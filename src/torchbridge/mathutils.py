@@ -21,7 +21,7 @@ def radial_deadzone(
     Returns the adjusted x/y vector and its 0..1 magnitude. Direction is
     preserved, including on diagonals.
     """
-    # Magnitude do vetor; a hipotenusa trata diagonais corretamente (deadzone redonda, não quadrada).
+    # Magnitude do vetor; a hipotenusa trata diagonais corretamente (deadzone redonda, não quadrada, para melhorar a suavidade do movimento).
     magnitude = min(1.0, math.hypot(x, y))
     # Dentro da deadzone: ignora o analógico (evita 'andar sozinho' por drift/folga).
     if magnitude <= deadzone:
