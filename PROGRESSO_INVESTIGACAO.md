@@ -36,6 +36,9 @@ A hierarquia real de objetos do motor do Torchlight é:
                        │
                        └── [+0x3C] ──► CGameUI
                                          │
+                                         ├── [+0x0294] ──► Parent Sheet (CEGUI::Window*)
+                                         ├── [+0x0298] ──► Loading Screen (CEGUI::Window*) [+0x80 != 0 quando ativa]
+                                         ├── [+0x029C] ──► TipText (CEGUI::Window*)
                                          ├── [+0x0324] ──► CMenuManager
                                          │                   │
                                          │                   └── [+0x0D84] ──► Estado da Tela Inicial (Switch de Estados 0..5, 6: Em Jogo)
@@ -60,7 +63,7 @@ A hierarquia real de objetos do motor do Torchlight é:
 
 ---
 
-## 4. Mapeamento das Telas Iniciais e Overlays
+## 4. Mapeamento das Telas Iniciais, Overlays e Carregamento
 
 ### A. Telas de Mudança de Cena (`CMenuManager + 0x0D84`)
 - `0`: **Tela Inicial (Menu Principal)** com a fogueira e o personagem
@@ -75,6 +78,16 @@ A hierarquia real de objetos do motor do Torchlight é:
 - **Quit Game (Confirmação)**: Localizado em `CGameUI + 0x0304` (`CModalMenu`). Quando a caixa "Deseja sair do jogo?" abre, o byte **`+0x18`** se torna **`1`**.
 - **Pause em jogo**: Localizado em `CGameUI + 0x02E8` (`COptionsMenu`). O byte **`+0x18`** se torna **`1`**.
 
+### C. Tela de Carregamento (Loading Screen)
+- **Layout**: O motor carrega `media/ui/loading.layout` (UTF-16) e armazena o ponteiro da janela CEGUI em **`CGameUI + 0x0298`**.
+- **Mecanismo Interno**:
+  - O jogo controla a visibilidade via a função `CGameUI::ShowLoading(bool bShow)` em `VA 0x00540CA0`.
+  - Ao iniciar o carregamento (ao clicar em Continue, transicionar de mapa, portal ou escadas da dungeon): o jogo chama `addChildWindow` anexando `loadingWindow` à folha principal (`CGameUI + 0x0294`). Na estrutura da CEGUI, o membro `d_parent` no offset **`+0x80`** passa a apontar para a folha principal (`!= 0`).
+  - Ao terminar o carregamento: o jogo chama `removeChildWindow`, desanexando a tela de loading e zerando `loadingWindow->d_parent` (`+0x80 == 0`).
+  - Além disso, durante todo o carregamento do mapa, o ponteiro do jogador `CPlayer*` (`CGameClient + 0x2C`) permanece em **`0` (NULL)** até que o spawn seja concluído.
+- **Critério de Detecção no Leitor**:
+  `is_loading = (loading_parent != 0) or (main_state_id == 6 and p_player == 0)`
+
 ---
 
 ## 5. Como Usar o Monitor em Tempo Real
@@ -82,4 +95,4 @@ Para monitorar continuamente:
 ```powershell
 python scripts/test_memory_reader.py
 ```
-O script atualiza a cada 300ms no terminal com reconexão automática ao PID do jogo.
+O script atualiza a cada 300ms no terminal com reconexão automática ao PID do jogo, detectando menus da tela inicial, modais/overlays, telas de carregamento e todos os menus de gameplay.

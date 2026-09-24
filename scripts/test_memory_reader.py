@@ -128,9 +128,19 @@ def inspect_game(mem: ProcessMemory) -> None:
     p_modal = mem.read_u32(p_game_ui + 0x0304)
     is_modal_open = (mem.read_u8(p_modal + 0x18) == 1) if p_modal else False
 
+    # Checa tela de carregamento (Loading Screen / Layout)
+    p_loading = mem.read_u32(p_game_ui + 0x0298)
+    loading_parent = mem.read_u32(p_loading + 0x80) if p_loading else None
+    p_player = mem.read_u32(p_client + 0x2C)
+
     p_menu_mgr = mem.read_u32(p_game_ui + OFFSET_MENU_MGR)
     main_state_id = mem.read_u32(p_menu_mgr + OFFSET_MAIN_STATE) if p_menu_mgr else 6
     state_desc = MAIN_MENU_STATES.get(main_state_id, f"Estado {main_state_id}")
+
+    # A tela de carregamento está ativa se:
+    # 1. A janela loading.layout estiver anexada à folha da UI (loading_parent != 0)
+    # 2. Ou se o estado for em jogo (6) mas o jogador ainda não tiver sido instanciado (p_player == 0)
+    is_loading = (loading_parent is not None and loading_parent != 0) or (main_state_id == 6 and not p_player)
 
     # Exibição do estado
     if is_settings_open:
@@ -146,6 +156,14 @@ def inspect_game(mem: ProcessMemory) -> None:
         print("-" * 60)
         print("-> Tela Atual: CONFIRMAÇÃO / SAIR (QUIT GAME)")
         print("   MODO RECOMENDADO: [MOUSE / CURSOR]")
+        return
+
+    if is_loading:
+        print("ESTADO DO JOGO : Carregando... (Loading Screen)")
+        print("-" * 60)
+        print("-> Tela Atual: TELA DE CARREGAMENTO (LOADING)")
+        print("   Carregando área/mapa e gerando entidades do mundo.")
+        print("   MODO RECOMENDADO: [AGUARDANDO / BLOQUEADO]")
         return
 
     print(f"ESTADO DO JOGO : {state_desc} [código {main_state_id}]")
