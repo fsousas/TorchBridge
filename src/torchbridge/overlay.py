@@ -619,6 +619,53 @@ class GameOverlay(QWidget):
                 "PET ACTIONS",
             )
 
+        # Badge de diagnóstico da Memória Interna (visível apenas no modo calibração)
+        mem_desc = snapshot.memory_state_desc or "Aguardando jogo..."
+        menus_str = ", ".join(snapshot.memory_open_menus) if snapshot.memory_open_menus else "Nenhum"
+        diag_lines = [
+            f"ESTADO: {mem_desc.upper()}",
+            f"MENUS : {menus_str}",
+            f"MODO  : {snapshot.mode.upper()}",
+        ]
+
+        painter.setFont(self._font(max(7, round(8.5 * scale)), True))
+        fm = painter.fontMetrics()
+        max_line_w = max(fm.horizontalAdvance(line) for line in diag_lines)
+        header_w = fm.horizontalAdvance("LEITURA DE MEMÓRIA (DEBUG)")
+        box_w = max(340 * scale, max(max_line_w, header_w) + 28 * scale)
+        box_h = (len(diag_lines) * 16 + 24) * scale
+        # Centralizado no topo: fica livre da caixa do Pet (esquerda) e dos menus/mapa (direita)
+        box_x = (rect.width - box_w) / 2
+        box_y = 12 * scale
+
+        # Fundo glassmorphism translúcido escuro com borda ciano
+        painter.setPen(QPen(QColor(75, 222, 247, 190), 1.2 * scale))
+        painter.setBrush(QColor(8, 20, 28, 225))
+        painter.drawRoundedRect(QRectF(box_x, box_y, box_w, box_h), 6 * scale, 6 * scale)
+
+        # Cabeçalho do badge
+        painter.setPen(QColor(75, 222, 247, 240))
+        painter.drawText(
+            QRectF(box_x + 10 * scale, box_y + 4 * scale, box_w - 20 * scale, 16 * scale),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            "LEITURA DE MEMÓRIA (DEBUG)",
+        )
+
+        # Linhas de informação
+        for idx, line in enumerate(diag_lines):
+            line_y = box_y + (23 + idx * 15) * scale
+            color = (
+                QColor(255, 175, 75)
+                if ("ABERTO" in line or "LOADING" in line or "CARREGANDO" in line or (idx == 1 and menus_str != "Nenhum"))
+                else QColor(220, 240, 248)
+            )
+            painter.setPen(color)
+            painter.drawText(
+                QRectF(box_x + 12 * scale, line_y, box_w - 24 * scale, 15 * scale),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                line,
+            )
+
     # Mensagens temporárias (conectado, calibrado, perfil recarregado...).
     def _draw_toast(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         import time

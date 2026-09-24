@@ -466,6 +466,12 @@ class OverlaySnapshot:
     aim_y: int | None = None
     toast_text: str = ""
     toast_until: float = 0.0
+    # Estado do jogo lido diretamente da memória RAM
+    memory_state_desc: str = ""
+    memory_is_in_game: bool = False
+    memory_is_loading: bool = False
+    memory_is_menu_open: bool = False
+    memory_open_menus: list[str] = field(default_factory=list)
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

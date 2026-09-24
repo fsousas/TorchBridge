@@ -24,6 +24,7 @@ from .models import (
     pet_submenu_open,
     toggle_panel,
 )
+from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
     InputInjector,
     WindowLocator,
@@ -43,6 +44,10 @@ class BridgeEngine(threading.Thread):
         super().__init__(name="TorchBridgeInput", daemon=True)
         self.config = config
         self.shared = shared
+        # Leitor de memória direto do processo do jogo
+        self.memory = TorchlightMemoryReader()
+        self._memory_state = GameMemoryState()
+        self._memory_last_read = 0.0
         initial = config.get()
         target = initial["target"]
         # Localizador da janela do Torchlight + injetor de entrada do Windows.
@@ -842,13 +847,22 @@ class BridgeEngine(threading.Thread):
         cursor_active = False
         aim_local: tuple[int, int] | None = None
 
+        # O modo efetivo respeita o estado do jogo na memória RAM:
+        # Se qualquer menu estiver aberto ou estiver fora do jogo (telas iniciais),
+        # o modo vira automaticamente 'cursor' para facilitar a navegação.
+        effective_mode = (
+            "cursor"
+            if (self._memory_state.is_connected and (self._memory_state.is_menu_open or not self._memory_state.is_in_game))
+            else self._mode
+        )
+
         # Movimento direto: exige analógico esquerdo inclinado, direito parado, roda fechada
         # e ao menos uma lateral livre — com os dois painéis abertos, o esquerdo vira cursor livre.
         # Com a sequência de clique do pet em curso o cursor é EXCLUSIVO dela: os sticks
         # ficam bloqueados até o retorno ao centro (evita disputar o cursor no meio do
         # hover/clique do pet).
         if (
-            self._mode == "direct"
+            effective_mode == "direct"
             and lmag > 0
             and rmag == 0
             and not radial_active
@@ -887,7 +901,7 @@ class BridgeEngine(threading.Thread):
             if not radial_active and rmag > 0:
                 cursor_x, cursor_y, cursor_mag = rx, ry, rmag
             # No modo cursor/menus, o analógico esquerdo assume o papel de cursor.
-            elif self._mode == "cursor" and lmag > 0:
+            elif effective_mode == "cursor" and lmag > 0:
                 cursor_x, cursor_y, cursor_mag = lx, ly, lmag
             # Ambos os painéis abertos: o esquerdo vira cursor livre (sem o click-to-move).
             elif lmag > 0 and both_panels_open(self._active_panels):
@@ -1067,6 +1081,45 @@ class BridgeEngine(threading.Thread):
                 # Guarda o estado de detecção para as bordas (subida/descida).
                 self._game_was_found = game_found
 
+                # Leitura periódica da memória RAM do Torchlight (a cada 20 ms / 50 Hz)
+                if now - self._memory_last_read >= 0.020:
+                    self._memory_state = self.memory.update()
+                    self._memory_last_read = now
+
+                    # Sincroniza painéis ativos se estiver em jogo
+                    if self._memory_state.is_in_game:
+                        left = ""
+                        if "Pet" in self._memory_state.open_menus:
+                            left = "P"
+                        elif "Atributos" in self._memory_state.open_menus:
+                            left = "C"
+
+                        right = ""
+                        if "Inventário" in self._memory_state.open_menus:
+                            right = "I"
+                        elif "Habilidades" in self._memory_state.open_menus:
+                            right = "S"
+                        elif "Missões (Quests)" in self._memory_state.open_menus:
+                            right = "Q"
+                        elif "Diário (Journal)" in self._memory_state.open_menus:
+                            right = "J"
+                        elif "Baú" in self._memory_state.open_menus:
+                            right = "B"
+                        elif "Vendedor (Loja)" in self._memory_state.open_menus:
+                            right = "V"
+                        elif "Encantador" in self._memory_state.open_menus:
+                            right = "E"
+                        elif "Portal (Waypoint)" in self._memory_state.open_menus:
+                            right = "W"
+
+                        self._active_panels = [left, right]
+
+                effective_mode = (
+                    "blocked"
+                    if self._memory_state.is_loading
+                    else ("cursor" if (self._memory_state.is_connected and (self._memory_state.is_menu_open or not self._memory_state.is_in_game)) else self._mode)
+                )
+
                 # Publica o estado completo para o overlay Qt (thread-safe).
                 self.shared.update(
                     enabled=enabled and bool(cfg["overlay"].get("enabled", True)),
@@ -1076,12 +1129,21 @@ class BridgeEngine(threading.Thread):
                     controller_connected=state.connected,
                     controller_name=state.name,
                     controller_mapping=state.mapping,
-                    mode=self._mode,
+                    mode=effective_mode,
+                    active_panels=list(self._active_panels),
+                    memory_state_desc=self._memory_state.state_desc,
+                    memory_is_in_game=self._memory_state.is_in_game,
+                    memory_is_loading=self._memory_state.is_loading,
+                    memory_is_menu_open=self._memory_state.is_menu_open,
+                    memory_open_menus=list(self._memory_state.open_menus),
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
                 if enabled and game_active and state.connected:
-                    self._process_active(hub, state, rect, cfg, now, dt)
+                    if self._memory_state.is_loading:
+                        self._release_all()
+                    else:
+                        self._process_active(hub, state, rect, cfg, now, dt)
                 # Qualquer interrupção (pausa, jogo em segundo plano, sem controle): libera tudo.
                 # As bordas dos gatilhos continuam acompanhando o hardware NOS TICKS
                 # INATIVOS (dentro de _process_active no tick ativo): um gatilho
@@ -1106,4 +1168,5 @@ class BridgeEngine(threading.Thread):
             self._release_all()
             if hub is not None:
                 hub.close()
+            self.memory.close()
             end_high_resolution_timer()
