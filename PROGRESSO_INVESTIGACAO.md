@@ -57,7 +57,8 @@ A hierarquia real de objetos do motor do Torchlight é:
                                          ├── [+0x02FC] ──► CQuestDialogMenu [+0x18 == 1 quando aberto] (Diálogo de Missão)
                                          ├── [+0x0304] ──► CModalMenu       [+0x18 == 1 quando aberto] (Modal de Confirmação/Sair)
                                          ├── [+0x030C] ──► CSkillMenu       [+0x1C == 1 quando aberto]
-                                         ├── [+0x0310] ──► CJournalMenu     [+0x1C == 1 quando aberto] (Diário de Quests)
+                                         ├── [+0x0310] ──► CJournalMenu     [+0x1C == 1 quando aberto] (Diário / Estatísticas gerais - Tecla J)
+                                         ├── [+0x0314] ──► CQuestMenu       [+0xC8 == 1 quando aberto] (Missões / Quests ativas - Tecla Q)
                                          └── [+0x031C] ──► CFishingMenu     [+0x18 == 1 quando aberto] (Mini-game de Pesca)
 ```
 

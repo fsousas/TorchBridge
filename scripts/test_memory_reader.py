@@ -45,7 +45,8 @@ GAMEPLAY_MENUS = {
     "Diálogo NPC":       (0x02F8, 0x18),
     "Diálogo Missão":    (0x02FC, 0x18),
     "Habilidades":       (0x030C, 0x1C),
-    "Diário (Quests)":   (0x0310, 0x1C),
+    "Diário (Journal)":  (0x0310, 0x1C), # Tecla J: Estatísticas gerais do save
+    "Missões (Quests)":  (0x0314, 0xC8), # Tecla Q: Log de missões ativas/completas
     "Pesca":             (0x031C, 0x18),
     "Morte / Respawn":   (0x02F0, 0x18),
 }
