@@ -8,7 +8,10 @@ import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass, field
 import logging
+import os
+from pathlib import Path
 import struct
+import time
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +57,54 @@ GAMEPLAY_MENUS: dict[str, tuple[int, int]] = {
 }
 
 
+def get_save_character_count() -> int:
+    """Retorna o número de personagens existentes na pasta de saves do Torchlight."""
+    save_dir = Path(os.environ.get("APPDATA", "")) / "runic games" / "torchlight" / "save"
+    if not save_dir.is_dir():
+        return 0
+    try:
+        files = {f.name.lower() for f in save_dir.iterdir() if f.is_file() and f.suffix.lower() == ".svt"}
+        return len(files)
+    except Exception:
+        return 0
+
+
+def get_audio_settings() -> dict[str, float | bool]:
+    """Lê os volumes normalizados (0.0 a 1.0) e flags de mudo em local_settings.txt."""
+    settings_file = Path(os.environ.get("APPDATA", "")) / "runic games" / "torchlight" / "local_settings.txt"
+    out: dict[str, float | bool] = {
+        "sound_volume": 1.0,
+        "music_volume": 1.0,
+        "sound_mute": False,
+        "music_mute": False,
+    }
+    if not settings_file.is_file():
+        return out
+    try:
+        raw = settings_file.read_bytes()
+        try:
+            text = raw.decode("utf-16")
+        except UnicodeDecodeError:
+            text = raw.decode("utf-8", errors="ignore")
+        for line in text.splitlines():
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            key = key.strip().upper()
+            val = val.strip()
+            if key == "SOUND VOLUME":
+                out["sound_volume"] = float(val)
+            elif key == "MUSIC VOLUME":
+                out["music_volume"] = float(val)
+            elif key == "SOUND MUTE":
+                out["sound_mute"] = (val == "1")
+            elif key == "MUSIC MUTE":
+                out["music_mute"] = (val == "1")
+    except Exception:
+        pass
+    return out
+
+
 class PROCESSENTRY32(ctypes.Structure):
     _fields_ = [
         ("dwSize", wintypes.DWORD),
@@ -71,7 +122,7 @@ class PROCESSENTRY32(ctypes.Structure):
 
 @dataclass(frozen=True)
 class GameMemoryState:
-    """Estado do jogo obtido diretamente da memória RAM."""
+    """Estado do jogo obtido diretamente da memória RAM e configurações locais."""
     is_connected: bool = False
     pid: int | None = None
     state_id: int = -1
@@ -81,6 +132,9 @@ class GameMemoryState:
     is_menu_open: bool = False
     open_menus: list[str] = field(default_factory=list)
     recommended_mode: str = "direct"  # "direct", "cursor", "blocked"
+    save_count: int = 0
+    sound_volume: float = 1.0
+    music_volume: float = 1.0
 
 
 class TorchlightMemoryReader:
@@ -89,6 +143,14 @@ class TorchlightMemoryReader:
     def __init__(self) -> None:
         self.pid: int | None = None
         self._handle: int | None = None
+        self._cached_save_count: int = 0
+        self._cached_audio: dict[str, float | bool] = {
+            "sound_volume": 1.0,
+            "music_volume": 1.0,
+            "sound_mute": False,
+            "music_mute": False,
+        }
+        self._last_disk_check: float = 0.0
 
     def close(self) -> None:
         if self._handle:
@@ -156,20 +218,55 @@ class TorchlightMemoryReader:
 
     def update(self) -> GameMemoryState:
         """Executa um ciclo de leitura rápida (microssegundos) e retorna o estado atual."""
+        # Atualiza contagem de saves e áudio em disco periodicamente (a cada 1.0s)
+        now = time.monotonic()
+        if now - self._last_disk_check >= 1.0:
+            self._cached_save_count = get_save_character_count()
+            self._cached_audio = get_audio_settings()
+            self._last_disk_check = now
+
+        sound_vol = float(self._cached_audio.get("sound_volume", 1.0))
+        music_vol = float(self._cached_audio.get("music_volume", 1.0))
+
         if not self._ensure_handle():
-            return GameMemoryState()
+            return GameMemoryState(
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
+            )
 
         p_game = self.read_u32(ADDR_CGAME_GLOBAL)
         if not p_game:
-            return GameMemoryState(is_connected=True, pid=self.pid, state_desc="Inicializando CGame...")
+            return GameMemoryState(
+                is_connected=True,
+                pid=self.pid,
+                state_desc="Inicializando CGame...",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
+            )
 
         p_client = self.read_u32(p_game + OFFSET_GAMECLIENT)
         if not p_client:
-            return GameMemoryState(is_connected=True, pid=self.pid, state_desc="Inicializando CGameClient...")
+            return GameMemoryState(
+                is_connected=True,
+                pid=self.pid,
+                state_desc="Inicializando CGameClient...",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
+            )
 
         p_ui = self.read_u32(p_client + OFFSET_GAMEUI)
         if not p_ui:
-            return GameMemoryState(is_connected=True, pid=self.pid, state_desc="Inicializando CGameUI...")
+            return GameMemoryState(
+                is_connected=True,
+                pid=self.pid,
+                state_desc="Inicializando CGameUI...",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
+            )
 
         # Overlays: Settings e Modal
         p_settings = self.read_u32(p_ui + 0x02EC)
@@ -200,6 +297,9 @@ class TorchlightMemoryReader:
                 is_menu_open=True,
                 open_menus=["Configurações"],
                 recommended_mode="cursor",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
             )
 
         if is_modal_open:
@@ -212,6 +312,9 @@ class TorchlightMemoryReader:
                 is_menu_open=True,
                 open_menus=["Confirmação Sair"],
                 recommended_mode="cursor",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
             )
 
         # Tela de carregamento
@@ -225,6 +328,9 @@ class TorchlightMemoryReader:
                 is_in_game=(main_state_id == 6),
                 is_menu_open=False,
                 recommended_mode="blocked",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
             )
 
         # Tela inicial (menus principais)
@@ -238,6 +344,9 @@ class TorchlightMemoryReader:
                 is_menu_open=True,
                 open_menus=[state_desc],
                 recommended_mode="cursor",
+                save_count=self._cached_save_count,
+                sound_volume=sound_vol,
+                music_volume=music_vol,
             )
 
         # Em gameplay: verificar todos os menus
@@ -262,4 +371,7 @@ class TorchlightMemoryReader:
             is_menu_open=is_menu_open,
             open_menus=open_menus,
             recommended_mode="cursor" if is_menu_open else "direct",
+            save_count=self._cached_save_count,
+            sound_volume=sound_vol,
+            music_volume=music_vol,
         )

@@ -76,6 +76,22 @@ class MemoryModuleTests(unittest.TestCase):
         reader.close()
         self.assertIsNone(reader._handle)
 
+    def test_save_character_count_type(self):
+        from torchbridge.memory import get_save_character_count
+        count = get_save_character_count()
+        self.assertIsInstance(count, int)
+        self.assertGreaterEqual(count, 0)
+
+    def test_audio_settings_keys(self):
+        from torchbridge.memory import get_audio_settings
+        audio = get_audio_settings()
+        self.assertIn("sound_volume", audio)
+        self.assertIn("music_volume", audio)
+        self.assertIn("sound_mute", audio)
+        self.assertIn("music_mute", audio)
+        self.assertIsInstance(audio["sound_volume"], float)
+        self.assertIsInstance(audio["music_volume"], float)
+
 
 if __name__ == "__main__":
     unittest.main()
