@@ -228,12 +228,19 @@ def _rasterize_hud_mask() -> tuple[int, int, list[bytes]] | None:
         from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QGuiApplication
         from PySide6.QtSvg import QSvgRenderer
 
-        # O Qt precisa de uma QGuiApplication para desenhar pixmaps; se não houver uma
-        # (ex.: testes unitários fora da UI), criamos uma offscreen efêmera.
-        app = QGuiApplication.instance()
-        if app is None:
-            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-            app = QGuiApplication([])
+        # O Qt precisa de uma aplicação para desenhar pixmaps; preferimos QApplication
+        # para que testes unitários possam também instanciar QWidgets sem conflito.
+        try:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is None:
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                app = QApplication([])
+        except Exception:
+            app = QGuiApplication.instance()
+            if app is None:
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                app = QGuiApplication([])
         renderer = QSvgRenderer()
         if not renderer.load(str(path)):
             return None

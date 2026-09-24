@@ -514,118 +514,173 @@ class GameOverlay(QWidget):
                 for x, y in close_tab_vertices(rect, side)
             ])
 
-        regions = panel_regions(rect)
-        # Painéis: traço cheio ciano, rótulo pequeno.
-        painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(local(regions["panel_left"]))
-        painter.drawRect(local(regions["panel_right"]))
-        # Zonas de fechar: a MESMA aba (pentágono) que a click_zone hit-testa — laranja.
-        painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
-        painter.setBrush(QColor(255, 159, 67, 55))
-        close_left_poly = local_polygon("left")
-        close_right_poly = local_polygon("right")
-        painter.drawPolygon(close_left_poly)
-        painter.drawPolygon(close_right_poly)
-        # Zona central: tracejado (clique nela zera os dois com ambos abertos).
-        painter.setPen(
-            QPen(QColor(120, 220, 150, 170), 1.2 * scale, Qt.PenStyle.DashLine)
-        )
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(local(regions["center"]))
-        # HUD inferior: a MESMA silhueta verde que a click_zone hit-testa como "não fecha
-        # painéis" — desenhada na posição real (frações da janela) para calibrar o ajuste fino.
-        if self._hud_pixmap is not None:
-            hl, ht, hw, hh = hud_target_rect(rect)
-            # hud_target_rect devolve absolutos; converte para local do overlay.
-            target = QRectF(hl - rect.left, ht - rect.top, hw, hh)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            painter.setPen(QPen(QColor(60, 235, 90, 120), 1.0 * scale))
-            painter.setBrush(QColor(60, 235, 90, 38))
-            painter.drawPixmap(
-                int(target.x()), int(target.y()), int(target.width()), int(target.height()),
-                self._hud_pixmap,
-            )
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-        # Pet actions: a caixinha real do jogo (formas geométricas) no canto superior
-        # esquerdo — referência visual para ações futuras, ainda SEM hit-test. Roxa pra
-        # não confundir com as cores das outras zonas (verde=HUD, ciano= painel, laranja=fechar).
-        if self._pet_actions_pixmap is not None:
-            pl, pt, pw, ph = pet_actions_target_rect(rect)
-            pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            painter.setPen(QPen(QColor(196, 120, 255, 130), 1.0 * scale))
-            painter.setBrush(QColor(196, 120, 255, 34))
-            painter.drawPixmap(
-                int(pet_local.x()), int(pet_local.y()), int(pet_local.width()), int(pet_local.height()),
-                self._pet_actions_pixmap,
-            )
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-            # Pontos de clique das 4 ações do pet: bolinha vermelha com cruz no centro
-            # EXATO de cada botão (pet_click_point — a mesma fonte do motor). É ali que
-            # o cursor vai quando o A confirma; calibrar a caixinha acima move os pontos.
-            # Contorno branco por baixo: sem ele, o traço vermelho some no círculo vermelho.
-            radius = 7.0 * scale
-            pens = (
-                QPen(QColor(255, 255, 255, 255), 4.5 * scale),
-                QPen(QColor(255, 80, 80, 255), 2.0 * scale),
-            )
-            for index in range(1, 5):
-                px, py = pet_click_point(rect, index)
-                # Absolute -> local do overlay.
-                lx = px - rect.left
-                ly = py - rect.top
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                for pen in pens:
-                    painter.setPen(pen)
-                    painter.drawEllipse(QPointF(lx, ly), radius, radius)
-                    painter.drawLine(QPointF(lx - radius - 3 * scale, ly), QPointF(lx + radius + 3 * scale, ly))
-                    painter.drawLine(QPointF(lx, ly - radius - 3 * scale), QPointF(lx, ly + radius + 3 * scale))
-        # Rótulos: o que cada zona faz (posicionados na bounding box da aba).
-        painter.setFont(self._font(max(7, round(9 * scale)), True))
-        painter.setPen(QColor(255, 159, 67, 245))
-        painter.drawText(close_left_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA ESQ")
-        painter.drawText(close_right_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA DIR")
-        painter.setPen(QColor(111, 210, 235, 200))
-        painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
-        painter.drawText(local(regions["panel_right"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
-        painter.setPen(QColor(120, 220, 150, 200))
-        painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
-        if self._hud_pixmap is not None:
-            hl, ht, hw, hh = hud_target_rect(rect)
-            hud_local = QRectF(hl - rect.left, ht - rect.top, hw, hh)
-            painter.setFont(self._font(max(7, round(9 * scale)), True))
-            painter.setPen(QColor(120, 235, 90, 235))
-            # Rótulo numa faixa de 20px logo ACIMA do topo da HUD (o hud_local.top() já é
-            # o topo da silhueta; desenhá-lo dentro dela faria o verde sumir no verde).
-            label_box = QRectF(
-                hud_local.left(), hud_local.top() - 24 * scale,
-                hud_local.width(), 20 * scale,
-            )
-            painter.drawText(
-                label_box,
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-                "HUD (NÃO FECHA)",
-            )
-        if self._pet_actions_pixmap is not None:
-            pl, pt, pw, ph = pet_actions_target_rect(rect)
-            pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
-            painter.setFont(self._font(max(7, round(9 * scale)), True))
-            painter.setPen(QColor(216, 156, 255, 235))
-            # A caixinha está colada ao canto: o rótulo fica à DIREITA dela, centralizado
-            # na vertical (não dá pra colocar acima/esquerda que não há espaço).
-            label_box = QRectF(
-                pet_local.right() + 6 * scale,
-                pet_local.top(),
-                120 * scale, pet_local.height(),
-            )
-            painter.drawText(
-                label_box,
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                "PET ACTIONS",
-            )
+        is_in_game = snapshot.memory_is_in_game or not snapshot.memory_state_desc
+        state_desc = snapshot.memory_state_desc
 
-        # Badge de diagnóstico da Memória Interna (visível apenas no modo calibração)
+        if is_in_game:
+            regions = panel_regions(rect)
+            # Painéis: traço cheio ciano, rótulo pequeno.
+            painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(local(regions["panel_left"]))
+            painter.drawRect(local(regions["panel_right"]))
+            # Zonas de fechar: a MESMA aba (pentágono) que a click_zone hit-testa — laranja.
+            painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
+            painter.setBrush(QColor(255, 159, 67, 55))
+            close_left_poly = local_polygon("left")
+            close_right_poly = local_polygon("right")
+            painter.drawPolygon(close_left_poly)
+            painter.drawPolygon(close_right_poly)
+            # Zona central: tracejado (clique nela zera os dois com ambos abertos).
+            painter.setPen(
+                QPen(QColor(120, 220, 150, 170), 1.2 * scale, Qt.PenStyle.DashLine)
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(local(regions["center"]))
+            # HUD inferior: a MESMA silhueta verde que a click_zone hit-testa como "não fecha
+            # painéis" — desenhada na posição real (frações da janela) para calibrar o ajuste fino.
+            if self._hud_pixmap is not None:
+                hl, ht, hw, hh = hud_target_rect(rect)
+                # hud_target_rect devolve absolutos; converte para local do overlay.
+                target = QRectF(hl - rect.left, ht - rect.top, hw, hh)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                painter.setPen(QPen(QColor(60, 235, 90, 120), 1.0 * scale))
+                painter.setBrush(QColor(60, 235, 90, 38))
+                painter.drawPixmap(
+                    int(target.x()), int(target.y()), int(target.width()), int(target.height()),
+                    self._hud_pixmap,
+                )
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+            # Pet actions: a caixinha real do jogo (formas geométricas) no canto superior
+            # esquerdo — referência visual para ações futuras, ainda SEM hit-test. Roxa pra
+            # não confundir com as cores das outras zonas (verde=HUD, ciano= painel, laranja=fechar).
+            if self._pet_actions_pixmap is not None:
+                pl, pt, pw, ph = pet_actions_target_rect(rect)
+                pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                painter.setPen(QPen(QColor(196, 120, 255, 130), 1.0 * scale))
+                painter.setBrush(QColor(196, 120, 255, 34))
+                painter.drawPixmap(
+                    int(pet_local.x()), int(pet_local.y()), int(pet_local.width()), int(pet_local.height()),
+                    self._pet_actions_pixmap,
+                )
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+                # Pontos de clique das 4 ações do pet: bolinha vermelha com cruz no centro
+                # EXATO de cada botão (pet_click_point — a mesma fonte do motor).
+                radius = 7.0 * scale
+                pens = (
+                    QPen(QColor(255, 255, 255, 255), 4.5 * scale),
+                    QPen(QColor(255, 80, 80, 255), 2.0 * scale),
+                )
+                for index in range(1, 5):
+                    px, py = pet_click_point(rect, index)
+                    lx = px - rect.left
+                    ly = py - rect.top
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    for pen in pens:
+                        painter.setPen(pen)
+                        painter.drawEllipse(QPointF(lx, ly), radius, radius)
+                        painter.drawLine(QPointF(lx - radius - 3 * scale, ly), QPointF(lx + radius + 3 * scale, ly))
+                        painter.drawLine(QPointF(lx, ly - radius - 3 * scale), QPointF(lx, ly + radius + 3 * scale))
+            # Rótulos: o que cada zona faz (posicionados na bounding box da aba).
+            painter.setFont(self._font(max(7, round(9 * scale)), True))
+            painter.setPen(QColor(255, 159, 67, 245))
+            painter.drawText(close_left_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA ESQ")
+            painter.drawText(close_right_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA DIR")
+            painter.setPen(QColor(111, 210, 235, 200))
+            painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
+            painter.drawText(local(regions["panel_right"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
+            painter.setPen(QColor(120, 220, 150, 200))
+            painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
+            if self._hud_pixmap is not None:
+                hl, ht, hw, hh = hud_target_rect(rect)
+                hud_local = QRectF(hl - rect.left, ht - rect.top, hw, hh)
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(120, 235, 90, 235))
+                label_box = QRectF(
+                    hud_local.left(), hud_local.top() - 24 * scale,
+                    hud_local.width(), 20 * scale,
+                )
+                painter.drawText(
+                    label_box,
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                    "HUD (NÃO FECHA)",
+                )
+            if self._pet_actions_pixmap is not None:
+                pl, pt, pw, ph = pet_actions_target_rect(rect)
+                pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(216, 156, 255, 235))
+                label_box = QRectF(
+                    pet_local.right() + 6 * scale,
+                    pet_local.top(),
+                    120 * scale, pet_local.height(),
+                )
+                painter.drawText(
+                    label_box,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    "PET ACTIONS",
+                )
+
+        elif state_desc == "Tela Inicial":
+            # Alvos da Tela Inicial (Title Screen) em modo calibração
+            btn_w = 43 * scale
+            btn_h = 36 * scale
+            for btn_name in TITLE_BUTTONS:
+                if btn_name == "continue" and snapshot.title_menu_focus != "continue":
+                    continue
+                bx, by = title_menu_button_point(rect, btn_name)
+                lx = bx - rect.left - btn_w / 2
+                ly = by - rect.top - btn_h / 2
+                is_focus = (snapshot.title_menu_focus == btn_name)
+                if is_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 75))
+                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+
+        elif state_desc == "Criar Personagem":
+            # Alvos da Tela de Criação de Personagem (state_id == 1) em modo calibração
+            for btn_name in CREATE_CHAR_BUTTONS:
+                if btn_name in ("destroyer", "vanquisher", "alchemist"):
+                    btn_w, btn_h = 44 * scale, 38 * scale
+                elif btn_name in ("dog", "cat", "ferret", "pet_name"):
+                    btn_w, btn_h = 34 * scale, 18 * scale
+                else:  # back, character_name
+                    btn_w, btn_h = 47 * scale, 37 * scale
+
+                bx, by = char_create_button_point(rect, btn_name)
+                lx = bx - rect.left - btn_w / 2
+                ly = by - rect.top - btn_h / 2
+                is_focus = (snapshot.char_create_focus == btn_name)
+                if is_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 75))
+                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+
+        elif state_desc == "Selecionar Dificuldade":
+            # Alvos da Tela de Seleção de Dificuldade (state_id == 2) em modo calibração
+            btn_w = 24 * scale
+            btn_h = 23 * scale
+            for btn_name in DIFFICULTY_BUTTONS:
+                bx, by = difficulty_menu_button_point(rect, btn_name)
+                lx = bx - rect.left - btn_w / 2
+                ly = by - rect.top - btn_h / 2
+                is_focus = (snapshot.difficulty_focus == btn_name)
+                if is_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 75))
+                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+
+        # Badge de diagnóstico da Memória Interna (visível em todas as telas no modo calibração)
         mem_desc = snapshot.memory_state_desc or "Aguardando jogo..."
         menus_str = ", ".join(snapshot.memory_open_menus) if snapshot.memory_open_menus else "Nenhum"
         diag_lines = [
@@ -671,64 +726,6 @@ class GameOverlay(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 line,
             )
-
-        # Alvos da Tela Inicial (Title Screen) em modo calibração
-        if not snapshot.memory_is_in_game and snapshot.memory_state_desc == "Tela Inicial":
-            btn_w = 43 * scale
-            btn_h = 36 * scale
-            for btn_name in TITLE_BUTTONS:
-                if btn_name == "continue" and snapshot.title_menu_focus != "continue":
-                    continue
-                bx, by = title_menu_button_point(rect, btn_name)
-                lx = bx - rect.left - btn_w / 2
-                ly = by - rect.top - btn_h / 2
-                is_focus = (snapshot.title_menu_focus == btn_name)
-                if is_focus:
-                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                    painter.setBrush(QColor(255, 215, 0, 110))
-                else:
-                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                    painter.setBrush(QColor(46, 204, 113, 75))
-                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
-
-        # Alvos da Tela de Criação de Personagem (state_id == 1) em modo calibração
-        if not snapshot.memory_is_in_game and snapshot.memory_state_desc == "Criar Personagem":
-            for btn_name in CREATE_CHAR_BUTTONS:
-                if btn_name in ("destroyer", "vanquisher", "alchemist"):
-                    btn_w, btn_h = 44 * scale, 38 * scale
-                elif btn_name in ("dog", "cat", "ferret", "pet_name"):
-                    btn_w, btn_h = 34 * scale, 18 * scale
-                else:  # back, character_name
-                    btn_w, btn_h = 47 * scale, 37 * scale
-
-                bx, by = char_create_button_point(rect, btn_name)
-                lx = bx - rect.left - btn_w / 2
-                ly = by - rect.top - btn_h / 2
-                is_focus = (snapshot.char_create_focus == btn_name)
-                if is_focus:
-                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                    painter.setBrush(QColor(255, 215, 0, 110))
-                else:
-                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                    painter.setBrush(QColor(46, 204, 113, 75))
-                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
-
-        # Alvos da Tela de Seleção de Dificuldade (state_id == 2) em modo calibração
-        if not snapshot.memory_is_in_game and snapshot.memory_state_desc == "Selecionar Dificuldade":
-            btn_w = 24 * scale
-            btn_h = 23 * scale
-            for btn_name in DIFFICULTY_BUTTONS:
-                bx, by = difficulty_menu_button_point(rect, btn_name)
-                lx = bx - rect.left - btn_w / 2
-                ly = by - rect.top - btn_h / 2
-                is_focus = (snapshot.difficulty_focus == btn_name)
-                if is_focus:
-                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                    painter.setBrush(QColor(255, 215, 0, 110))
-                else:
-                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                    painter.setBrush(QColor(46, 204, 113, 75))
-                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
 
     # Mensagens temporárias (conectado, calibrado, perfil recarregado...).
     def _draw_toast(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
