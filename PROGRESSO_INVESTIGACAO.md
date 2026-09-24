@@ -47,18 +47,18 @@ A hierarquia real de objetos do motor do Torchlight é:
                                          ├── [+0x02D0] ──► CStatsMenu       [+0x44 == 1 quando aberto]
                                          ├── [+0x02D4] ──► CPetMenu         [+0x34 == 1 quando aberto]
                                          ├── [+0x02D8] ──► CMerchantMenu    [+0x30 == 1 quando aberto]
-                                         ├── [+0x02DC] ──► CEnchantMenu     [+0x30 == 1 quando aberto]
+                                         ├── [+0x02DC] ──► CEnchantMenu     [+0x38 == 1 quando aberto]
                                          ├── [+0x02E4] ──► CStashMenu       [+0x30 == 1 quando aberto]
                                          ├── [+0x02E8] ──► COptionsMenu     [+0x18 == 1 quando aberto] (Menu de Pause em Jogo)
                                          ├── [+0x02EC] ──► CSettingsMenu    [+0x18 == 1 quando aberto] (Overlay de Settings)
-                                         ├── [+0x02F0] ──► CDieMenu         (Tela de Morte/Ressurreição)
-                                         ├── [+0x02F4] ──► CWaypointMenu    (Portal/Teleporte)
+                                         ├── [+0x02F0] ──► CDieMenu         [+0x18 == 1 quando aberto] (Tela de Morte/Ressurreição)
+                                         ├── [+0x02F4] ──► CWaypointMenu    [+0x18 == 1 quando aberto] (Portal / Teleporte)
                                          ├── [+0x02F8] ──► CDialogMenu      [+0x18 == 1 quando aberto] (Diálogo de NPC)
-                                         ├── [+0x02FC] ──► CQuestDialogMenu (Diálogo de Missão)
+                                         ├── [+0x02FC] ──► CQuestDialogMenu [+0x18 == 1 quando aberto] (Diálogo de Missão)
                                          ├── [+0x0304] ──► CModalMenu       [+0x18 == 1 quando aberto] (Modal de Confirmação/Sair)
                                          ├── [+0x030C] ──► CSkillMenu       [+0x1C == 1 quando aberto]
-                                         ├── [+0x0310] ──► CJournalMenu     (Diário de Quests)
-                                         └── [+0x031C] ──► CFishingMenu     (Mini-game de Pesca)
+                                         ├── [+0x0310] ──► CJournalMenu     [+0x1C == 1 quando aberto] (Diário de Quests)
+                                         └── [+0x031C] ──► CFishingMenu     [+0x18 == 1 quando aberto] (Mini-game de Pesca)
 ```
 
 ---

@@ -35,13 +35,19 @@ MAIN_MENU_STATES = {
 
 # Offsets dos menus dentro de CGameUI e seus bytes de isOpen
 GAMEPLAY_MENUS = {
-    "Inventário":       (0x02CC, 0x30),
-    "Atributos":        (0x02D0, 0x44),
-    "Pet":              (0x02D4, 0x34),
-    "Vendedor (Loja)":  (0x02D8, 0x30),
-    "Encantador":       (0x02DC, 0x30),
-    "Baú":              (0x02E4, 0x30),
-    "Habilidades":      (0x030C, 0x1C),
+    "Inventário":        (0x02CC, 0x30),
+    "Atributos":         (0x02D0, 0x44),
+    "Pet":               (0x02D4, 0x34),
+    "Vendedor (Loja)":   (0x02D8, 0x30),
+    "Encantador":        (0x02DC, 0x38),
+    "Baú":               (0x02E4, 0x30),
+    "Portal (Waypoint)": (0x02F4, 0x18),
+    "Diálogo NPC":       (0x02F8, 0x18),
+    "Diálogo Missão":    (0x02FC, 0x18),
+    "Habilidades":       (0x030C, 0x1C),
+    "Diário (Quests)":   (0x0310, 0x1C),
+    "Pesca":             (0x031C, 0x18),
+    "Morte / Respawn":   (0x02F0, 0x18),
 }
 
 class PROCESSENTRY32(ctypes.Structure):
@@ -182,14 +188,14 @@ def inspect_game(mem: ProcessMemory) -> None:
     for menu_name, (ui_offset, open_offset) in GAMEPLAY_MENUS.items():
         p_menu = mem.read_u32(p_game_ui + ui_offset)
         if not p_menu:
-            print(f"  {menu_name:<18}: Não instanciado")
+            print(f"  {menu_name:<20}: Não instanciado")
             continue
 
         is_open = mem.read_u8(p_menu + open_offset)
         status = "ABERTO" if (is_open == 1) else "fechado"
         if is_open == 1:
             any_open = True
-        print(f"  {menu_name:<18}: {status:<8} (ptr: 0x{p_menu:08X})")
+        print(f"  {menu_name:<20}: {status:<8} (ptr: 0x{p_menu:08X})")
 
     # Opções / Pause em jogo
     p_options = mem.read_u32(p_game_ui + 0x02E8)
@@ -197,7 +203,7 @@ def inspect_game(mem: ProcessMemory) -> None:
         is_paused = (mem.read_u8(p_options + 0x18) == 1)
         if is_paused:
             any_open = True
-            print(f"  {'Pause / Opções':<18}: ABERTO")
+            print(f"  {'Pause / Opções':<20}: ABERTO")
 
     print("-" * 60)
     print(f"MODO DE CONTROLE RECOMENDADO: {'[MOUSE / MENU]' if any_open else '[DIRETO / JOGO]'}")
