@@ -17,6 +17,7 @@ from .config import ConfigManager
 from .models import (
     OverlaySnapshot,
     SharedOverlayState,
+    TITLE_BUTTONS,
     close_tab_vertices,
     hud_asset_path,
     hud_target_rect,
@@ -25,6 +26,7 @@ from .models import (
     pet_actions_asset_path,
     pet_actions_target_rect,
     pet_click_point,
+    title_menu_button_point,
 )
 from .win32 import make_overlay_clickthrough
 
@@ -665,6 +667,25 @@ class GameOverlay(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 line,
             )
+
+        # Alvos da Tela Inicial (Title Screen) em modo calibração
+        if not snapshot.memory_is_in_game and snapshot.memory_state_desc == "Tela Inicial":
+            btn_w = 43 * scale
+            btn_h = 36 * scale
+            for btn_name in TITLE_BUTTONS:
+                if btn_name == "continue" and snapshot.title_menu_focus != "continue":
+                    continue
+                bx, by = title_menu_button_point(rect, btn_name)
+                lx = bx - rect.left - btn_w / 2
+                ly = by - rect.top - btn_h / 2
+                is_focus = (snapshot.title_menu_focus == btn_name)
+                if is_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 75))
+                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
 
     # Mensagens temporárias (conectado, calibrado, perfil recarregado...).
     def _draw_toast(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:

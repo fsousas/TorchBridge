@@ -1580,3 +1580,76 @@ class LegacyProfileMigrationTests(unittest.TestCase):
             path.write_text(json.dumps({"bindings": {"y": "4"}}), encoding="utf-8")
             config = ConfigManager(path)
             self.assertEqual(config.get()["bindings"]["y"], "4")
+
+
+class TitleMenuNavigationTests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def test_initial_focus_with_save_is_continue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=0, save_count=1)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+            state = ControllerState()
+
+            engine._handle_title_menu_navigation(state, rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._title_focus, "continue")
+            self.assertEqual(shared.get().title_menu_focus, "continue")
+            self.assertEqual(len(injector.moved), 1)
+            self.assertEqual(injector.moved[0], (970, 650))
+
+    def test_initial_focus_without_save_is_new_character(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=0, save_count=0)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+            state = ControllerState()
+
+            engine._handle_title_menu_navigation(state, rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._title_focus, "new_character")
+            self.assertEqual(shared.get().title_menu_focus, "new_character")
+            self.assertEqual(len(injector.moved), 1)
+            self.assertEqual(injector.moved[0], (212, 727))
+
+    def test_dpad_navigation_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=0, save_count=1)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            # 1. Início em continue
+            engine._handle_title_menu_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._title_focus, "continue")
+
+            # 2. D-pad baixo -> quit_game
+            s_down = ControllerState(buttons={"dpad_down"})
+            engine._previous = ControllerState()
+            engine._handle_title_menu_navigation(s_down, rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._title_focus, "quit_game")
+            self.assertEqual(injector.moved[-1], (970, 727))
+
+            # 3. D-pad esquerda -> settings
+            s_left = ControllerState(buttons={"dpad_left"})
+            engine._previous = ControllerState()
+            engine._handle_title_menu_navigation(s_left, rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._title_focus, "settings")
+            self.assertEqual(injector.moved[-1], (718, 727))
+
+            # 4. D-pad cima -> continue (pois has_save é True)
+            s_up = ControllerState(buttons={"dpad_up"})
+            engine._previous = ControllerState()
+            engine._handle_title_menu_navigation(s_up, rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._title_focus, "continue")
+            self.assertEqual(injector.moved[-1], (970, 650))

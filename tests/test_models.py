@@ -407,5 +407,42 @@ class HudMaskAssetTests(unittest.TestCase):
         self.assertEqual(click_zone(rect, 960, 1070), "center")
 
 
+class TitleMenuButtonTests(unittest.TestCase):
+    def test_title_menu_button_points_768p(self):
+        from torchbridge.models import TITLE_BUTTONS, title_menu_button_point
+        rect = Rect(0, 0, 1024, 768)
+        self.assertEqual(len(TITLE_BUTTONS), 5)
+        
+        # New character (lado esquerdo inferior)
+        nx, ny = title_menu_button_point(rect, "new_character")
+        self.assertEqual(ny, round(768 * 0.9466))
+        self.assertAlmostEqual(nx, 212.5, delta=1.5)
+        
+        # Load character
+        lx, ly = title_menu_button_point(rect, "load_character")
+        self.assertEqual(ly, round(768 * 0.9466))
+        self.assertAlmostEqual(lx, 467.5, delta=1.5)
+        
+        # Settings
+        sx, sy = title_menu_button_point(rect, "settings")
+        self.assertEqual(sy, round(768 * 0.9466))
+        self.assertAlmostEqual(sx, 718.5, delta=1.5)
+        
+        # Quit game
+        qx, qy = title_menu_button_point(rect, "quit_game")
+        self.assertEqual(qy, round(768 * 0.9466))
+        self.assertAlmostEqual(qx, 969.5, delta=1.5)
+        
+        # Continue (acima do Quit Game)
+        cx, cy = title_menu_button_point(rect, "continue")
+        self.assertEqual(cy, round(768 * 0.8464))
+        self.assertAlmostEqual(cx, 969.5, delta=1.5)
+
+    def test_title_menu_invalid_rect(self):
+        from torchbridge.models import title_menu_button_point
+        invalid_rect = Rect(0, 0, 0, 0)
+        self.assertEqual(title_menu_button_point(invalid_rect, "continue"), (0, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

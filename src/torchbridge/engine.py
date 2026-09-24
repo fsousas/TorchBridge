@@ -22,6 +22,7 @@ from .models import (
     panels_x_shift,
     pet_click_point,
     pet_submenu_open,
+    title_menu_button_point,
     toggle_panel,
 )
 from .memory import GameMemoryState, TorchlightMemoryReader
@@ -131,6 +132,10 @@ class BridgeEngine(threading.Thread):
         # vez aqui e passada ao click_zone em cada borda de clique. None = sem asset
         # (comportamento antigo: clique central com ambos abertos fecha tudo).
         self._hud_mask = load_hud_mask()
+        # Navegação no Menu Inicial (Title Screen) via D-pad
+        self._title_screen_initialized = False
+        self._title_focus = "continue"
+        self._last_state_id = -1
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -338,6 +343,67 @@ class BridgeEngine(threading.Thread):
         # R3: borda de subida, um toque por pressionamento, sem auto-repeat.
         if state.pressed("r3") and not self._previous.pressed("r3"):
             self._tap_binding(bindings.get("r3"))
+
+    # Navegação por D-pad na Tela Inicial (Title Screen, state_id == 0)
+    def _handle_title_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos botões da Tela Inicial (Title Screen) via D-pad."""
+        has_save = (self._memory_state.save_count >= 1)
+
+        # Inicialização ao entrar na Tela Inicial
+        if not self._title_screen_initialized or self._last_state_id != 0:
+            self._title_screen_initialized = True
+            self._last_state_id = 0
+            self._title_focus = "continue" if has_save else "new_character"
+            target_x, target_y = title_menu_button_point(rect, self._title_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(title_menu_focus=self._title_focus)
+            return
+
+        current = self._title_focus
+        new_focus = current
+
+        # Transições via D-pad (na borda de subida)
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_right:
+            if current == "new_character":
+                new_focus = "load_character"
+            elif current == "load_character":
+                new_focus = "settings"
+            elif current == "settings":
+                new_focus = "quit_game"
+            elif current == "continue":
+                new_focus = "quit_game"
+        elif dpad_left:
+            if current == "quit_game":
+                new_focus = "settings"
+            elif current == "settings":
+                new_focus = "load_character"
+            elif current == "load_character":
+                new_focus = "new_character"
+            elif current == "continue":
+                new_focus = "settings"
+        elif dpad_down:
+            if current == "continue":
+                new_focus = "quit_game"
+        elif dpad_up:
+            if has_save and current in ("quit_game", "settings"):
+                new_focus = "continue"
+
+        if new_focus != current:
+            self._title_focus = new_focus
+            target_x, target_y = title_menu_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(title_menu_focus=new_focus)
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
@@ -951,6 +1017,12 @@ class BridgeEngine(threading.Thread):
         bindings = cfg["bindings"]
         self._handle_center_buttons(state, rect, bindings, now)
         self._handle_discrete_bindings(state, bindings)
+        # Navegação no Menu Inicial (Tela Inicial, state_id == 0)
+        if self._memory_state.is_connected and self._memory_state.state_id == 0:
+            self._handle_title_menu_navigation(state, rect, hub)
+        else:
+            self._title_screen_initialized = False
+
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
@@ -1136,6 +1208,7 @@ class BridgeEngine(threading.Thread):
                     memory_is_loading=self._memory_state.is_loading,
                     memory_is_menu_open=self._memory_state.is_menu_open,
                     memory_open_menus=list(self._memory_state.open_menus),
+                    title_menu_focus=self._title_focus if (self._memory_state.is_connected and self._memory_state.state_id == 0) else None,
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.

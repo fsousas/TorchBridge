@@ -8,6 +8,8 @@ import os
 import sys
 import time
 
+from .mathutils import clamp
+
 
 @dataclass(frozen=True)
 # Área retangular útil (cliente) da janela do jogo, em coordenadas absolutas de tela.
@@ -443,6 +445,55 @@ def click_zone(
     return "center"
 
 
+# Coordenadas relativas dos botões da Tela Inicial (Title Screen)
+# Base de referência: 768p (1024x768). Proporção ancorada na ALTURA da janela (rect.height).
+TITLE_BUTTON_BOTTOM_Y_FRACTION = 0.9466  # Y = rect.top + rect.height * 0.9466 (~727px em 768p)
+TITLE_BUTTON_CONTINUE_Y_FRACTION = 0.8464  # Y = rect.top + rect.height * 0.8464 (~650px em 768p)
+
+# Deslocamentos horizontais a partir do CENTRO da janela (rect.left + rect.width * 0.5)
+# Escala multiplicada por (rect.height / 768.0)
+TITLE_X_OFFSET_NEW_CHARACTER = -299.5
+TITLE_X_OFFSET_LOAD_CHARACTER = -44.5
+TITLE_X_OFFSET_SETTINGS = 206.5
+TITLE_X_OFFSET_QUIT = 457.5
+TITLE_X_OFFSET_CONTINUE = 457.5
+
+TITLE_BUTTONS = ("new_character", "load_character", "settings", "quit_game", "continue")
+
+
+def title_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) absoluta de um botão na Tela Inicial,
+    respeitando a proporção da altura da janela (rect.height).
+    """
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+
+    if button_name == "continue":
+        x = center_x + TITLE_X_OFFSET_CONTINUE * scale
+        y = rect.top + rect.height * TITLE_BUTTON_CONTINUE_Y_FRACTION
+    elif button_name == "new_character":
+        x = center_x + TITLE_X_OFFSET_NEW_CHARACTER * scale
+        y = rect.top + rect.height * TITLE_BUTTON_BOTTOM_Y_FRACTION
+    elif button_name == "load_character":
+        x = center_x + TITLE_X_OFFSET_LOAD_CHARACTER * scale
+        y = rect.top + rect.height * TITLE_BUTTON_BOTTOM_Y_FRACTION
+    elif button_name == "settings":
+        x = center_x + TITLE_X_OFFSET_SETTINGS * scale
+        y = rect.top + rect.height * TITLE_BUTTON_BOTTOM_Y_FRACTION
+    elif button_name == "quit_game":
+        x = center_x + TITLE_X_OFFSET_QUIT * scale
+        y = rect.top + rect.height * TITLE_BUTTON_BOTTOM_Y_FRACTION
+    else:
+        x = center_x
+        y = rect.top + rect.height * TITLE_BUTTON_BOTTOM_Y_FRACTION
+
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -472,6 +523,7 @@ class OverlaySnapshot:
     memory_is_loading: bool = False
     memory_is_menu_open: bool = False
     memory_open_menus: list[str] = field(default_factory=list)
+    title_menu_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).
