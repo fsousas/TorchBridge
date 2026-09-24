@@ -17,7 +17,9 @@ from .models import (
     Rect,
     SharedOverlayState,
     both_panels_open,
+    char_create_button_point,
     click_zone,
+    difficulty_menu_button_point,
     load_hud_mask,
     panels_x_shift,
     pet_click_point,
@@ -135,6 +137,12 @@ class BridgeEngine(threading.Thread):
         # Navegação no Menu Inicial (Title Screen) via D-pad
         self._title_screen_initialized = False
         self._title_focus = "continue"
+        # Navegação na Criação de Personagem (state_id == 1) via D-pad
+        self._char_create_initialized = False
+        self._char_create_focus = "destroyer"
+        # Navegação na Seleção de Dificuldade (state_id == 2) via D-pad
+        self._difficulty_initialized = False
+        self._difficulty_focus = "hardcore"
         self._last_state_id = -1
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
@@ -238,6 +246,9 @@ class BridgeEngine(threading.Thread):
             pet_submenu_selection=None,
             aim_x=None,
             aim_y=None,
+            title_menu_focus=None,
+            char_create_focus=None,
+            difficulty_focus=None,
         )
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
@@ -404,6 +415,150 @@ class BridgeEngine(threading.Thread):
             self.injector.move(target_x, target_y)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(title_menu_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Criação de Personagem (state_id == 1)
+    def _handle_char_create_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação na Tela de Criação de Personagem (state_id == 1) via D-pad."""
+        if not self._char_create_initialized or self._last_state_id != 1:
+            self._char_create_initialized = True
+            self._last_state_id = 1
+            self._char_create_focus = "destroyer"
+            target_x, target_y = char_create_button_point(rect, self._char_create_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(char_create_focus=self._char_create_focus)
+            return
+
+        current = self._char_create_focus
+        new_focus = current
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_right:
+            if current == "destroyer":
+                new_focus = "dog"
+            elif current == "vanquisher":
+                new_focus = "cat"
+            elif current == "alchemist":
+                new_focus = "ferret"
+            elif current == "back":
+                new_focus = "character_name"
+        elif dpad_left:
+            if current == "dog":
+                new_focus = "destroyer"
+            elif current == "cat":
+                new_focus = "vanquisher"
+            elif current == "ferret":
+                new_focus = "alchemist"
+            elif current == "pet_name":
+                new_focus = "alchemist"
+            elif current == "character_name":
+                new_focus = "back"
+        elif dpad_down:
+            if current == "destroyer":
+                new_focus = "vanquisher"
+            elif current == "vanquisher":
+                new_focus = "alchemist"
+            elif current == "alchemist":
+                new_focus = "back"
+            elif current == "dog":
+                new_focus = "cat"
+            elif current == "cat":
+                new_focus = "ferret"
+            elif current == "ferret":
+                new_focus = "pet_name"
+            elif current == "pet_name":
+                new_focus = "character_name"
+        elif dpad_up:
+            if current == "back":
+                new_focus = "alchemist"
+            elif current == "character_name":
+                new_focus = "pet_name"
+            elif current == "alchemist":
+                new_focus = "vanquisher"
+            elif current == "vanquisher":
+                new_focus = "destroyer"
+            elif current == "pet_name":
+                new_focus = "ferret"
+            elif current == "ferret":
+                new_focus = "cat"
+            elif current == "cat":
+                new_focus = "dog"
+
+        if new_focus != current:
+            self._char_create_focus = new_focus
+            target_x, target_y = char_create_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(char_create_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Seleção de Dificuldade (state_id == 2)
+    def _handle_difficulty_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação na Tela de Seleção de Dificuldade (state_id == 2) via D-pad."""
+        if not self._difficulty_initialized or self._last_state_id != 2:
+            self._difficulty_initialized = True
+            self._last_state_id = 2
+            self._difficulty_focus = "hardcore"
+            target_x, target_y = difficulty_menu_button_point(rect, self._difficulty_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(difficulty_focus=self._difficulty_focus)
+            return
+
+        current = self._difficulty_focus
+        new_focus = current
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_down:
+            if current == "easy":
+                new_focus = "normal"
+            elif current == "normal":
+                new_focus = "hard"
+            elif current == "hard":
+                new_focus = "very_hard"
+            elif current == "very_hard":
+                new_focus = "hardcore"
+            elif current == "hardcore":
+                new_focus = "back"
+        elif dpad_up:
+            if current == "back":
+                new_focus = "hardcore"
+            elif current == "hardcore":
+                new_focus = "very_hard"
+            elif current == "very_hard":
+                new_focus = "hard"
+            elif current == "hard":
+                new_focus = "normal"
+            elif current == "normal":
+                new_focus = "easy"
+        elif dpad_right:
+            if current == "hardcore":
+                new_focus = "very_hard"
+        elif dpad_left:
+            if current in ("easy", "normal", "hard", "very_hard"):
+                new_focus = "hardcore"
+
+        if new_focus != current:
+            self._difficulty_focus = new_focus
+            target_x, target_y = difficulty_menu_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(difficulty_focus=new_focus)
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
@@ -1017,11 +1172,36 @@ class BridgeEngine(threading.Thread):
         bindings = cfg["bindings"]
         self._handle_center_buttons(state, rect, bindings, now)
         self._handle_discrete_bindings(state, bindings)
-        # Navegação no Menu Inicial (Tela Inicial, state_id == 0)
-        if self._memory_state.is_connected and self._memory_state.state_id == 0:
-            self._handle_title_menu_navigation(state, rect, hub)
+        # Navegação nos Menus via D-pad conforme o estado da memória
+        if self._memory_state.is_connected:
+            state_id = self._memory_state.state_id
+            if state_id == 0:
+                self._handle_title_menu_navigation(state, rect, hub)
+            elif self._title_screen_initialized:
+                self._title_screen_initialized = False
+                self.shared.update(title_menu_focus=None)
+
+            if state_id == 1:
+                self._handle_char_create_navigation(state, rect, hub)
+            elif self._char_create_initialized:
+                self._char_create_initialized = False
+                self.shared.update(char_create_focus=None)
+
+            if state_id == 2:
+                self._handle_difficulty_navigation(state, rect, hub)
+            elif self._difficulty_initialized:
+                self._difficulty_initialized = False
+                self.shared.update(difficulty_focus=None)
         else:
-            self._title_screen_initialized = False
+            if self._title_screen_initialized:
+                self._title_screen_initialized = False
+                self.shared.update(title_menu_focus=None)
+            if self._char_create_initialized:
+                self._char_create_initialized = False
+                self.shared.update(char_create_focus=None)
+            if self._difficulty_initialized:
+                self._difficulty_initialized = False
+                self.shared.update(difficulty_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.

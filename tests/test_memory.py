@@ -26,6 +26,7 @@ class MemoryModuleTests(unittest.TestCase):
     def test_main_menu_states_mapping(self):
         self.assertEqual(MAIN_MENU_STATES[0], "Tela Inicial")
         self.assertEqual(MAIN_MENU_STATES[1], "Criar Personagem")
+        self.assertEqual(MAIN_MENU_STATES[2], "Selecionar Dificuldade")
         self.assertEqual(MAIN_MENU_STATES[3], "Carregar Personagem")
         self.assertEqual(MAIN_MENU_STATES[6], "Em Jogo")
 

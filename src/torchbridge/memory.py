@@ -32,7 +32,7 @@ OFFSET_MAIN_STATE = 0x0D84
 MAIN_MENU_STATES: dict[int, str] = {
     0: "Tela Inicial",
     1: "Criar Personagem",
-    2: "Criar Personagem (Hardcore)",
+    2: "Selecionar Dificuldade",
     3: "Carregar Personagem",
     4: "Detalhes do Personagem",
     6: "Em Jogo",

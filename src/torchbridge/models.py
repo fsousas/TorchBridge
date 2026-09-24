@@ -494,6 +494,137 @@ def title_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# Coordenadas dos botões da Tela de Criação de Personagem (state_id == 1)
+# Todas as posições são ancoradas e escaladas proporcionalmente à ALTURA da janela (rect.height),
+# garantindo alinhamento sub-pixel idêntico em 4:3, 16:9 ou qualquer outra proporção.
+CHAR_CREATE_CLASSES_X_FRACTION = 0.1855  # Âncora na borda esquerda: rect.left + height * 0.1855
+CHAR_CREATE_DESTROYER_Y_FRACTION = 0.382
+CHAR_CREATE_VANQUISHER_Y_FRACTION = 0.558
+CHAR_CREATE_ALCHEMIST_Y_FRACTION = 0.733
+
+CHAR_CREATE_PET_X_FROM_RIGHT_FRACTION = 0.072  # Âncora na borda direita: rect.right - height * 0.072
+CHAR_CREATE_PET_DOG_Y_FRACTION = 0.552
+CHAR_CREATE_PET_CAT_Y_FRACTION = 0.591
+CHAR_CREATE_PET_FERRET_Y_FRACTION = 0.631
+CHAR_CREATE_PET_NAME_Y_FRACTION = 0.719
+
+CHAR_CREATE_BOTTOM_Y_FRACTION = 0.948  # Âncora no rodapé / centro
+CHAR_CREATE_BACK_X_OFFSET_FRACTION = -0.266
+CHAR_CREATE_NAME_X_OFFSET_FRACTION = 0.052
+
+CREATE_CHAR_BUTTONS = (
+    "destroyer",
+    "vanquisher",
+    "alchemist",
+    "dog",
+    "cat",
+    "ferret",
+    "pet_name",
+    "back",
+    "character_name",
+)
+
+
+def char_create_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão na Tela de Criação de Personagem."""
+    if not rect.valid:
+        return (0, 0)
+
+    center_x = rect.left + rect.width * 0.5
+
+    if button_name == "destroyer":
+        x = rect.left + rect.height * CHAR_CREATE_CLASSES_X_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_DESTROYER_Y_FRACTION
+    elif button_name == "vanquisher":
+        x = rect.left + rect.height * CHAR_CREATE_CLASSES_X_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_VANQUISHER_Y_FRACTION
+    elif button_name == "alchemist":
+        x = rect.left + rect.height * CHAR_CREATE_CLASSES_X_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_ALCHEMIST_Y_FRACTION
+    elif button_name == "dog":
+        x = rect.right - rect.height * CHAR_CREATE_PET_X_FROM_RIGHT_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_PET_DOG_Y_FRACTION
+    elif button_name == "cat":
+        x = rect.right - rect.height * CHAR_CREATE_PET_X_FROM_RIGHT_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_PET_CAT_Y_FRACTION
+    elif button_name == "ferret":
+        x = rect.right - rect.height * CHAR_CREATE_PET_X_FROM_RIGHT_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_PET_FERRET_Y_FRACTION
+    elif button_name == "pet_name":
+        x = rect.right - rect.height * CHAR_CREATE_PET_X_FROM_RIGHT_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_PET_NAME_Y_FRACTION
+    elif button_name == "back":
+        x = center_x + rect.height * CHAR_CREATE_BACK_X_OFFSET_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_BOTTOM_Y_FRACTION
+    elif button_name == "character_name":
+        x = center_x + rect.height * CHAR_CREATE_NAME_X_OFFSET_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_BOTTOM_Y_FRACTION
+    else:
+        x = rect.left + rect.height * CHAR_CREATE_CLASSES_X_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_DESTROYER_Y_FRACTION
+
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+# Coordenadas dos botões da Tela de Seleção de Dificuldade (state_id == 2)
+DIFFICULTY_OPTIONS_X_FRACTION = 0.239  # Âncora na borda esquerda: rect.left + height * 0.239
+DIFFICULTY_EASY_Y_FRACTION = 0.378
+DIFFICULTY_NORMAL_Y_FRACTION = 0.428
+DIFFICULTY_HARD_Y_FRACTION = 0.481
+DIFFICULTY_VERY_HARD_Y_FRACTION = 0.532
+
+DIFFICULTY_HARDCORE_X_FRACTION = 0.1068  # Caixa de seleção Hardcore
+DIFFICULTY_HARDCORE_Y_FRACTION = 0.631
+
+DIFFICULTY_BOTTOM_Y_FRACTION = 0.948  # Botão Voltar (rodapé/centro)
+DIFFICULTY_BACK_X_OFFSET_FRACTION = -0.266
+
+DIFFICULTY_BUTTONS = (
+    "easy",
+    "normal",
+    "hard",
+    "very_hard",
+    "hardcore",
+    "back",
+)
+
+
+def difficulty_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão na Tela de Seleção de Dificuldade."""
+    if not rect.valid:
+        return (0, 0)
+
+    center_x = rect.left + rect.width * 0.5
+
+    if button_name == "easy":
+        x = rect.left + rect.height * DIFFICULTY_OPTIONS_X_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_EASY_Y_FRACTION
+    elif button_name == "normal":
+        x = rect.left + rect.height * DIFFICULTY_OPTIONS_X_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_NORMAL_Y_FRACTION
+    elif button_name == "hard":
+        x = rect.left + rect.height * DIFFICULTY_OPTIONS_X_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_HARD_Y_FRACTION
+    elif button_name == "very_hard":
+        x = rect.left + rect.height * DIFFICULTY_OPTIONS_X_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_VERY_HARD_Y_FRACTION
+    elif button_name == "hardcore":
+        x = rect.left + rect.height * DIFFICULTY_HARDCORE_X_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_HARDCORE_Y_FRACTION
+    elif button_name == "back":
+        x = center_x + rect.height * DIFFICULTY_BACK_X_OFFSET_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_BOTTOM_Y_FRACTION
+    else:
+        x = rect.left + rect.height * DIFFICULTY_HARDCORE_X_FRACTION
+        y = rect.top + rect.height * DIFFICULTY_HARDCORE_Y_FRACTION
+
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -524,6 +655,8 @@ class OverlaySnapshot:
     memory_is_menu_open: bool = False
     memory_open_menus: list[str] = field(default_factory=list)
     title_menu_focus: str | None = None
+    char_create_focus: str | None = None
+    difficulty_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

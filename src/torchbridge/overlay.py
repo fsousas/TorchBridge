@@ -17,8 +17,12 @@ from .config import ConfigManager
 from .models import (
     OverlaySnapshot,
     SharedOverlayState,
+    CREATE_CHAR_BUTTONS,
+    DIFFICULTY_BUTTONS,
     TITLE_BUTTONS,
+    char_create_button_point,
     close_tab_vertices,
+    difficulty_menu_button_point,
     hud_asset_path,
     hud_target_rect,
     panel_regions,
@@ -679,6 +683,45 @@ class GameOverlay(QWidget):
                 lx = bx - rect.left - btn_w / 2
                 ly = by - rect.top - btn_h / 2
                 is_focus = (snapshot.title_menu_focus == btn_name)
+                if is_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 75))
+                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+
+        # Alvos da Tela de Criação de Personagem (state_id == 1) em modo calibração
+        if not snapshot.memory_is_in_game and snapshot.memory_state_desc == "Criar Personagem":
+            for btn_name in CREATE_CHAR_BUTTONS:
+                if btn_name in ("destroyer", "vanquisher", "alchemist"):
+                    btn_w, btn_h = 44 * scale, 38 * scale
+                elif btn_name in ("dog", "cat", "ferret", "pet_name"):
+                    btn_w, btn_h = 34 * scale, 18 * scale
+                else:  # back, character_name
+                    btn_w, btn_h = 47 * scale, 37 * scale
+
+                bx, by = char_create_button_point(rect, btn_name)
+                lx = bx - rect.left - btn_w / 2
+                ly = by - rect.top - btn_h / 2
+                is_focus = (snapshot.char_create_focus == btn_name)
+                if is_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 75))
+                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+
+        # Alvos da Tela de Seleção de Dificuldade (state_id == 2) em modo calibração
+        if not snapshot.memory_is_in_game and snapshot.memory_state_desc == "Selecionar Dificuldade":
+            btn_w = 24 * scale
+            btn_h = 23 * scale
+            for btn_name in DIFFICULTY_BUTTONS:
+                bx, by = difficulty_menu_button_point(rect, btn_name)
+                lx = bx - rect.left - btn_w / 2
+                ly = by - rect.top - btn_h / 2
+                is_focus = (snapshot.difficulty_focus == btn_name)
                 if is_focus:
                     painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
                     painter.setBrush(QColor(255, 215, 0, 110))

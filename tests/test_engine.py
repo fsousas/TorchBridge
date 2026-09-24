@@ -1653,3 +1653,158 @@ class TitleMenuNavigationTests(unittest.TestCase):
             engine._handle_title_menu_navigation(s_up, rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._title_focus, "continue")
             self.assertEqual(injector.moved[-1], (970, 650))
+
+
+class CharCreateNavigationTests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def test_initial_focus_is_destroyer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            engine._handle_char_create_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "destroyer")
+            self.assertEqual(shared.get().char_create_focus, "destroyer")
+            self.assertEqual(len(injector.moved), 1)
+            dx, dy = injector.moved[0]
+            self.assertAlmostEqual(dx, round(768 * 0.1855), delta=1)
+            self.assertAlmostEqual(dy, round(768 * 0.382), delta=1)
+
+    def test_dpad_navigation_cycle_char_create(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            # 1. Início em destroyer
+            engine._handle_char_create_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "destroyer")
+
+            # 2. D-pad baixo -> vanquisher
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_down"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "vanquisher")
+            self.assertEqual(shared.get().char_create_focus, "vanquisher")
+
+            # 3. D-pad baixo -> alchemist
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_down"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "alchemist")
+
+            # 4. D-pad baixo -> back
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_down"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "back")
+
+            # 5. D-pad direita -> character_name
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "character_name")
+
+            # 6. D-pad cima -> pet_name
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "pet_name")
+
+            # 7. D-pad cima -> ferret
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "ferret")
+
+            # 8. D-pad cima -> cat
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "cat")
+
+            # 9. D-pad cima -> dog
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "dog")
+
+            # 10. D-pad esquerda -> destroyer
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_left"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "destroyer")
+
+
+class DifficultyNavigationTests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def test_initial_focus_is_hardcore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=2)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            engine._handle_difficulty_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "hardcore")
+            self.assertEqual(shared.get().difficulty_focus, "hardcore")
+            self.assertEqual(len(injector.moved), 1)
+            hx, hy = injector.moved[0]
+            self.assertAlmostEqual(hx, round(768 * 0.1068), delta=1)
+            self.assertAlmostEqual(hy, round(768 * 0.631), delta=1)
+
+    def test_dpad_navigation_cycle_difficulty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=2)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            # 1. Início em hardcore
+            engine._handle_difficulty_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "hardcore")
+
+            # 2. D-pad cima -> very_hard
+            engine._previous = ControllerState()
+            engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "very_hard")
+            self.assertEqual(shared.get().difficulty_focus, "very_hard")
+
+            # 3. D-pad cima -> hard
+            engine._previous = ControllerState()
+            engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "hard")
+
+            # 4. D-pad cima -> normal
+            engine._previous = ControllerState()
+            engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "normal")
+
+            # 5. D-pad cima -> easy
+            engine._previous = ControllerState()
+            engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "easy")
+
+            # 6. D-pad baixo descendo até o back
+            for expected in ["normal", "hard", "very_hard", "hardcore", "back"]:
+                engine._previous = ControllerState()
+                engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_down"}), rect, hub)  # type: ignore[arg-type]
+                self.assertEqual(engine._difficulty_focus, expected)
+
+            # 7. D-pad cima de volta para hardcore
+            engine._previous = ControllerState()
+            engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "hardcore")
+
