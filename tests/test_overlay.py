@@ -40,8 +40,35 @@ class OverlayCalibrationTests(unittest.TestCase):
             pix = QPixmap(1024, 768)
             painter = QPainter(pix)
             try:
-                # Não deve levantar exceções e deve renderizar elementos in-game
+                # 1. Sem painéis abertos (tela limpa de menus)
                 overlay._draw_calibration(painter, snap, 1.0)
+
+                # 2. Painel esquerdo aberto (ex: Atributos 'C') -> esconde HUD pet, mostra painel esquerdo
+                snap_left = OverlaySnapshot(
+                    game_rect=rect,
+                    memory_is_in_game=True,
+                    memory_state_desc="Em Jogo",
+                    active_panels=["C", ""],
+                )
+                overlay._draw_calibration(painter, snap_left, 1.0)
+
+                # 3. Painel direito aberto (ex: Inventário 'I') -> mostra HUD pet e painel direito
+                snap_right = OverlaySnapshot(
+                    game_rect=rect,
+                    memory_is_in_game=True,
+                    memory_state_desc="Em Jogo",
+                    active_panels=["", "I"],
+                )
+                overlay._draw_calibration(painter, snap_right, 1.0)
+
+                # 4. Ambos painéis abertos -> mostra ambos + zona central
+                snap_both = OverlaySnapshot(
+                    game_rect=rect,
+                    memory_is_in_game=True,
+                    memory_state_desc="Em Jogo",
+                    active_panels=["C", "I"],
+                )
+                overlay._draw_calibration(painter, snap_both, 1.0)
             finally:
                 painter.end()
 

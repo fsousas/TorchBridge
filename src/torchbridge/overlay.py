@@ -519,29 +519,59 @@ class GameOverlay(QWidget):
 
         if is_in_game:
             regions = panel_regions(rect)
-            # Painéis: traço cheio ciano, rótulo pequeno.
-            painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(local(regions["panel_left"]))
-            painter.drawRect(local(regions["panel_right"]))
-            # Zonas de fechar: a MESMA aba (pentágono) que a click_zone hit-testa — laranja.
-            painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
-            painter.setBrush(QColor(255, 159, 67, 55))
-            close_left_poly = local_polygon("left")
-            close_right_poly = local_polygon("right")
-            painter.drawPolygon(close_left_poly)
-            painter.drawPolygon(close_right_poly)
-            # Zona central: tracejado (clique nela zera os dois com ambos abertos).
-            painter.setPen(
-                QPen(QColor(120, 220, 150, 170), 1.2 * scale, Qt.PenStyle.DashLine)
-            )
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(local(regions["center"]))
-            # HUD inferior: a MESMA silhueta verde que a click_zone hit-testa como "não fecha
-            # painéis" — desenhada na posição real (frações da janela) para calibrar o ajuste fino.
+            left_open = bool(snapshot.active_panels and len(snapshot.active_panels) > 0 and snapshot.active_panels[0])
+            right_open = bool(snapshot.active_panels and len(snapshot.active_panels) > 1 and snapshot.active_panels[1])
+            both_open = left_open and right_open
+
+            # 1. Painel Esquerdo e Aba de Fechar Esquerda (só visível com menu esquerdo aberto)
+            if left_open:
+                painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(local(regions["panel_left"]))
+
+                painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
+                painter.setBrush(QColor(255, 159, 67, 55))
+                close_left_poly = local_polygon("left")
+                painter.drawPolygon(close_left_poly)
+
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(255, 159, 67, 245))
+                painter.drawText(close_left_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA ESQ")
+                painter.setPen(QColor(111, 210, 235, 200))
+                painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
+
+            # 2. Painel Direito e Aba de Fechar Direita (só visível com menu direito aberto)
+            if right_open:
+                painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(local(regions["panel_right"]))
+
+                painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
+                painter.setBrush(QColor(255, 159, 67, 55))
+                close_right_poly = local_polygon("right")
+                painter.drawPolygon(close_right_poly)
+
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(255, 159, 67, 245))
+                painter.drawText(close_right_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA DIR")
+                painter.setPen(QColor(111, 210, 235, 200))
+                painter.drawText(local(regions["panel_right"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
+
+            # 3. Zona Central: tracejado (clique nela fecha ambos somente quando os dois estiverem abertos)
+            if both_open:
+                painter.setPen(
+                    QPen(QColor(120, 220, 150, 170), 1.2 * scale, Qt.PenStyle.DashLine)
+                )
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(local(regions["center"]))
+
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(120, 220, 150, 200))
+                painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
+
+            # 4. HUD inferior (elemento fixo da interface in-game)
             if self._hud_pixmap is not None:
                 hl, ht, hw, hh = hud_target_rect(rect)
-                # hud_target_rect devolve absolutos; converte para local do overlay.
                 target = QRectF(hl - rect.left, ht - rect.top, hw, hh)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
                 painter.setPen(QPen(QColor(60, 235, 90, 120), 1.0 * scale))
@@ -551,10 +581,22 @@ class GameOverlay(QWidget):
                     self._hud_pixmap,
                 )
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-            # Pet actions: a caixinha real do jogo (formas geométricas) no canto superior
-            # esquerdo — referência visual para ações futuras, ainda SEM hit-test. Roxa pra
-            # não confundir com as cores das outras zonas (verde=HUD, ciano= painel, laranja=fechar).
-            if self._pet_actions_pixmap is not None:
+
+                hud_local = QRectF(hl - rect.left, ht - rect.top, hw, hh)
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(120, 235, 90, 235))
+                label_box = QRectF(
+                    hud_local.left(), hud_local.top() - 24 * scale,
+                    hud_local.width(), 20 * scale,
+                )
+                painter.drawText(
+                    label_box,
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                    "HUD (NÃO FECHA)",
+                )
+
+            # 5. Pet actions: visível somente quando o painel esquerdo NÃO estiver cobrindo a HUD do pet
+            if not left_open and self._pet_actions_pixmap is not None:
                 pl, pt, pw, ph = pet_actions_target_rect(rect)
                 pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -565,8 +607,7 @@ class GameOverlay(QWidget):
                     self._pet_actions_pixmap,
                 )
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-                # Pontos de clique das 4 ações do pet: bolinha vermelha com cruz no centro
-                # EXATO de cada botão (pet_click_point — a mesma fonte do motor).
+
                 radius = 7.0 * scale
                 pens = (
                     QPen(QColor(255, 255, 255, 255), 4.5 * scale),
@@ -582,33 +623,7 @@ class GameOverlay(QWidget):
                         painter.drawEllipse(QPointF(lx, ly), radius, radius)
                         painter.drawLine(QPointF(lx - radius - 3 * scale, ly), QPointF(lx + radius + 3 * scale, ly))
                         painter.drawLine(QPointF(lx, ly - radius - 3 * scale), QPointF(lx, ly + radius + 3 * scale))
-            # Rótulos: o que cada zona faz (posicionados na bounding box da aba).
-            painter.setFont(self._font(max(7, round(9 * scale)), True))
-            painter.setPen(QColor(255, 159, 67, 245))
-            painter.drawText(close_left_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA ESQ")
-            painter.drawText(close_right_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA DIR")
-            painter.setPen(QColor(111, 210, 235, 200))
-            painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
-            painter.drawText(local(regions["panel_right"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
-            painter.setPen(QColor(120, 220, 150, 200))
-            painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
-            if self._hud_pixmap is not None:
-                hl, ht, hw, hh = hud_target_rect(rect)
-                hud_local = QRectF(hl - rect.left, ht - rect.top, hw, hh)
-                painter.setFont(self._font(max(7, round(9 * scale)), True))
-                painter.setPen(QColor(120, 235, 90, 235))
-                label_box = QRectF(
-                    hud_local.left(), hud_local.top() - 24 * scale,
-                    hud_local.width(), 20 * scale,
-                )
-                painter.drawText(
-                    label_box,
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-                    "HUD (NÃO FECHA)",
-                )
-            if self._pet_actions_pixmap is not None:
-                pl, pt, pw, ph = pet_actions_target_rect(rect)
-                pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
+
                 painter.setFont(self._font(max(7, round(9 * scale)), True))
                 painter.setPen(QColor(216, 156, 255, 235))
                 label_box = QRectF(
