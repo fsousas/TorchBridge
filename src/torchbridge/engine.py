@@ -1478,6 +1478,16 @@ class BridgeEngine(threading.Thread):
                             left = "P"
                         elif "Atributos" in self._memory_state.open_menus:
                             left = "C"
+                        elif "Transmutador" in self._memory_state.open_menus:
+                            left = "T"
+                        elif "Sockets" in self._memory_state.open_menus:
+                            left = "K"
+                        elif "Encantador" in self._memory_state.open_menus:
+                            left = "E"
+                        elif "Vendedor (Loja)" in self._memory_state.open_menus:
+                            left = "V"
+                        elif "Baú" in self._memory_state.open_menus:
+                            left = "B"
 
                         right = ""
                         if "Inventário" in self._memory_state.open_menus:
@@ -1488,12 +1498,6 @@ class BridgeEngine(threading.Thread):
                             right = "Q"
                         elif "Diário (Journal)" in self._memory_state.open_menus:
                             right = "J"
-                        elif "Baú" in self._memory_state.open_menus:
-                            right = "B"
-                        elif "Vendedor (Loja)" in self._memory_state.open_menus:
-                            right = "V"
-                        elif "Encantador" in self._memory_state.open_menus:
-                            right = "E"
                         elif "Portal (Waypoint)" in self._memory_state.open_menus:
                             right = "W"
 

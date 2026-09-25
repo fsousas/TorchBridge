@@ -134,6 +134,25 @@ class OverlayCalibrationTests(unittest.TestCase):
             finally:
                 painter.end()
 
+    def test_draw_calibration_crafting_menus(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            for menu_name in ("Transmutador", "Sockets", "Encantador"):
+                snap = OverlaySnapshot(
+                    game_rect=rect,
+                    memory_is_in_game=True,
+                    memory_state_desc="Em Jogo",
+                    memory_open_menus=[menu_name, "Inventário"],
+                    active_panels=["T", "I"],
+                )
+                pix = QPixmap(1024, 768)
+                painter = QPainter(pix)
+                try:
+                    overlay._draw_calibration(painter, snap, 1.0)
+                finally:
+                    painter.end()
+
 
 if __name__ == "__main__":
     unittest.main()

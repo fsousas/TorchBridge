@@ -47,7 +47,8 @@ A hierarquia real de objetos do motor do Torchlight é:
                                          ├── [+0x02D0] ──► CStatsMenu       [+0x44 == 1 quando aberto]
                                          ├── [+0x02D4] ──► CPetMenu         [+0x34 == 1 quando aberto]
                                          ├── [+0x02D8] ──► CMerchantMenu    [+0x30 == 1 quando aberto]
-                                         ├── [+0x02DC] ──► CEnchantMenu     [+0x38 == 1 quando aberto]
+                                         ├── [+0x02DC] ──► CEnchantMenu     [+0x38 == 1 quando aberto; +0x90 = modo (0x19: Sockets, 0x15: Encantador)]
+                                          ├── [+0x02E0] ──► CCombineMenu     [+0x54 == 1 quando aberto] (Transmutador / Duran the Transmuter)
                                          ├── [+0x02E4] ──► CStashMenu       [+0x30 == 1 quando aberto]
                                          ├── [+0x02E8] ──► COptionsMenu     [+0x18 == 1 quando aberto] (Menu de Pause em Jogo)
                                          ├── [+0x02EC] ──► CSettingsMenu    [+0x18 == 1 quando aberto] (Overlay de Settings)
@@ -151,6 +152,37 @@ O script atualiza a cada 300ms no terminal com reconexão automática ao PID do 
     - `accept_visible == 1` e `decline_visible == 0` (o botão Decline permanece oculto/desativado)
     - Botão **Accept** ativo em $X = \text{center\_x} - 99 \times (\text{height} / 768)$, $Y = \text{top} + \text{height} \times 0.745$.
 
+---
 
+## 7. Mapeamento das Telas de Crafting (Transmutador, Sockets e Encantador)
 
+### A. Transmutador (Duran the Transmuter)
+- **Estrutura C++**: `CCombineMenu` em `CGameUI + 0x02E0`
+- **Flag de Aberto**: byte `+0x54 == 1`
+- **Painel Lateral**: Painel Esquerdo (`PANEL_SIDE['T'] = 0`)
+- **Slots de Itens (1024x768)**:
+  - 4 slots em grid 2x2: `(177, 145)`, `(229, 145)`, `(177, 217)`, `(229, 217)`
+- **Botões (1024x768)**:
+  - `decline` (Fechar): `(200, 284)`
+  - `transmute` (Transmutar): `(200, 329)`
+
+### B. Sockets e Remoção de Gemas (Gron the Enchanter / Furl the Gem Inlayer)
+- **Estrutura C++**: `CEnchantMenu` em `CGameUI + 0x02DC`
+- **Flag de Aberto**: byte `+0x38 == 1`
+- **Modo**: `+0x90 in (0x19, 0x1A, 0x1B)`
+- **Painel Lateral**: Painel Esquerdo (`PANEL_SIDE['K'] = 0`)
+- **Slot de Item (1024x768)**: Slot único central em `(200, 188)`
+- **Botões (1024x768)**:
+  - `decline` (Fechar): `(200, 274)`
+  - `recover` (Recuperar): `(200, 319)`
+
+### C. Encantador de Itens (Goren the Enchanter)
+- **Estrutura C++**: `CEnchantMenu` em `CGameUI + 0x02DC`
+- **Flag de Aberto**: byte `+0x38 == 1`
+- **Modo**: `+0x90 == 0x15` (21) ou `0x16` (22)
+- **Painel Lateral**: Painel Esquerdo (`PANEL_SIDE['E'] = 0`)
+- **Slot de Item (1024x768)**: Slot único central em `(200, 188)`
+- **Botões (1024x768)**:
+  - `decline` (Fechar): `(200, 274)`
+  - `enchant` (Encantar): `(200, 319)`
 

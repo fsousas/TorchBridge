@@ -65,10 +65,16 @@ class ControllerState:
 PANEL_SIDE: dict[str, int] = {
     "C": 0,
     "P": 0,
+    "V": 0,
+    "B": 0,
+    "E": 0,
+    "K": 0,
+    "T": 0,
     "I": 1,
     "S": 1,
     "Q": 1,
     "J": 1,
+    "W": 1,
 }
 
 
@@ -669,6 +675,77 @@ def dialog_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
         x = center_x
         y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
 
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+# Coordenadas base dos botões e slots de interfaces de crafting (painel esquerdo, base 1024x768)
+# Extraídas diretamente dos arquivos de layout combinemenu.layout e enchantmenu.layout
+CRAFTING_BUTTONS: dict[str, dict[str, tuple[float, float]]] = {
+    "Transmutador": {
+        "decline": (200.0, 284.0),
+        "transmute": (200.0, 329.0),
+        "accept": (200.0, 329.0),
+    },
+    "Sockets": {
+        "decline": (200.0, 274.0),
+        "recover": (200.0, 319.0),
+        "accept": (200.0, 319.0),
+    },
+    "Encantador": {
+        "decline": (200.0, 274.0),
+        "enchant": (200.0, 319.0),
+        "accept": (200.0, 319.0),
+    },
+}
+
+# Posições dos slots de itens (base 1024x768)
+CRAFTING_SLOTS: dict[str, list[tuple[float, float]]] = {
+    # 4 slots: 2x2 grid (topo-esq, topo-dir, baixo-esq, baixo-dir)
+    "Transmutador": [
+        (177.0, 145.0),
+        (229.0, 145.0),
+        (177.0, 217.0),
+        (229.0, 217.0),
+    ],
+    # 1 slot central
+    "Sockets": [
+        (200.0, 188.0),
+    ],
+    # 1 slot central
+    "Encantador": [
+        (200.0, 188.0),
+    ],
+}
+
+
+def crafting_button_point(rect: Rect, menu_name: str, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão nas telas de Transmutador, Sockets e Encantador."""
+    if not rect.valid:
+        return (0, 0)
+    buttons = CRAFTING_BUTTONS.get(menu_name, CRAFTING_BUTTONS.get("Encantador", {}))
+    bx, by = buttons.get(button_name.lower(), (200.0, 274.0))
+    scale = rect.height / 768.0
+    x = rect.left + bx * scale
+    y = rect.top + by * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def crafting_slot_point(rect: Rect, menu_name: str, slot_index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um slot de item nas telas de Transmutador (0..3) ou Sockets/Encantador (0)."""
+    if not rect.valid:
+        return (0, 0)
+    slots = CRAFTING_SLOTS.get(menu_name, CRAFTING_SLOTS.get("Encantador", []))
+    if not slots:
+        return (0, 0)
+    idx = max(0, min(slot_index, len(slots) - 1))
+    sx, sy = slots[idx]
+    scale = rect.height / 768.0
+    x = rect.left + sx * scale
+    y = rect.top + sy * scale
     clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
     clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
     return (clamped_x, clamped_y)

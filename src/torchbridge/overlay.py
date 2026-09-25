@@ -20,6 +20,10 @@ from .models import (
     CREATE_CHAR_BUTTONS,
     DIFFICULTY_BUTTONS,
     TITLE_BUTTONS,
+    CRAFTING_BUTTONS,
+    CRAFTING_SLOTS,
+    crafting_button_point,
+    crafting_slot_point,
     char_create_button_point,
     close_tab_vertices,
     dialog_button_point,
@@ -664,6 +668,48 @@ class GameOverlay(QWidget):
                     elif label in ("SKIP", "CONTINUE"):
                         label = "CONTINUAR"
                     painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, label)
+
+            # 7. Alvos de Crafting (Transmutador, Sockets, Encantador) em modo calibração
+            crafting_menu = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (snapshot.memory_open_menus or [])), None)
+            if crafting_menu:
+                # Desenha slots de itens
+                slots = CRAFTING_SLOTS.get(crafting_menu, [])
+                slot_w = 44 * scale * (rect.height / 768.0)
+                slot_h = 44 * scale * (rect.height / 768.0)
+                for s_idx in range(len(slots)):
+                    sx, sy = crafting_slot_point(rect, crafting_menu, s_idx)
+                    lx = sx - rect.left - slot_w / 2
+                    ly = sy - rect.top - slot_h / 2
+                    painter.setPen(QPen(QColor(111, 210, 235, 230), 1.5 * scale))
+                    painter.setBrush(QColor(111, 210, 235, 50))
+                    painter.drawRoundedRect(QRectF(lx, ly, slot_w, slot_h), 4 * scale, 4 * scale)
+                    painter.setFont(self._font(max(7, round(8 * scale)), True))
+                    painter.setPen(QColor(255, 255, 255, 240))
+                    slot_label = f"SLOT {s_idx + 1}" if len(slots) > 1 else "ITEM"
+                    painter.drawText(QRectF(lx, ly, slot_w, slot_h), Qt.AlignmentFlag.AlignCenter, slot_label)
+
+                # Desenha botões de ação (Decline, Transmute / Recover / Enchant)
+                buttons = CRAFTING_BUTTONS.get(crafting_menu, {})
+                btn_w = 110 * scale * (rect.height / 768.0)
+                btn_h = 28 * scale * (rect.height / 768.0)
+                for b_name in buttons:
+                    if b_name == "accept":
+                        continue  # accept é a mesma posição do botão principal
+                    bx, by = crafting_button_point(rect, crafting_menu, b_name)
+                    lx = bx - rect.left - btn_w / 2
+                    ly = by - rect.top - btn_h / 2
+                    painter.setPen(QPen(QColor(255, 159, 67, 230), 1.5 * scale))
+                    painter.setBrush(QColor(255, 159, 67, 75))
+                    painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+                    painter.setFont(self._font(max(7, round(8 * scale)), True))
+                    painter.setPen(QColor(255, 255, 255, 240))
+                    label_map = {
+                        "decline": "FECHAR",
+                        "transmute": "TRANSMUTAR",
+                        "recover": "RECUPERAR",
+                        "enchant": "ENCANTAR",
+                    }
+                    painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, label_map.get(b_name, b_name.upper()))
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração

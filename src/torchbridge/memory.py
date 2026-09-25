@@ -49,6 +49,7 @@ GAMEPLAY_MENUS: dict[str, tuple[int, int]] = {
     "Pet":               (0x02D4, 0x34),
     "Vendedor (Loja)":   (0x02D8, 0x30),
     "Encantador":        (0x02DC, 0x38),
+    "Transmutador":      (0x02E0, 0x54),
     "Baú":               (0x02E4, 0x30),
     "Portal (Waypoint)": (0x02F4, 0x18),
     "Habilidades":       (0x030C, 0x1C),
@@ -393,8 +394,19 @@ class TorchlightMemoryReader:
         open_menus: list[str] = []
         for name, (ui_offset, open_offset) in GAMEPLAY_MENUS.items():
             p_menu = self.read_u32(p_ui + ui_offset)
-            if p_menu and self.read_u8(p_menu + open_offset) == 1:
-                open_menus.append(name)
+            if not p_menu:
+                continue
+            if self.read_u8(p_menu + open_offset) == 1:
+                if name == "Encantador":
+                    # Distingue Sockets (Gron / Furl) de Encantador (Goren) pelo modo em +0x90
+                    # Modos 0x19 (25), 0x1A (26), 0x1B (27) correspondem a Sockets
+                    mode = self.read_u32(p_menu + 0x90)
+                    if mode in (0x19, 0x1A, 0x1B):
+                        open_menus.append("Sockets")
+                    else:
+                        open_menus.append("Encantador")
+                else:
+                    open_menus.append(name)
 
         # Diálogos de NPCs, Missões e Telas de História
         dialog_type = ""
