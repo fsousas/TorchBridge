@@ -1392,8 +1392,8 @@ class BridgeEngine(threading.Thread):
         if left_pressed and not self._previous_left_pressed:
             cursor_x, cursor_y = self.injector.cursor_position()
             zone = click_zone(rect, cursor_x, cursor_y, self._hud_mask)
-            # Botão fechar do painel ESQUERDO: o jogo fechou só o lado esquerdo.
-            if zone == "close_left" and self._active_panels[0]:
+            # Botão fechar do painel ESQUERDO: o jogo fechou só o lado esquerdo (não se aplica a T/K/E que não têm aba).
+            if zone == "close_left" and self._active_panels[0] and self._active_panels[0] not in ("T", "K", "E"):
                 self._active_panels[0] = ""
                 self.shared.update(active_panels=list(self._active_panels))
             # Botão fechar do painel DIREITO: espelho do caso acima.

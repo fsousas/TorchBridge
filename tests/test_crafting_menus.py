@@ -142,31 +142,31 @@ class CraftingMenusTests(unittest.TestCase):
     def test_crafting_button_and_slot_coordinates(self):
         rect = Rect(left=0, top=0, width=1024, height=768)
 
-        # Transmutador: 2 botões e 4 slots
+        # Transmutador: 2 botões e 4 slots calibrados
         dec_x, dec_y = crafting_button_point(rect, "Transmutador", "decline")
-        self.assertEqual((dec_x, dec_y), (200, 284))
+        self.assertEqual((dec_x, dec_y), (240, 405))
 
         act_x, act_y = crafting_button_point(rect, "Transmutador", "transmute")
-        self.assertEqual((act_x, act_y), (200, 329))
+        self.assertEqual((act_x, act_y), (240, 450))
 
         s1_x, s1_y = crafting_slot_point(rect, "Transmutador", 0)
         s2_x, s2_y = crafting_slot_point(rect, "Transmutador", 1)
         s3_x, s3_y = crafting_slot_point(rect, "Transmutador", 2)
         s4_x, s4_y = crafting_slot_point(rect, "Transmutador", 3)
 
-        self.assertEqual((s1_x, s1_y), (177, 145))
-        self.assertEqual((s2_x, s2_y), (229, 145))
-        self.assertEqual((s3_x, s3_y), (177, 217))
-        self.assertEqual((s4_x, s4_y), (229, 217))
+        self.assertEqual((s1_x, s1_y), (216, 266))
+        self.assertEqual((s2_x, s2_y), (268, 266))
+        self.assertEqual((s3_x, s3_y), (216, 339))
+        self.assertEqual((s4_x, s4_y), (268, 339))
 
-        # Sockets / Encantador: 2 botões e 1 slot
+        # Sockets / Encantador: 2 botões e 1 slot calibrados
         s_dec_x, s_dec_y = crafting_button_point(rect, "Sockets", "decline")
         s_rec_x, s_rec_y = crafting_button_point(rect, "Sockets", "recover")
         s_slot_x, s_slot_y = crafting_slot_point(rect, "Sockets", 0)
 
-        self.assertEqual((s_dec_x, s_dec_y), (200, 274))
-        self.assertEqual((s_rec_x, s_rec_y), (200, 319))
-        self.assertEqual((s_slot_x, s_slot_y), (200, 188))
+        self.assertEqual((s_dec_x, s_dec_y), (240, 402))
+        self.assertEqual((s_rec_x, s_rec_y), (240, 447))
+        self.assertEqual((s_slot_x, s_slot_y), (240, 314))
 
 
 if __name__ == "__main__":

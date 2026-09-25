@@ -156,33 +156,39 @@ O script atualiza a cada 300ms no terminal com reconexão automática ao PID do 
 
 ## 7. Mapeamento das Telas de Crafting (Transmutador, Sockets e Encantador)
 
+As telas de crafting são placas de madeira suspensas por correntes no lado esquerdo da tela, e **não possuem a aba lateral de fechar** presente nos painéis normais (Pet e Atributos).
+
 ### A. Transmutador (Duran the Transmuter)
 - **Estrutura C++**: `CCombineMenu` em `CGameUI + 0x02E0`
 - **Flag de Aberto**: byte `+0x54 == 1`
 - **Painel Lateral**: Painel Esquerdo (`PANEL_SIDE['T'] = 0`)
 - **Slots de Itens (1024x768)**:
-  - 4 slots em grid 2x2: `(177, 145)`, `(229, 145)`, `(177, 217)`, `(229, 217)`
+  - 4 slots retangulares (48x68 px) em grid 2x2:
+    - Slot 1 (topo-esq): `(216, 266)`
+    - Slot 2 (topo-dir): `(268, 266)`
+    - Slot 3 (baixo-esq): `(216, 339)`
+    - Slot 4 (baixo-dir): `(268, 339)`
 - **Botões (1024x768)**:
-  - `decline` (Fechar): `(200, 284)`
-  - `transmute` (Transmutar): `(200, 329)`
+  - `decline` (Fechar): `(240, 405)` (128x24 px)
+  - `transmute` (Transmutar): `(240, 450)` (128x24 px)
 
 ### B. Sockets e Remoção de Gemas (Gron the Enchanter / Furl the Gem Inlayer)
 - **Estrutura C++**: `CEnchantMenu` em `CGameUI + 0x02DC`
 - **Flag de Aberto**: byte `+0x38 == 1`
 - **Modo**: `+0x90 in (0x19, 0x1A, 0x1B)`
 - **Painel Lateral**: Painel Esquerdo (`PANEL_SIDE['K'] = 0`)
-- **Slot de Item (1024x768)**: Slot único central em `(200, 188)`
+- **Slot de Item (1024x768)**: Slot único quadrado (96x96 px) em `(240, 314)`
 - **Botões (1024x768)**:
-  - `decline` (Fechar): `(200, 274)`
-  - `recover` (Recuperar): `(200, 319)`
+  - `decline` (Fechar): `(240, 402)` (128x24 px)
+  - `recover` (Recuperar): `(240, 447)` (128x24 px)
 
 ### C. Encantador de Itens (Goren the Enchanter)
 - **Estrutura C++**: `CEnchantMenu` em `CGameUI + 0x02DC`
 - **Flag de Aberto**: byte `+0x38 == 1`
 - **Modo**: `+0x90 == 0x15` (21) ou `0x16` (22)
 - **Painel Lateral**: Painel Esquerdo (`PANEL_SIDE['E'] = 0`)
-- **Slot de Item (1024x768)**: Slot único central em `(200, 188)`
+- **Slot de Item (1024x768)**: Slot único quadrado (96x96 px) em `(240, 314)`
 - **Botões (1024x768)**:
-  - `decline` (Fechar): `(200, 274)`
-  - `enchant` (Encantar): `(200, 319)`
+  - `decline` (Fechar): `(240, 402)` (128x24 px)
+  - `enchant` (Encantar): `(240, 447)` (128x24 px)
 

@@ -534,14 +534,19 @@ class GameOverlay(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(local(regions["panel_left"]))
 
-                painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
-                painter.setBrush(QColor(255, 159, 67, 55))
-                close_left_poly = local_polygon("left")
-                painter.drawPolygon(close_left_poly)
+                # As telas de Crafting (Transmutador, Sockets, Encantador) são placas suspensas sem aba lateral
+                left_panel = snapshot.active_panels[0] if (snapshot.active_panels and len(snapshot.active_panels) > 0) else ""
+                if left_panel not in ("T", "K", "E"):
+                    painter.setPen(QPen(QColor(255, 159, 67, 235), 2.5 * scale))
+                    painter.setBrush(QColor(255, 159, 67, 55))
+                    close_left_poly = local_polygon("left")
+                    painter.drawPolygon(close_left_poly)
+
+                    painter.setFont(self._font(max(7, round(9 * scale)), True))
+                    painter.setPen(QColor(255, 159, 67, 245))
+                    painter.drawText(close_left_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA ESQ")
 
                 painter.setFont(self._font(max(7, round(9 * scale)), True))
-                painter.setPen(QColor(255, 159, 67, 245))
-                painter.drawText(close_left_poly.boundingRect().adjusted(0, -26 * scale, 0, -6 * scale), Qt.AlignmentFlag.AlignCenter, "FECHA ESQ")
                 painter.setPen(QColor(111, 210, 235, 200))
                 painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
 
@@ -674,8 +679,13 @@ class GameOverlay(QWidget):
             if crafting_menu:
                 # Desenha slots de itens
                 slots = CRAFTING_SLOTS.get(crafting_menu, [])
-                slot_w = 44 * scale * (rect.height / 768.0)
-                slot_h = 44 * scale * (rect.height / 768.0)
+                if crafting_menu == "Transmutador":
+                    slot_w = 48 * scale * (rect.height / 768.0)
+                    slot_h = 68 * scale * (rect.height / 768.0)
+                else:
+                    slot_w = 96 * scale * (rect.height / 768.0)
+                    slot_h = 96 * scale * (rect.height / 768.0)
+
                 for s_idx in range(len(slots)):
                     sx, sy = crafting_slot_point(rect, crafting_menu, s_idx)
                     lx = sx - rect.left - slot_w / 2
@@ -690,8 +700,8 @@ class GameOverlay(QWidget):
 
                 # Desenha botões de ação (Decline, Transmute / Recover / Enchant)
                 buttons = CRAFTING_BUTTONS.get(crafting_menu, {})
-                btn_w = 110 * scale * (rect.height / 768.0)
-                btn_h = 28 * scale * (rect.height / 768.0)
+                btn_w = 128 * scale * (rect.height / 768.0)
+                btn_h = 24 * scale * (rect.height / 768.0)
                 for b_name in buttons:
                     if b_name == "accept":
                         continue  # accept é a mesma posição do botão principal

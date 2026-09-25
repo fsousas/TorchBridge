@@ -681,22 +681,22 @@ def dialog_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
 
 
 # Coordenadas base dos botões e slots de interfaces de crafting (painel esquerdo, base 1024x768)
-# Extraídas diretamente dos arquivos de layout combinemenu.layout e enchantmenu.layout
+# Calibradas e validadas pixel a pixel a partir dos elementos visuais reais in-game
 CRAFTING_BUTTONS: dict[str, dict[str, tuple[float, float]]] = {
     "Transmutador": {
-        "decline": (200.0, 284.0),
-        "transmute": (200.0, 329.0),
-        "accept": (200.0, 329.0),
+        "decline": (240.0, 405.0),
+        "transmute": (240.0, 450.0),
+        "accept": (240.0, 450.0),
     },
     "Sockets": {
-        "decline": (200.0, 274.0),
-        "recover": (200.0, 319.0),
-        "accept": (200.0, 319.0),
+        "decline": (240.0, 402.0),
+        "recover": (240.0, 447.0),
+        "accept": (240.0, 447.0),
     },
     "Encantador": {
-        "decline": (200.0, 274.0),
-        "enchant": (200.0, 319.0),
-        "accept": (200.0, 319.0),
+        "decline": (240.0, 402.0),
+        "enchant": (240.0, 447.0),
+        "accept": (240.0, 447.0),
     },
 }
 
@@ -704,18 +704,18 @@ CRAFTING_BUTTONS: dict[str, dict[str, tuple[float, float]]] = {
 CRAFTING_SLOTS: dict[str, list[tuple[float, float]]] = {
     # 4 slots: 2x2 grid (topo-esq, topo-dir, baixo-esq, baixo-dir)
     "Transmutador": [
-        (177.0, 145.0),
-        (229.0, 145.0),
-        (177.0, 217.0),
-        (229.0, 217.0),
+        (216.0, 266.0),
+        (268.0, 266.0),
+        (216.0, 339.0),
+        (268.0, 339.0),
     ],
-    # 1 slot central
+    # 1 slot central quadrado (inner 96x96)
     "Sockets": [
-        (200.0, 188.0),
+        (240.0, 314.0),
     ],
-    # 1 slot central
+    # 1 slot central quadrado (inner 96x96)
     "Encantador": [
-        (200.0, 188.0),
+        (240.0, 314.0),
     ],
 }
 
