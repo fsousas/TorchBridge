@@ -751,6 +751,32 @@ def crafting_slot_point(rect: Rect, menu_name: str, slot_index: int) -> tuple[in
     return (clamped_x, clamped_y)
 
 
+# Coordenadas dos botões do Menu de Pause (COptionsMenu / Options) em jogo (base 1024x768)
+# Calibradas e validadas a partir dos quadradinhos em assets/images/menus/in-game paused.png
+PAUSE_BUTTONS: tuple[str, ...] = ("settings", "exit_to_title", "return_to_game")
+
+PAUSE_BUTTON_COORDS: dict[str, tuple[float, float]] = {
+    "settings": (599.0, 233.0),
+    "exit_to_title": (599.0, 323.0),
+    "return_to_game": (599.0, 413.0),
+}
+
+
+def pause_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) central do quadradinho mapeado no Menu de Pause."""
+    if not rect.valid:
+        return (0, 0)
+    bx, by = PAUSE_BUTTON_COORDS.get(button_name.lower(), (599.0, 413.0))
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    # Offset horizontal em relacao ao centro da tela (512 em 1024x768)
+    x = center_x + (bx - 512.0) * scale
+    y = rect.top + by * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -787,6 +813,7 @@ class OverlaySnapshot:
     dialog_focus: str | None = None
     dialog_type: str = ""
     dialog_buttons: list[str] = field(default_factory=list)
+    pause_menu_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

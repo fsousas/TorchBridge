@@ -21,6 +21,7 @@ from .models import (
     click_zone,
     dialog_button_point,
     difficulty_menu_button_point,
+    pause_menu_button_point,
     load_hud_mask,
     panels_x_shift,
     pet_click_point,
@@ -148,6 +149,9 @@ class BridgeEngine(threading.Thread):
         self._dialog_initialized = False
         self._dialog_focus: str | None = None
         self._last_dialog_type = ""
+        # Navegação no Menu de Pause (COptionsMenu / Options) via D-pad
+        self._pause_menu_initialized = False
+        self._pause_focus = "return_to_game"
         self._last_state_id = -1
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
@@ -166,7 +170,9 @@ class BridgeEngine(threading.Thread):
         self._dialog_initialized = False
         self._dialog_focus = None
         self._last_dialog_type = ""
-        self.shared.update(radial_selection=None)
+        self._pause_menu_initialized = False
+        self._pause_focus = None
+        self.shared.update(radial_selection=None, pause_menu_focus=None)
 
     # Pede a parada; a thread encerra no próximo ciclo.
     def stop(self) -> None:
@@ -257,6 +263,7 @@ class BridgeEngine(threading.Thread):
             title_menu_focus=None,
             char_create_focus=None,
             difficulty_focus=None,
+            pause_menu_focus=None,
         )
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
@@ -667,6 +674,59 @@ class BridgeEngine(threading.Thread):
             self.injector.move(target_x, target_y)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(dialog_focus=new_focus)
+
+    # Navegação por D-pad no Menu de Pause (COptionsMenu / Options) em jogo
+    def _handle_pause_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação no Menu de Pause (COptionsMenu / Options) em jogo via D-pad."""
+        if not self._pause_menu_initialized:
+            self._pause_menu_initialized = True
+            # Foco padrão: 'return_to_game' (marcador amarelo do usuário)
+            self._pause_focus = "return_to_game"
+            target_x, target_y = pause_menu_button_point(rect, self._pause_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(pause_menu_focus=self._pause_focus)
+            return
+
+        current = self._pause_focus or "return_to_game"
+        new_focus = current
+
+        # Botão B: atalho direto para Retornar ao Jogo
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._pause_focus = "return_to_game"
+            target_x, target_y = pause_menu_button_point(rect, "return_to_game")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(pause_menu_focus="return_to_game")
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_up:
+            if current == "return_to_game":
+                new_focus = "exit_to_title"
+            elif current == "exit_to_title":
+                new_focus = "settings"
+        elif dpad_down:
+            if current == "settings":
+                new_focus = "exit_to_title"
+            elif current == "exit_to_title":
+                new_focus = "return_to_game"
+
+        if new_focus != current:
+            self._pause_focus = new_focus
+            target_x, target_y = pause_menu_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(pause_menu_focus=new_focus)
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
@@ -1317,6 +1377,18 @@ class BridgeEngine(threading.Thread):
                 self._last_dialog_type = ""
                 self._dialog_focus = None
                 self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[])
+
+            # Menu de Pause (COptionsMenu / Options) em jogo
+            is_paused = self._memory_state.is_in_game and (
+                "Pause" in self._memory_state.open_menus
+                or "paused" in [m.lower() for m in self._memory_state.open_menus]
+            )
+            if is_paused:
+                self._handle_pause_menu_navigation(state, rect, hub)
+            elif self._pause_menu_initialized:
+                self._pause_menu_initialized = False
+                self._pause_focus = None
+                self.shared.update(pause_menu_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -1332,6 +1404,10 @@ class BridgeEngine(threading.Thread):
                 self._last_dialog_type = ""
                 self._dialog_focus = None
                 self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[])
+            if self._pause_menu_initialized:
+                self._pause_menu_initialized = False
+                self._pause_focus = None
+                self.shared.update(pause_menu_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.

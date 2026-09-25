@@ -192,3 +192,27 @@ As telas de crafting são placas de madeira suspensas por correntes no lado esqu
   - `decline` (Fechar): `(240, 402)` (128x24 px)
   - `enchant` (Encantar): `(240, 447)` (128x24 px)
 
+---
+
+## 8. Mapeamento do Menu de Pause em Jogo (`COptionsMenu` / `Options`)
+
+### A. Detecção na Memória
+- **Estrutura C++**: `COptionsMenu` em `CGameUI + 0x02E8`
+- **Flag de Aberto**: byte `+0x18 == 1`
+- **Registro no Leitor**: `"Pause": (0x02E8, 0x18)` em `GAMEPLAY_MENUS`
+- **Critério de Ativação**: `state_id == 6` (Em Jogo) e `"Pause"` presente em `open_menus`.
+
+### B. Coordenadas Calibradas dos Marcadores (Base 1024x768)
+Extraídas diretamente dos marcadores inseridos em `assets/images/menus/in-game paused.png`:
+- **Default (Amarelo) - Retornar ao Jogo**:
+  - `return_to_game`: `(599, 413)`
+  - Posição inicial do cursor ao abrir o menu de pause
+- **Possibilidades (Verde)**:
+  - `settings` (Opções): `(599, 233)`
+  - `exit_to_title` (Sair para o Menu Principal): `(599, 323)`
+
+### C. Navegação via Controle
+- **D-pad Cima / Baixo**: Alterna ciclicamente entre `settings` $\leftrightarrow$ `exit_to_title` $\leftrightarrow$ `return_to_game` com feedback tátil (rumble).
+- **Botão B**: Atalho direto para focar e clicar em `return_to_game`, fechando o menu e retornando à jogatina.
+- **Modo Calibração (Overlay)**: Exibe os 3 quadradinhos (17x17 px), amarelo no foco ativo e verde nas possibilidades.
+

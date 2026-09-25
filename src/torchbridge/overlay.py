@@ -36,6 +36,8 @@ from .models import (
     pet_actions_target_rect,
     pet_click_point,
     title_menu_button_point,
+    PAUSE_BUTTONS,
+    pause_menu_button_point,
 )
 from .win32 import make_overlay_clickthrough
 
@@ -720,6 +722,28 @@ class GameOverlay(QWidget):
                         "enchant": "ENCANTAR",
                     }
                     painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, label_map.get(b_name, b_name.upper()))
+
+            # 8. Alvos do Menu de Pause (COptionsMenu / Options) em modo calibração
+            # Segue o padrão de assets/images/menus/in-game paused.png:
+            # Amarelo para o foco ativo (default: return_to_game) e verde para as possibilidades.
+            is_paused = (
+                "Pause" in (snapshot.memory_open_menus or [])
+                or any(m.lower() in ("pause", "paused") for m in (snapshot.memory_open_menus or []))
+            )
+            if is_paused:
+                box_size = 17.0 * scale * (rect.height / 768.0)
+                for btn_name in PAUSE_BUTTONS:
+                    bx, by = pause_menu_button_point(rect, btn_name)
+                    lx = bx - rect.left - box_size / 2.0
+                    ly = by - rect.top - box_size / 2.0
+                    is_focus = (snapshot.pause_menu_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 160))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 90))
+                    painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3.0 * scale, 3.0 * scale)
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração

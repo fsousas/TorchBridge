@@ -51,6 +51,7 @@ GAMEPLAY_MENUS: dict[str, tuple[int, int]] = {
     "Encantador":        (0x02DC, 0x38),
     "Transmutador":      (0x02E0, 0x54),
     "Baú":               (0x02E4, 0x30),
+    "Pause":             (0x02E8, 0x18),
     "Portal (Waypoint)": (0x02F4, 0x18),
     "Habilidades":       (0x030C, 0x1C),
     "Diário (Journal)":  (0x0310, 0x1C),
