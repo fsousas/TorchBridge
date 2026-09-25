@@ -116,15 +116,15 @@ class SettingsTests(unittest.TestCase):
         """Valida as coordenadas das opções nos 3 menus dropdown."""
         rect = Rect(left=0, top=0, width=1024, height=768)
 
-        # Shadows: 6 opções (Opção 0 amarela em 789, 293)
-        self.assertEqual(settings_dropdown_option_point(rect, "shadows", 0), (789, 293))
-        self.assertEqual(settings_dropdown_option_point(rect, "shadows", 1), (789, 310))
-        self.assertEqual(settings_dropdown_option_point(rect, "shadows", 5), (789, 380))
+        # Shadows: 6 opções (Opção 0 amarela em 780, 293)
+        self.assertEqual(settings_dropdown_option_point(rect, "shadows", 0), (780, 293))
+        self.assertEqual(settings_dropdown_option_point(rect, "shadows", 1), (780, 310))
+        self.assertEqual(settings_dropdown_option_point(rect, "shadows", 5), (780, 380))
 
-        # Resolution: 18 opções (Opção 0 amarela em 385, 296)
-        self.assertEqual(settings_dropdown_option_point(rect, "resolution", 0), (385, 296))
-        self.assertEqual(settings_dropdown_option_point(rect, "resolution", 1), (385, 313))
-        self.assertEqual(settings_dropdown_option_point(rect, "resolution", 17), (385, 586))
+        # Resolution: 18 opções (Opção 0 amarela em 385, 293)
+        self.assertEqual(settings_dropdown_option_point(rect, "resolution", 0), (385, 293))
+        self.assertEqual(settings_dropdown_option_point(rect, "resolution", 1), (385, 310))
+        self.assertEqual(settings_dropdown_option_point(rect, "resolution", 17), (385, 574))
 
         # Particle Detail: 3 opções (Opção 0 amarela em 785, 396)
         self.assertEqual(settings_dropdown_option_point(rect, "particle_detail", 0), (785, 396))
@@ -382,7 +382,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(engine._settings_dropdown, "shadows")
         self.assertEqual(engine._settings_dropdown_idx, 0)
         self.assertEqual(shared.get().settings_dropdown, "shadows")
-        self.assertEqual(injector.cursor, (789, 293))  # Opção 0 amarela
+        self.assertEqual(injector.cursor, (780, 293))  # Opção 0 amarela
         self.assertIn(("mouse", "left", True), injector.events)
         self.assertIn(("mouse", "left", False), injector.events)
 
@@ -393,7 +393,7 @@ class SettingsTests(unittest.TestCase):
         engine._process_active(hub, dpad_d, rect, cfg, 0.2, 0.05)
 
         self.assertEqual(engine._settings_dropdown_idx, 1)
-        self.assertEqual(injector.cursor, (789, 310))  # Opção 1
+        self.assertEqual(injector.cursor, (780, 310))  # Opção 1
 
         # 4. Pressiona A na opção 1 -> Clica na opção e volta o cursor pro botão rosa
         engine._previous = empty

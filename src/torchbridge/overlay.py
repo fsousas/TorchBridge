@@ -926,11 +926,13 @@ class GameOverlay(QWidget):
                     painter.setBrush(QColor(0xB2, 0x00, 0x7C, 140))
                     painter.drawRoundedRect(QRectF(olx, oly, box_size, box_size), 3 * scale, 3 * scale)
 
-                    # 2. Opções da lista
+                    # 2. Opções da lista (no resolution: 18px altura e 4px gap na ref 1280x1024 -> h=13.5 na base 768p)
+                    opt_box_w = box_size
+                    opt_box_h = 13.5 * scale * (rect.height / 768.0) if drop_name == "resolution" else box_size
                     for idx in range(len(drop_info["options"])):
                         opt_x, opt_y = settings_dropdown_option_point(rect, drop_name, idx)
-                        opt_lx = opt_x - rect.left - box_size / 2.0
-                        opt_ly = opt_y - rect.top - box_size / 2.0
+                        opt_lx = opt_x - rect.left - opt_box_w / 2.0
+                        opt_ly = opt_y - rect.top - opt_box_h / 2.0
                         is_sel = (snapshot.settings_dropdown_idx == idx)
                         base_color = c_amarelo if idx == 0 else c_verde
                         if is_sel:
@@ -939,7 +941,7 @@ class GameOverlay(QWidget):
                         else:
                             painter.setPen(QPen(base_color, 1.5 * scale))
                             painter.setBrush(QColor(base_color.red(), base_color.green(), base_color.blue(), 100))
-                        painter.drawRoundedRect(QRectF(opt_lx, opt_ly, box_size, box_size), 3 * scale, 3 * scale)
+                        painter.drawRoundedRect(QRectF(opt_lx, opt_ly, opt_box_w, opt_box_h), 3 * scale, 3 * scale)
             else:
                 # Tela principal de configurações
                 # 1. Linhas ciano dos sliders
