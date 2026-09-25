@@ -97,3 +97,60 @@ Para monitorar continuamente:
 python scripts/test_memory_reader.py
 ```
 O script atualiza a cada 300ms no terminal com reconexão automática ao PID do jogo, detectando menus da tela inicial, modais/overlays, telas de carregamento e todos os menus de gameplay.
+
+---
+
+## 6. Mapeamento do Sistema de Diálogos e Telas de História
+
+### A. Telas de História / Cinemáticas (`CCinematicMenu`)
+- **Ponteiro em CGameUI**: `p_ui + 0x0300`
+- **Flag de Aberto**: byte `+0x18 == 1`
+- **Botão Skip / Continue**: ponteiro em `+0x68`
+  - Coordenadas de clique: $X = \text{center\_x} + \text{height} \times 0.487$, $Y = \text{top} + \text{height} \times 0.948$
+
+### B. Sistema de Diálogos de NPCs e Missões (`CQuestDialogMenu` / `CDialogMenu`)
+- **Ponteiros em CGameUI**:
+  - `p_ui + 0x02FC`: `CQuestDialogMenu` (Diálogos de história, missões e conversas de NPCs)
+  - `p_ui + 0x02F8`: `CDialogMenu` (Diálogos simples genéricos de cidade)
+- **Flag de Aberto**: byte `+0x18 == 1`
+- **Ponteiros dos Botões na Estrutura C++**:
+  - `+0x6C`: Botão **Ok** (`.?AVPushButton@CEGUI@@`)
+  - `+0x70`: Botão **Accept** (`.?AVPushButton@CEGUI@@`)
+  - `+0x74`: Botão **Decline** (`.?AVPushButton@CEGUI@@`)
+- **Flag de Visibilidade dos Botões**: No objeto `CEGUI::Window`, o byte `+0x1A0` é `d_visible` (`1` = visível, `0` = oculto).
+- **Enum Nativo de Tipo de Diálogo (`CQuestDialog + 0x5C`)**:
+  - `p_ui + 0x02FC` (`CQuestDialogMenu`) -> `+0x98` -> `CQuestDialog*` (`p_qdlg`)
+  - O campo **`p_qdlg + 0x5C`** armazena o Enum nativo do motor:
+    - `1`: **Missão para Aceitar** (`INTRO` - botões Accept + Decline)
+    - `2`: **Missão em Andamento** (`RETURN` - botão Ok de lembrete com recompensas na lateral)
+    - `3`: **Missão Concluída** (`COMPLETE` - botão Ok com entrega de recompensas)
+    - `4`: **Diálogo Simples** (`PASSIVE` / Conversa - botão Ok sem missões ativas)
+- **Identificação dos Tipos de Diálogo**:
+  - **1 - Diálogo Simples (Conversa de NPC)**:
+    - Enum `p_qdlg + 0x5C == 4` (ou quest passiva / sem recompensas)
+    - `ok_visible == 1`, `accept_visible == 0`, `decline_visible == 0`
+    - Botão único **Ok** centralizado em $X = \text{center\_x}$, $Y = \text{top} + \text{height} \times 0.745$.
+  - **2 - Missão para Aceitar (Validado com Trill-Bot 4000)**:
+    - Enum `p_qdlg + 0x5C == 1`
+    - `accept_visible == 1` e `decline_visible == 1`, `ok_visible == 0`
+    - Botões duplos lado a lado em $Y = \text{top} + \text{height} \times 0.745$:
+      - **Accept**: $X = \text{center\_x} - 99 \times (\text{height} / 768)$ (lado esquerdo)
+      - **Decline**: $X = \text{center\_x} + 99 \times (\text{height} / 768)$ (lado direito)
+    - Navegação via D-pad: D-pad Esquerda seleciona `Accept`, D-pad Direita seleciona `Decline`.
+  - **3 - Missão em Andamento (Validado com Trill-Bot 4000)**:
+    - Enum `p_qdlg + 0x5C == 2` (branch de retorno / lembrete)
+    - `ok_visible == 1`, `accept_visible == 0`, `decline_visible == 0`
+    - Botão único **Ok** centralizado em $X = \text{center\_x}$, $Y = \text{top} + \text{height} \times 0.745$.
+  - **4 - Missão Concluída (Validado com Vasman / Mago)**:
+    - Enum `p_qdlg + 0x5C == 3` (branch `COMPLETE` do arquivo `.DAT`)
+    - Identificado quest `VASMAN_QUEST1` ("The Gleaming Ember", branch `OLDMANGREET`)
+    - `ok_visible == 1`, `accept_visible == 0`, `decline_visible == 0`
+    - Botão único **Ok** centralizado em $X = \text{center\_x}$, $Y = \text{top} + \text{height} \times 0.745$.
+  - **5 - Missão Principal (Validado na Introdução e Syl)**:
+    - Configurada no arquivo `.DAT` com `FORCEACCEPT: True` (Missões de história não podem ser recusadas pelo jogador)
+    - `accept_visible == 1` e `decline_visible == 0` (o botão Decline permanece oculto/desativado)
+    - Botão **Accept** ativo em $X = \text{center\_x} - 99 \times (\text{height} / 768)$, $Y = \text{top} + \text{height} \times 0.745$.
+
+
+
+

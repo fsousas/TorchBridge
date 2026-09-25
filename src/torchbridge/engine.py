@@ -19,6 +19,7 @@ from .models import (
     both_panels_open,
     char_create_button_point,
     click_zone,
+    dialog_button_point,
     difficulty_menu_button_point,
     load_hud_mask,
     panels_x_shift,
@@ -143,6 +144,10 @@ class BridgeEngine(threading.Thread):
         # Navegação na Seleção de Dificuldade (state_id == 2) via D-pad
         self._difficulty_initialized = False
         self._difficulty_focus = "hardcore"
+        # Navegação em Diálogos e Telas de História via D-pad
+        self._dialog_initialized = False
+        self._dialog_focus: str | None = None
+        self._last_dialog_type = ""
         self._last_state_id = -1
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
@@ -158,6 +163,9 @@ class BridgeEngine(threading.Thread):
         self._reset_active_panels()
         self._radial_selection = None
         self._radial_dismissed = False
+        self._dialog_initialized = False
+        self._dialog_focus = None
+        self._last_dialog_type = ""
         self.shared.update(radial_selection=None)
 
     # Pede a parada; a thread encerra no próximo ciclo.
@@ -598,6 +606,67 @@ class BridgeEngine(threading.Thread):
             self.injector.move(target_x, target_y)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(difficulty_focus=new_focus)
+
+    # Navegação por D-pad em Diálogos de NPCs, Missões e Telas de História
+    def _handle_dialog_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação nos botões de diálogos (Ok, Accept, Decline, Continue) via D-pad."""
+        dtype = self._memory_state.dialog_type
+        buttons = self._memory_state.dialog_buttons
+        if not dtype or not buttons:
+            return
+
+        # Inicialização ao entrar no diálogo ou mudar de tipo
+        if not self._dialog_initialized or self._last_dialog_type != dtype:
+            self._dialog_initialized = True
+            self._last_dialog_type = dtype
+            # Default focus: primeiro botão da lista
+            self._dialog_focus = buttons[0]
+            target_x, target_y = dialog_button_point(rect, self._dialog_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(
+                dialog_focus=self._dialog_focus,
+                dialog_type=dtype,
+                dialog_buttons=list(buttons),
+            )
+            return
+
+        current = self._dialog_focus or buttons[0]
+        new_focus = current
+
+        # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Recusar / Decline se disponível
+        if "decline" in buttons:
+            if state.pressed("b") and not self._previous.pressed("b"):
+                self._dialog_focus = "decline"
+                target_x, target_y = dialog_button_point(rect, "decline")
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(dialog_focus="decline")
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+                return
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+
+        if dpad_right:
+            if "decline" in buttons and current == "accept":
+                new_focus = "decline"
+        elif dpad_left:
+            if "accept" in buttons and current == "decline":
+                new_focus = "accept"
+
+        if new_focus != current:
+            self._dialog_focus = new_focus
+            target_x, target_y = dialog_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(dialog_focus=new_focus)
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
@@ -1239,6 +1308,15 @@ class BridgeEngine(threading.Thread):
             elif self._difficulty_initialized:
                 self._difficulty_initialized = False
                 self.shared.update(difficulty_focus=None)
+
+            # Diálogos de NPCs, Missões e Telas de História
+            if self._memory_state.dialog_type:
+                self._handle_dialog_navigation(state, rect, hub)
+            elif self._dialog_initialized:
+                self._dialog_initialized = False
+                self._last_dialog_type = ""
+                self._dialog_focus = None
+                self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[])
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -1249,6 +1327,11 @@ class BridgeEngine(threading.Thread):
             if self._difficulty_initialized:
                 self._difficulty_initialized = False
                 self.shared.update(difficulty_focus=None)
+            if self._dialog_initialized:
+                self._dialog_initialized = False
+                self._last_dialog_type = ""
+                self._dialog_focus = None
+                self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[])
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -1440,6 +1523,9 @@ class BridgeEngine(threading.Thread):
                     memory_open_menus=list(self._memory_state.open_menus),
                     char_name_len=self._memory_state.char_name_len,
                     title_menu_focus=self._title_focus if (self._memory_state.is_connected and self._memory_state.state_id == 0) else None,
+                    dialog_focus=self._dialog_focus if (self._memory_state.is_connected and self._memory_state.dialog_type) else None,
+                    dialog_type=self._memory_state.dialog_type if self._memory_state.is_connected else "",
+                    dialog_buttons=list(self._memory_state.dialog_buttons) if self._memory_state.is_connected else [],
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.

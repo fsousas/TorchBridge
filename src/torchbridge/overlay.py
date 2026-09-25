@@ -22,6 +22,7 @@ from .models import (
     TITLE_BUTTONS,
     char_create_button_point,
     close_tab_vertices,
+    dialog_button_point,
     difficulty_menu_button_point,
     hud_asset_path,
     hud_target_rect,
@@ -636,6 +637,33 @@ class GameOverlay(QWidget):
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     "PET ACTIONS",
                 )
+
+            # 6. Alvos de Diálogo (Missões, Diálogo Simples, História) em modo calibração
+            if snapshot.dialog_type and snapshot.dialog_buttons:
+                btn_w = 124 * scale * (rect.height / 768.0)
+                btn_h = 24 * scale * (rect.height / 768.0)
+                for btn_name in snapshot.dialog_buttons:
+                    bx, by = dialog_button_point(rect, btn_name)
+                    lx = bx - rect.left - btn_w / 2
+                    ly = by - rect.top - btn_h / 2
+                    is_focus = (snapshot.dialog_focus == btn_name.lower())
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 110))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 75))
+                    painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+                    painter.setFont(self._font(max(7, round(8 * scale)), True))
+                    painter.setPen(QColor(255, 255, 255, 240))
+                    label = btn_name.upper()
+                    if label == "ACCEPT":
+                        label = "ACEITAR"
+                    elif label == "DECLINE":
+                        label = "RECUSAR"
+                    elif label in ("SKIP", "CONTINUE"):
+                        label = "CONTINUAR"
+                    painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, label)
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import logging
 import os
 from pathlib import Path
+import re
 import struct
 import time
 
@@ -50,14 +51,21 @@ GAMEPLAY_MENUS: dict[str, tuple[int, int]] = {
     "Encantador":        (0x02DC, 0x38),
     "Baú":               (0x02E4, 0x30),
     "Portal (Waypoint)": (0x02F4, 0x18),
-    "Diálogo NPC":       (0x02F8, 0x18),
-    "Diálogo Missão":    (0x02FC, 0x18),
     "Habilidades":       (0x030C, 0x1C),
     "Diário (Journal)":  (0x0310, 0x1C),
     "Missões (Quests)":  (0x0314, 0xC8),
     "Pesca":             (0x031C, 0x18),
     "Morte / Respawn":   (0x02F0, 0x18),
 }
+
+
+def strip_torchlight_formatting(text: str) -> str:
+    """Remove tags de formatação de cores e sublinhado nativas do Torchlight (ex: |cFFFFBA00 e |u)."""
+    if not text:
+        return ""
+    clean = re.sub(r"\|c[0-9A-Fa-f]{8}", "", text)
+    clean = clean.replace("|u", "").replace("|U", "")
+    return clean.strip()
 
 
 def get_save_character_count() -> int:
@@ -139,6 +147,10 @@ class GameMemoryState:
     sound_volume: float = 1.0
     music_volume: float = 1.0
     char_name_len: int = 0
+    dialog_type: str = ""  # "historia", "simples", "missao_aceitar", "missao_andamento", "missao_concluida", "missao_principal"
+    dialog_buttons: list[str] = field(default_factory=list)  # ["ok"], ["accept", "decline"], ["accept"], ["continue"]
+    dialog_quest_name: str = ""
+    dialog_quest_title: str = ""
 
 
 class TorchlightMemoryReader:
@@ -219,6 +231,20 @@ class TorchlightMemoryReader:
             if read.value == 1:
                 return buf.raw[0]
         return None
+
+    def read_wstring(self, address: int, max_chars: int = 64) -> str:
+        """Lê uma string UTF-16LE da memória do jogo até o caractere nulo."""
+        if not self._handle or not address:
+            return ""
+        buf = ctypes.create_string_buffer(max_chars * 2)
+        read = ctypes.c_size_t()
+        if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, max_chars * 2, ctypes.byref(read)):
+            try:
+                raw = buf.raw[:read.value]
+                return raw.decode("utf-16le", errors="ignore").split("\x00")[0]
+            except Exception:
+                pass
+        return ""
 
     def update(self) -> GameMemoryState:
         """Executa um ciclo de leitura rápida (microssegundos) e retorna o estado atual."""
@@ -370,6 +396,72 @@ class TorchlightMemoryReader:
             if p_menu and self.read_u8(p_menu + open_offset) == 1:
                 open_menus.append(name)
 
+        # Diálogos de NPCs, Missões e Telas de História
+        dialog_type = ""
+        dialog_buttons: list[str] = []
+        dialog_quest_name = ""
+        dialog_quest_title = ""
+
+        # 1. Tela de História / Cinemática (CCinematicMenu em +0x0300)
+        p_cine = self.read_u32(p_ui + 0x0300)
+        if p_cine and self.read_u8(p_cine + 0x18) == 1:
+            dialog_type = "historia"
+            dialog_buttons = ["continue"]
+            open_menus.append("Tela de História")
+
+        # 2. Diálogos de Missões e NPCs (CQuestDialogMenu em +0x02FC ou CDialogMenu em +0x02F8)
+        p_qdialog = self.read_u32(p_ui + 0x02FC)
+        p_dialog = self.read_u32(p_ui + 0x02F8)
+        p_active_dlg = None
+        if p_qdialog and self.read_u8(p_qdialog + 0x18) == 1:
+            p_active_dlg = p_qdialog
+        elif p_dialog and self.read_u8(p_dialog + 0x18) == 1:
+            p_active_dlg = p_dialog
+
+        if p_active_dlg:
+            btn_ok = self.read_u32(p_active_dlg + 0x6C)
+            btn_accept = self.read_u32(p_active_dlg + 0x70)
+            btn_decline = self.read_u32(p_active_dlg + 0x74)
+
+            ok_vis = (self.read_u8(btn_ok + 0x1A0) == 1) if btn_ok else False
+            acc_vis = (self.read_u8(btn_accept + 0x1A0) == 1) if btn_accept else False
+            dec_vis = (self.read_u8(btn_decline + 0x1A0) == 1) if btn_decline else False
+
+            p_qdlg = self.read_u32(p_active_dlg + 0x98)
+            enum_type = self.read_u32(p_qdlg + 0x5C) if p_qdlg else None
+            p_quest = self.read_u32(p_qdlg + 0x8) if p_qdlg else None
+            if p_quest:
+                dialog_quest_name = self.read_wstring(self.read_u32(p_quest + 0x98))
+                raw_title = self.read_wstring(self.read_u32(p_quest + 0xB4))
+                dialog_quest_title = strip_torchlight_formatting(raw_title)
+
+            # Classificação dos tipos de diálogo conforme Enum nativo e botões
+            if acc_vis and dec_vis:
+                dialog_type = "missao_aceitar"
+                dialog_buttons = ["accept", "decline"]
+                open_menus.append("Missão (Aceitar)")
+            elif acc_vis and not dec_vis:
+                dialog_type = "missao_principal"
+                dialog_buttons = ["accept"]
+                open_menus.append("Missão Principal")
+            elif ok_vis:
+                if enum_type == 3:
+                    dialog_type = "missao_concluida"
+                    dialog_buttons = ["ok"]
+                    open_menus.append("Missão (Concluída)")
+                elif enum_type == 2:
+                    dialog_type = "missao_andamento"
+                    dialog_buttons = ["ok"]
+                    open_menus.append("Missão (Em Andamento)")
+                else:
+                    dialog_type = "simples"
+                    dialog_buttons = ["ok"]
+                    open_menus.append("Diálogo Simples")
+            else:
+                dialog_type = "simples"
+                dialog_buttons = ["ok"]
+                open_menus.append("Diálogo")
+
         # Pause em jogo
         p_options = self.read_u32(p_ui + 0x02E8)
         if p_options and self.read_u8(p_options + 0x18) == 1:
@@ -388,4 +480,8 @@ class TorchlightMemoryReader:
             save_count=self._cached_save_count,
             sound_volume=sound_vol,
             music_volume=music_vol,
+            dialog_type=dialog_type,
+            dialog_buttons=dialog_buttons,
+            dialog_quest_name=dialog_quest_name,
+            dialog_quest_title=dialog_quest_title,
         )

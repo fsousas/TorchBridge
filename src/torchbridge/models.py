@@ -637,6 +637,43 @@ def difficulty_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int
     return (clamped_x, clamped_y)
 
 
+# Coordenadas calibradas para Botões de Diálogos e Telas de História
+DIALOG_BUTTON_Y_FRACTION = 0.745          # Linha vertical dos botões Ok, Accept, Decline (572/768)
+DIALOG_ACCEPT_X_OFFSET_FRACTION = -99.0 / 768.0  # -0.1289 (99px à esquerda do centro em 768p)
+DIALOG_DECLINE_X_OFFSET_FRACTION = 99.0 / 768.0   # +0.1289 (99px à direita do centro em 768p)
+DIALOG_OK_X_OFFSET_FRACTION = 0.0                 # Centralizado no X
+
+CINEMATIC_SKIP_X_OFFSET_FRACTION = 0.487          # Botão Skip/Continue na tela de história
+CINEMATIC_SKIP_Y_FRACTION = 0.948
+
+
+def dialog_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão em diálogos de NPCs, missões e tela de história."""
+    if not rect.valid:
+        return (0, 0)
+    center_x = rect.left + rect.width * 0.5
+    btn = button_name.lower()
+    if btn == "ok":
+        x = center_x
+        y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
+    elif btn == "accept":
+        x = center_x + rect.height * DIALOG_ACCEPT_X_OFFSET_FRACTION
+        y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
+    elif btn == "decline":
+        x = center_x + rect.height * DIALOG_DECLINE_X_OFFSET_FRACTION
+        y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
+    elif btn in ("skip", "continue"):
+        x = center_x + rect.height * CINEMATIC_SKIP_X_OFFSET_FRACTION
+        y = rect.top + rect.height * CINEMATIC_SKIP_Y_FRACTION
+    else:
+        x = center_x
+        y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
+
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -670,6 +707,9 @@ class OverlaySnapshot:
     title_menu_focus: str | None = None
     char_create_focus: str | None = None
     difficulty_focus: str | None = None
+    dialog_focus: str | None = None
+    dialog_type: str = ""
+    dialog_buttons: list[str] = field(default_factory=list)
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).
