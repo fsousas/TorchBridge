@@ -101,6 +101,24 @@ def main() -> int:
     enabled_action.setChecked(True)
     enabled_action.triggered.connect(engine.set_enabled)
 
+    # Checkbox 'Modo de calibração': liga/desliga o desenho das marcações de calibração no overlay.
+    calib_action = menu.addAction("Modo de calibração")
+    calib_action.setCheckable(True)
+    calib_action.setChecked(config.get()["overlay"].get("show_calibration", False))
+
+    def toggle_calibration(checked: bool) -> None:
+        config.set_show_calibration(checked)
+        overlay.update()
+        shared.toast("Calibração ativada" if checked else "Calibração desativada")
+
+    calib_action.triggered.connect(toggle_calibration)
+
+    # Mantém o checkbox sincronizado caso o perfil seja alterado externamente.
+    def sync_menu_state() -> None:
+        calib_action.setChecked(config.get()["overlay"].get("show_calibration", False))
+
+    menu.aboutToShow.connect(sync_menu_state)
+
     open_profile_action = menu.addAction("Abrir perfil de controles")
 
     # Abre o perfil.json no editor padrão do Windows.
@@ -109,7 +127,14 @@ def main() -> int:
 
     open_profile_action.triggered.connect(open_profile)
     reload_action = menu.addAction("Recarregar perfil")
-    reload_action.triggered.connect(lambda: config.reload(force=True))
+
+    def reload_profile() -> None:
+        config.reload(force=True)
+        sync_menu_state()
+        overlay.update()
+        shared.toast("Perfil recarregado")
+
+    reload_action.triggered.connect(reload_profile)
     menu.addSeparator()
     exit_action = menu.addAction("Sair")
     # 'Sair' encerra o event loop → passa pelo cleanup.

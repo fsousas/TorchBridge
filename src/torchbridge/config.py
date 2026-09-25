@@ -300,3 +300,12 @@ class ConfigManager:
             data["raw_controller"] = mapping
             self._write(data)
         self.reload(force=True)
+
+    # Altera a exibição do modo de calibração no overlay e grava no perfil.
+    def set_show_calibration(self, enabled: bool) -> None:
+        with self._lock:
+            data = deepcopy(self._data)
+            data["overlay"]["show_calibration"] = bool(enabled)
+            self._write(data)
+        self.reload(force=True)
+

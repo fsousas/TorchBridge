@@ -51,6 +51,25 @@ class ConfigTests(unittest.TestCase):
             manager = ConfigManager(path)
             self.assertEqual(manager.get()["movement"]["movement_radius_percent"], 0.30)
 
+    # Testa alternância e persistência de show_calibration.
+    def test_set_show_calibration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "perfil.json"
+            manager = ConfigManager(path)
+            self.assertTrue(manager.get()["overlay"]["show_calibration"])
+            manager.set_show_calibration(False)
+            self.assertFalse(manager.get()["overlay"]["show_calibration"])
+            # Salvo no disco
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertFalse(saved["overlay"]["show_calibration"])
+            # Liga novamente
+            manager.set_show_calibration(True)
+            self.assertTrue(manager.get()["overlay"]["show_calibration"])
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertTrue(saved["overlay"]["show_calibration"])
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
