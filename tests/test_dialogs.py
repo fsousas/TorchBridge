@@ -29,20 +29,25 @@ class DialogFormattingAndPointsTests(unittest.TestCase):
         rect = Rect(left=0, top=0, width=1024, height=768)
         self.assertTrue(rect.valid)
 
-        # Ok button: exactly centered horizontally
+        # Ok button: 554, 573
         ok_x, ok_y = dialog_button_point(rect, "ok")
-        self.assertEqual(ok_x, 512)
-        self.assertEqual(ok_y, round(768 * DIALOG_BUTTON_Y_FRACTION))
+        self.assertEqual(ok_x, 554)
+        self.assertEqual(ok_y, 573)
 
-        # Accept button: center - 99 px
+        # Accept button: 461, 573
         acc_x, acc_y = dialog_button_point(rect, "accept")
-        self.assertEqual(acc_x, 512 - 99)
-        self.assertEqual(acc_y, ok_y)
+        self.assertEqual(acc_x, 461)
+        self.assertEqual(acc_y, 573)
 
-        # Decline button: center + 99 px
+        # Decline button: 658, 573
         dec_x, dec_y = dialog_button_point(rect, "decline")
-        self.assertEqual(dec_x, 512 + 99)
-        self.assertEqual(dec_y, ok_y)
+        self.assertEqual(dec_x, 658)
+        self.assertEqual(dec_y, 573)
+
+        # Reward Slot: 174, 506
+        rw_x, rw_y = dialog_button_point(rect, "reward_slot")
+        self.assertEqual(rw_x, 174)
+        self.assertEqual(rw_y, 506)
 
         # Continue / Skip button: bottom right
         cont_x, cont_y = dialog_button_point(rect, "continue")
@@ -61,16 +66,19 @@ class DialogMemoryClassificationTests(unittest.TestCase):
         self.assertEqual(state.dialog_buttons, [])
         self.assertEqual(state.dialog_quest_name, "")
         self.assertEqual(state.dialog_quest_title, "")
+        self.assertFalse(state.dialog_has_item_reward)
 
     def test_overlay_snapshot_includes_dialog_fields(self):
         snap = OverlaySnapshot(
             dialog_type="missao_aceitar",
             dialog_buttons=["accept", "decline"],
             dialog_focus="accept",
+            dialog_has_reward=True,
         )
         self.assertEqual(snap.dialog_type, "missao_aceitar")
         self.assertEqual(snap.dialog_buttons, ["accept", "decline"])
         self.assertEqual(snap.dialog_focus, "accept")
+        self.assertTrue(snap.dialog_has_reward)
 
 
 class DialogEngineNavigationTests(unittest.TestCase):
@@ -93,14 +101,15 @@ class DialogEngineNavigationTests(unittest.TestCase):
         self.hub = MagicMock()
         self.rect = Rect(left=0, top=0, width=1024, height=768)
 
-    def test_accept_decline_dpad_navigation(self):
-        # Configure memory state with quest offer
+    def test_accept_decline_dpad_navigation_without_reward(self):
+        # Configure memory state with quest offer without item reward
         self.engine._memory_state = GameMemoryState(
             is_connected=True,
             is_in_game=True,
             state_id=6,
             dialog_type="missao_aceitar",
             dialog_buttons=["accept", "decline"],
+            dialog_has_item_reward=False,
         )
 
         # 1st tick: initialization focuses 'accept'
@@ -120,6 +129,72 @@ class DialogEngineNavigationTests(unittest.TestCase):
         self.engine._previous = ControllerState(connected=True, buttons=frozenset())
         self.engine._handle_dialog_navigation(state_left, self.rect, self.hub)
         self.assertEqual(self.engine._dialog_focus, "accept")
+
+        # 4th tick: press dpad_left again -> without reward, stays on 'accept'
+        self.engine._handle_dialog_navigation(state_left, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "accept")
+
+    def test_accept_decline_dpad_navigation_with_reward(self):
+        # Configure memory state with quest offer WITH item reward
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            state_id=6,
+            dialog_type="missao_aceitar",
+            dialog_buttons=["accept", "decline"],
+            dialog_has_item_reward=True,
+        )
+
+        # 1st tick: initialization focuses 'accept'
+        state = ControllerState(connected=True)
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._handle_dialog_navigation(state, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "accept")
+
+        # 2nd tick: press dpad_left -> moves to 'reward_slot'
+        state_left = ControllerState(connected=True, buttons=frozenset(["dpad_left"]))
+        self.engine._previous = ControllerState(connected=True, buttons=frozenset())
+        self.engine._handle_dialog_navigation(state_left, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "reward_slot")
+
+        # 3rd tick: press dpad_right -> moves back to 'accept'
+        state_right = ControllerState(connected=True, buttons=frozenset(["dpad_right"]))
+        self.engine._previous = ControllerState(connected=True, buttons=frozenset())
+        self.engine._handle_dialog_navigation(state_right, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "accept")
+
+        # 4th tick: press dpad_right -> moves to 'decline'
+        self.engine._handle_dialog_navigation(state_right, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "decline")
+
+    def test_ok_dialog_navigation_with_reward(self):
+        # Configure memory state with in-progress quest WITH item reward
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            state_id=6,
+            dialog_type="missao_andamento",
+            dialog_buttons=["ok"],
+            dialog_has_item_reward=True,
+        )
+
+        # 1st tick: initialization focuses 'ok'
+        state = ControllerState(connected=True)
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._handle_dialog_navigation(state, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "ok")
+
+        # 2nd tick: press dpad_left -> moves to 'reward_slot'
+        state_left = ControllerState(connected=True, buttons=frozenset(["dpad_left"]))
+        self.engine._previous = ControllerState(connected=True, buttons=frozenset())
+        self.engine._handle_dialog_navigation(state_left, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "reward_slot")
+
+        # 3rd tick: press dpad_right -> moves back to 'ok'
+        state_right = ControllerState(connected=True, buttons=frozenset(["dpad_right"]))
+        self.engine._previous = ControllerState(connected=True, buttons=frozenset())
+        self.engine._handle_dialog_navigation(state_right, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "ok")
 
     def test_b_button_decline(self):
         # Configure memory state with quest offer
@@ -144,19 +219,26 @@ class DialogEngineNavigationTests(unittest.TestCase):
         self.engine.injector.mouse_button.assert_any_call("left", True)
         self.engine.injector.mouse_button.assert_any_call("left", False)
 
-    def test_single_ok_dialog_navigation(self):
-        # Configure memory state with in-progress or completed quest
+    def test_single_ok_dialog_without_reward(self):
+        # Configure memory state with in-progress or completed quest without item reward
         self.engine._memory_state = GameMemoryState(
             is_connected=True,
             is_in_game=True,
             state_id=6,
             dialog_type="missao_concluida",
             dialog_buttons=["ok"],
+            dialog_has_item_reward=False,
         )
 
         state = ControllerState(connected=True)
         self.engine._previous = ControllerState(connected=True)
         self.engine._handle_dialog_navigation(state, self.rect, self.hub)
+        self.assertEqual(self.engine._dialog_focus, "ok")
+
+        # dpad_left without reward stays on 'ok'
+        state_left = ControllerState(connected=True, buttons=frozenset(["dpad_left"]))
+        self.engine._previous = ControllerState(connected=True, buttons=frozenset())
+        self.engine._handle_dialog_navigation(state_left, self.rect, self.hub)
         self.assertEqual(self.engine._dialog_focus, "ok")
 
 

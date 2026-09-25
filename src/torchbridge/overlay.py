@@ -535,6 +535,7 @@ class GameOverlay(QWidget):
         # Telas que NÃO devem exibir HUD inferior nem Pet Actions:
         # - Configurações (Settings)
         # - Telas de Carregamento (Loading)
+        # - Diálogos e Missões (NPCs, Quests, História)
         is_settings = (
             "Configurações" in (snapshot.memory_open_menus or [])
             or any("configura" in m.lower() or "setting" in m.lower() for m in (snapshot.memory_open_menus or []))
@@ -543,6 +544,18 @@ class GameOverlay(QWidget):
         is_loading = (
             snapshot.memory_is_loading
             or (bool(state_desc) and "carregando" in state_desc.lower())
+        )
+        is_dialog = (
+            bool(snapshot.dialog_type)
+            or any(
+                "missão" in m.lower()
+                or "missao" in m.lower()
+                or "diálogo" in m.lower()
+                or "dialogo" in m.lower()
+                or "história" in m.lower()
+                or "historia" in m.lower()
+                for m in (snapshot.memory_open_menus or [])
+            )
         )
 
         is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading
@@ -553,8 +566,8 @@ class GameOverlay(QWidget):
             right_open = bool(snapshot.active_panels and len(snapshot.active_panels) > 1 and snapshot.active_panels[1])
             both_open = left_open and right_open
 
-            # 1. Painel Esquerdo e Aba de Fechar Esquerda (só visível com menu esquerdo aberto)
-            if left_open:
+            # 1. Painel Esquerdo e Aba de Fechar Esquerda (só visível com menu esquerdo aberto e fora de diálogos)
+            if not is_dialog and left_open:
                 painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(local(regions["panel_left"]))
@@ -575,8 +588,8 @@ class GameOverlay(QWidget):
                 painter.setPen(QColor(111, 210, 235, 200))
                 painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
 
-            # 2. Painel Direito e Aba de Fechar Direita (só visível com menu direito aberto)
-            if right_open:
+            # 2. Painel Direito e Aba de Fechar Direita (só visível com menu direito aberto e fora de diálogos)
+            if not is_dialog and right_open:
                 painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(local(regions["panel_right"]))
@@ -592,8 +605,8 @@ class GameOverlay(QWidget):
                 painter.setPen(QColor(111, 210, 235, 200))
                 painter.drawText(local(regions["panel_right"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
 
-            # 3. Zona Central: tracejado (clique nela fecha ambos somente quando os dois estiverem abertos)
-            if both_open:
+            # 3. Zona Central: tracejado (clique nela fecha ambos somente quando os dois estiverem abertos e fora de diálogos)
+            if not is_dialog and both_open:
                 painter.setPen(
                     QPen(QColor(120, 220, 150, 170), 1.2 * scale, Qt.PenStyle.DashLine)
                 )
@@ -604,8 +617,8 @@ class GameOverlay(QWidget):
                 painter.setPen(QColor(120, 220, 150, 200))
                 painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
 
-            # 4. HUD inferior (elemento fixo da interface in-game)
-            if self._hud_pixmap is not None:
+            # 4. HUD inferior (elemento fixo da interface in-game, oculto em diálogos/missões)
+            if not is_dialog and self._hud_pixmap is not None:
                 hl, ht, hw, hh = hud_target_rect(rect)
                 target = QRectF(hl - rect.left, ht - rect.top, hw, hh)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -630,8 +643,8 @@ class GameOverlay(QWidget):
                     "HUD (NÃO FECHA)",
                 )
 
-            # 5. Pet actions: visível somente quando o painel esquerdo NÃO estiver cobrindo a HUD do pet
-            if not left_open and self._pet_actions_pixmap is not None:
+            # 5. Pet actions: visível somente quando o painel esquerdo NÃO estiver cobrindo a HUD do pet e fora de diálogos/missões
+            if not is_dialog and not left_open and self._pet_actions_pixmap is not None:
                 pl, pt, pw, ph = pet_actions_target_rect(rect)
                 pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -698,6 +711,24 @@ class GameOverlay(QWidget):
                     elif label in ("SKIP", "CONTINUE"):
                         label = "CONTINUAR"
                     painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, label)
+
+                # Slot de Recompensa de Item da Missão (se houver)
+                if snapshot.dialog_has_reward:
+                    rx, ry = dialog_button_point(rect, "reward_slot")
+                    slot_size = 40 * scale * (rect.height / 768.0)
+                    rlx = rx - rect.left - slot_size / 2
+                    rly = ry - rect.top - slot_size / 2
+                    is_reward_focus = (snapshot.dialog_focus == "reward_slot")
+                    if is_reward_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 110))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 75))
+                    painter.drawRoundedRect(QRectF(rlx, rly, slot_size, slot_size), 4 * scale, 4 * scale)
+                    painter.setFont(self._font(max(6, round(7 * scale)), True))
+                    painter.setPen(QColor(255, 255, 255, 240))
+                    painter.drawText(QRectF(rlx, rly, slot_size, slot_size), Qt.AlignmentFlag.AlignCenter, "ITEM")
 
             # 7. Alvos de Crafting (Transmutador, Sockets, Encantador) em modo calibração
             crafting_menu = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (snapshot.memory_open_menus or [])), None)

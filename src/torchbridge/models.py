@@ -643,24 +643,27 @@ def difficulty_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int
     return (clamped_x, clamped_y)
 
 
-# Coordenadas calibradas para Botões de Diálogos e Telas de História
-DIALOG_BUTTON_Y_FRACTION = 0.745          # Linha vertical dos botões Ok, Accept, Decline (572/768)
-DIALOG_ACCEPT_X_OFFSET_FRACTION = -99.0 / 768.0  # -0.1289 (99px à esquerda do centro em 768p)
-DIALOG_DECLINE_X_OFFSET_FRACTION = 99.0 / 768.0   # +0.1289 (99px à direita do centro em 768p)
-DIALOG_OK_X_OFFSET_FRACTION = 0.0                 # Centralizado no X
+# Coordenadas calibradas para Botões de Diálogos e Telas de História (base 1024x768)
+DIALOG_BUTTON_Y_FRACTION = 573.0 / 768.0          # Linha vertical dos botões Ok, Accept, Decline (573/768 = ~0.7461)
+DIALOG_ACCEPT_X_OFFSET_FRACTION = -51.0 / 768.0  # -0.0664 (461px - 512px = 51px à esquerda do centro em 768p)
+DIALOG_DECLINE_X_OFFSET_FRACTION = 146.0 / 768.0  # +0.1901 (658px - 512px = 146px à direita do centro em 768p)
+DIALOG_OK_X_OFFSET_FRACTION = 42.0 / 768.0       # +0.0547 (554px - 512px = 42px à direita do centro em 768p)
+
+DIALOG_REWARD_SLOT_X_OFFSET_FRACTION = -338.0 / 768.0  # -0.4401 (174px - 512px = 338px à esquerda do centro em 768p)
+DIALOG_REWARD_SLOT_Y_FRACTION = 506.0 / 768.0         # 0.6589 (506px em 768p)
 
 CINEMATIC_SKIP_X_OFFSET_FRACTION = 0.487          # Botão Skip/Continue na tela de história
 CINEMATIC_SKIP_Y_FRACTION = 0.948
 
 
 def dialog_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
-    """Calcula a coordenada (x, y) de um botão em diálogos de NPCs, missões e tela de história."""
+    """Calcula a coordenada (x, y) de um botão ou slot de recompensa em diálogos de NPCs, missões e tela de história."""
     if not rect.valid:
         return (0, 0)
     center_x = rect.left + rect.width * 0.5
     btn = button_name.lower()
     if btn == "ok":
-        x = center_x
+        x = center_x + rect.height * DIALOG_OK_X_OFFSET_FRACTION
         y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
     elif btn == "accept":
         x = center_x + rect.height * DIALOG_ACCEPT_X_OFFSET_FRACTION
@@ -668,11 +671,14 @@ def dialog_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     elif btn == "decline":
         x = center_x + rect.height * DIALOG_DECLINE_X_OFFSET_FRACTION
         y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
+    elif btn in ("reward", "reward_slot", "slot"):
+        x = center_x + rect.height * DIALOG_REWARD_SLOT_X_OFFSET_FRACTION
+        y = rect.top + rect.height * DIALOG_REWARD_SLOT_Y_FRACTION
     elif btn in ("skip", "continue"):
         x = center_x + rect.height * CINEMATIC_SKIP_X_OFFSET_FRACTION
         y = rect.top + rect.height * CINEMATIC_SKIP_Y_FRACTION
     else:
-        x = center_x
+        x = center_x + rect.height * DIALOG_OK_X_OFFSET_FRACTION
         y = rect.top + rect.height * DIALOG_BUTTON_Y_FRACTION
 
     clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
@@ -1081,6 +1087,7 @@ class OverlaySnapshot:
     dialog_focus: str | None = None
     dialog_type: str = ""
     dialog_buttons: list[str] = field(default_factory=list)
+    dialog_has_reward: bool = False
     pause_menu_focus: str | None = None
     load_char_focus: str | None = None
     load_char_delete_open: bool = False

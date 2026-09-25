@@ -677,9 +677,10 @@ class BridgeEngine(threading.Thread):
         rect: Rect,
         hub: ControllerHub,
     ) -> None:
-        """Gerencia a navegação nos botões de diálogos (Ok, Accept, Decline, Continue) via D-pad."""
+        """Gerencia a navegação nos botões de diálogos (Ok, Accept, Decline, Continue) e slot de recompensa via D-pad."""
         dtype = self._memory_state.dialog_type
         buttons = self._memory_state.dialog_buttons
+        has_reward = self._memory_state.dialog_has_item_reward
         if not dtype or not buttons:
             return
 
@@ -687,7 +688,7 @@ class BridgeEngine(threading.Thread):
         if not self._dialog_initialized or self._last_dialog_type != dtype:
             self._dialog_initialized = True
             self._last_dialog_type = dtype
-            # Default focus: primeiro botão da lista
+            # Default focus: primeiro botão da lista (Accept em missao_aceitar, Ok em andamento/concluida)
             self._dialog_focus = buttons[0]
             target_x, target_y = dialog_button_point(rect, self._dialog_focus)
             self.injector.move(target_x, target_y)
@@ -695,6 +696,7 @@ class BridgeEngine(threading.Thread):
                 dialog_focus=self._dialog_focus,
                 dialog_type=dtype,
                 dialog_buttons=list(buttons),
+                dialog_has_reward=has_reward,
             )
             return
 
@@ -718,11 +720,16 @@ class BridgeEngine(threading.Thread):
         dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
 
         if dpad_right:
-            if "decline" in buttons and current == "accept":
+            if current == "reward_slot":
+                # Da recompensa para a direita: volta para o botão de ação (accept ou ok)
+                new_focus = "accept" if "accept" in buttons else "ok"
+            elif "decline" in buttons and current == "accept":
                 new_focus = "decline"
         elif dpad_left:
-            if "accept" in buttons and current == "decline":
+            if current == "decline" and "accept" in buttons:
                 new_focus = "accept"
+            elif current in ("accept", "ok") and has_reward:
+                new_focus = "reward_slot"
 
         if new_focus != current:
             self._dialog_focus = new_focus
@@ -2005,7 +2012,7 @@ class BridgeEngine(threading.Thread):
                 self._dialog_initialized = False
                 self._last_dialog_type = ""
                 self._dialog_focus = None
-                self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[])
+                self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[], dialog_has_reward=False)
 
             # Menu de Pause (COptionsMenu / Options) em jogo
             is_paused = self._memory_state.is_in_game and (

@@ -153,6 +153,7 @@ class GameMemoryState:
     dialog_buttons: list[str] = field(default_factory=list)  # ["ok"], ["accept", "decline"], ["accept"], ["continue"]
     dialog_quest_name: str = ""
     dialog_quest_title: str = ""
+    dialog_has_item_reward: bool = False
 
 
 class TorchlightMemoryReader:
@@ -414,6 +415,7 @@ class TorchlightMemoryReader:
         dialog_buttons: list[str] = []
         dialog_quest_name = ""
         dialog_quest_title = ""
+        dialog_has_item_reward = False
 
         # 1. Tela de História / Cinemática (CCinematicMenu em +0x0300)
         p_cine = self.read_u32(p_ui + 0x0300)
@@ -448,6 +450,15 @@ class TorchlightMemoryReader:
                 raw_title = self.read_wstring(self.read_u32(p_quest + 0xB4))
                 dialog_quest_title = strip_torchlight_formatting(raw_title)
 
+                # Verifica se a missão possui recompensa de item (CSpawnClass* em +0x18 ou itens diretos)
+                p_rewards = self.read_u32(p_quest + 0x150)
+                if p_rewards:
+                    p_spawn = self.read_u32(p_rewards + 0x18)
+                    p_item1 = self.read_u32(p_rewards + 0x1C)
+                    p_item2 = self.read_u32(p_rewards + 0x20)
+                    if p_spawn or p_item1 or p_item2:
+                        dialog_has_item_reward = True
+
             # Classificação dos tipos de diálogo conforme Enum nativo e botões
             if acc_vis and dec_vis:
                 dialog_type = "missao_aceitar"
@@ -469,10 +480,12 @@ class TorchlightMemoryReader:
                 else:
                     dialog_type = "simples"
                     dialog_buttons = ["ok"]
+                    dialog_has_item_reward = False
                     open_menus.append("Diálogo Simples")
             else:
                 dialog_type = "simples"
                 dialog_buttons = ["ok"]
+                dialog_has_item_reward = False
                 open_menus.append("Diálogo")
 
         # Pause em jogo
@@ -497,4 +510,5 @@ class TorchlightMemoryReader:
             dialog_buttons=dialog_buttons,
             dialog_quest_name=dialog_quest_name,
             dialog_quest_title=dialog_quest_title,
+            dialog_has_item_reward=dialog_has_item_reward,
         )
