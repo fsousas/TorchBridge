@@ -37,7 +37,7 @@ MAIN_MENU_STATES: dict[int, str] = {
     1: "Criar Personagem",
     2: "Selecionar Dificuldade",
     3: "Carregar Personagem",
-    4: "Detalhes do Personagem",
+    4: "Selecionar Dificuldade",
     6: "Em Jogo",
 }
 

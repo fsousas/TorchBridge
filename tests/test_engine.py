@@ -1835,6 +1835,18 @@ class DifficultyNavigationTests(unittest.TestCase):
             self.assertAlmostEqual(hx, round(768 * 0.1068), delta=1)
             self.assertAlmostEqual(hy, round(768 * 0.631), delta=1)
 
+    def test_initial_focus_is_hardcore_state_4(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=4)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            engine._handle_difficulty_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "hardcore")
+            self.assertEqual(shared.get().difficulty_focus, "hardcore")
+
     def test_dpad_navigation_cycle_difficulty(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared, injector = self._make_engine(directory)

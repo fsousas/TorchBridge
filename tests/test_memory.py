@@ -29,6 +29,7 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertEqual(MAIN_MENU_STATES[1], "Criar Personagem")
         self.assertEqual(MAIN_MENU_STATES[2], "Selecionar Dificuldade")
         self.assertEqual(MAIN_MENU_STATES[3], "Carregar Personagem")
+        self.assertEqual(MAIN_MENU_STATES[4], "Selecionar Dificuldade")
         self.assertEqual(MAIN_MENU_STATES[6], "Em Jogo")
 
     def test_gameplay_menus_offsets_defined(self):

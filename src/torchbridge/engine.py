@@ -534,9 +534,9 @@ class BridgeEngine(threading.Thread):
         hub: ControllerHub,
     ) -> None:
         """Gerencia a navegação na Tela de Seleção de Dificuldade (state_id == 2) via D-pad."""
-        if not self._difficulty_initialized or self._last_state_id != 2:
+        if not self._difficulty_initialized or self._last_state_id not in (2, 4):
             self._difficulty_initialized = True
-            self._last_state_id = 2
+            self._last_state_id = self._memory_state.state_id
             self._difficulty_focus = "hardcore"
             target_x, target_y = difficulty_menu_button_point(rect, self._difficulty_focus)
             self.injector.move(target_x, target_y)
@@ -1226,7 +1226,7 @@ class BridgeEngine(threading.Thread):
                 self._char_create_initialized = False
                 self.shared.update(char_create_focus=None)
 
-            if state_id == 2:
+            if state_id in (2, 4):
                 self._handle_difficulty_navigation(state, rect, hub)
             elif self._difficulty_initialized:
                 self._difficulty_initialized = False
