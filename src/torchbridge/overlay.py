@@ -655,7 +655,10 @@ class GameOverlay(QWidget):
                 lx = bx - rect.left - btn_w / 2
                 ly = by - rect.top - btn_h / 2
                 is_focus = (snapshot.char_create_focus == btn_name)
-                if is_focus:
+                if btn_name == "ok" and snapshot.char_name_len == 0:
+                    painter.setPen(QPen(QColor(231, 76, 60, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                    painter.setBrush(QColor(231, 76, 60, 40))
+                elif is_focus:
                     painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
                     painter.setBrush(QColor(255, 215, 0, 110))
                 else:

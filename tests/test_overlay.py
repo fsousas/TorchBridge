@@ -75,7 +75,18 @@ class OverlayCalibrationTests(unittest.TestCase):
             pix = QPixmap(1024, 768)
             painter = QPainter(pix)
             try:
+                # Com nome vazio (char_name_len=0): botão OK desenhado tracejado
                 overlay._draw_calibration(painter, snap, 1.0)
+
+                # Com nome preenchido e foco em OK
+                snap_with_name = OverlaySnapshot(
+                    game_rect=rect,
+                    memory_is_in_game=False,
+                    memory_state_desc="Criar Personagem",
+                    char_create_focus="ok",
+                    char_name_len=8,
+                )
+                overlay._draw_calibration(painter, snap_with_name, 1.0)
             finally:
                 painter.end()
 

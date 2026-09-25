@@ -22,6 +22,7 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertFalse(state.is_menu_open)
         self.assertEqual(state.open_menus, [])
         self.assertEqual(state.recommended_mode, "direct")
+        self.assertEqual(state.char_name_len, 0)
 
     def test_main_menu_states_mapping(self):
         self.assertEqual(MAIN_MENU_STATES[0], "Tela Inicial")
@@ -46,12 +47,14 @@ class MemoryModuleTests(unittest.TestCase):
             memory_is_loading=False,
             memory_is_menu_open=True,
             memory_open_menus=["Inventário", "Pet"],
+            char_name_len=7,
         )
         self.assertEqual(snapshot.memory_state_desc, "Em Jogo")
         self.assertTrue(snapshot.memory_is_in_game)
         self.assertFalse(snapshot.memory_is_loading)
         self.assertTrue(snapshot.memory_is_menu_open)
         self.assertEqual(snapshot.memory_open_menus, ["Inventário", "Pet"])
+        self.assertEqual(snapshot.char_name_len, 7)
 
     def test_shared_state_publishes_memory_fields(self):
         shared = SharedOverlayState()

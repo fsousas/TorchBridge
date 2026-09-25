@@ -434,6 +434,16 @@ class BridgeEngine(threading.Thread):
             return
 
         current = self._char_create_focus
+        has_name = (self._memory_state.char_name_len > 0)
+
+        # Se o foco estava no 'ok' mas o nome foi apagado, recua para 'character_name'
+        if current == "ok" and not has_name:
+            current = "character_name"
+            self._char_create_focus = "character_name"
+            target_x, target_y = char_create_button_point(rect, "character_name")
+            self.injector.move(target_x, target_y)
+            self.shared.update(char_create_focus="character_name")
+
         new_focus = current
 
         # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Cancelar / Voltar
@@ -463,7 +473,8 @@ class BridgeEngine(threading.Thread):
             elif current == "back":
                 new_focus = "character_name"
             elif current == "character_name":
-                new_focus = "ok"
+                if has_name:
+                    new_focus = "ok"
         elif dpad_left:
             if current == "dog":
                 new_focus = "destroyer"
@@ -491,7 +502,7 @@ class BridgeEngine(threading.Thread):
             elif current == "ferret":
                 new_focus = "pet_name"
             elif current == "pet_name":
-                new_focus = "ok"
+                new_focus = "ok" if has_name else "character_name"
         elif dpad_up:
             if current == "back":
                 new_focus = "alchemist"
@@ -1419,6 +1430,7 @@ class BridgeEngine(threading.Thread):
                     memory_is_loading=self._memory_state.is_loading,
                     memory_is_menu_open=self._memory_state.is_menu_open,
                     memory_open_menus=list(self._memory_state.open_menus),
+                    char_name_len=self._memory_state.char_name_len,
                     title_menu_focus=self._title_focus if (self._memory_state.is_connected and self._memory_state.state_id == 0) else None,
                 )
 

@@ -666,6 +666,7 @@ class OverlaySnapshot:
     memory_is_loading: bool = False
     memory_is_menu_open: bool = False
     memory_open_menus: list[str] = field(default_factory=list)
+    char_name_len: int = 0
     title_menu_focus: str | None = None
     char_create_focus: str | None = None
     difficulty_focus: str | None = None

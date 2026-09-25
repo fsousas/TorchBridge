@@ -28,6 +28,9 @@ OFFSET_LEVEL      = 0x38
 OFFSET_GAMEUI     = 0x3C
 OFFSET_MENU_MGR   = 0x0324
 OFFSET_MAIN_STATE = 0x0D84
+OFFSET_NEW_GAME_MENU = 0x0D78
+OFFSET_CHAR_EDITBOX  = 0x70
+OFFSET_CHAR_NAME_LEN = 0x88
 
 MAIN_MENU_STATES: dict[int, str] = {
     0: "Tela Inicial",
@@ -135,6 +138,7 @@ class GameMemoryState:
     save_count: int = 0
     sound_volume: float = 1.0
     music_volume: float = 1.0
+    char_name_len: int = 0
 
 
 class TorchlightMemoryReader:
@@ -335,6 +339,15 @@ class TorchlightMemoryReader:
 
         # Tela inicial (menus principais)
         if main_state_id != 6:
+            char_name_len = 0
+            if main_state_id == 1 and p_menu_mgr:
+                p_new_game = self.read_u32(p_menu_mgr + OFFSET_NEW_GAME_MENU)
+                if p_new_game:
+                    p_editbox = self.read_u32(p_new_game + OFFSET_CHAR_EDITBOX)
+                    if p_editbox:
+                        val = self.read_u32(p_editbox + OFFSET_CHAR_NAME_LEN)
+                        char_name_len = val if val is not None else 0
+
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
@@ -347,6 +360,7 @@ class TorchlightMemoryReader:
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
                 music_volume=music_vol,
+                char_name_len=char_name_len,
             )
 
         # Em gameplay: verificar todos os menus

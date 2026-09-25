@@ -1713,12 +1713,18 @@ class CharCreateNavigationTests(unittest.TestCase):
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._char_create_focus, "character_name")
 
-            # 5b. D-pad direita -> ok
+            # 5a. Sem nome digitado (char_name_len == 0): D-pad direita NÃO deve ir para 'ok'
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "character_name")
+
+            # 5b. Jogador digita um nome (char_name_len > 0): D-pad direita agora vai para 'ok'
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1, char_name_len=9)
             engine._previous = ControllerState()
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._char_create_focus, "ok")
 
-            # 5c. D-pad esquerda -> character_name
+            # 5c. D-pad esquerda -> volta para character_name
             engine._previous = ControllerState()
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_left"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._char_create_focus, "character_name")
@@ -1727,6 +1733,12 @@ class CharCreateNavigationTests(unittest.TestCase):
             engine._previous = ControllerState()
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._char_create_focus, "ok")
+
+            # 5e. Se o jogador apagar o nome enquanto focado em 'ok', foco recua automaticamente
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1, char_name_len=0)
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "character_name")
 
             # 6. D-pad cima -> pet_name
             engine._previous = ControllerState()
