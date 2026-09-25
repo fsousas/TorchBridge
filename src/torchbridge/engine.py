@@ -349,7 +349,7 @@ class BridgeEngine(threading.Thread):
     ) -> None:
         # Roda aberta: a roda é o mundo — nenhum toque de tecla dispara enquanto ela
         # estiver de pé (o d-pad controla a sublinha de pet actions lá dentro).
-        if state.pressed("lb") and not self._radial_dismissed:
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
         # R3: borda de subida, um toque por pressionamento, sem auto-repeat.
         if state.pressed("r3") and not self._previous.pressed("r3"):
@@ -788,7 +788,7 @@ class BridgeEngine(threading.Thread):
         now: float,
     ) -> None:
         # Roda aberta: a roda é o mundo — B/Y suprimidos (regra clássica).
-        if state.pressed("lb") and not self._radial_dismissed:
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
         # Sequência do pet em curso: o cursor/click é exclusivo dela — o Shift+clique
         # do Y não pode mexer no cursor no meio do clique do pet, nem a ESC do B
@@ -925,6 +925,14 @@ class BridgeEngine(threading.Thread):
         self._pet_click_seq = None
         self.injector.move(return_x, return_y)
 
+    def _is_radial_allowed(self) -> bool:
+        """Determina se a roda de habilidades pode ser aberta.
+        Regra: somente permitida quando em gameplay (is_in_game) e sem o menu Pause aberto.
+        Se a leitura de memória não estiver conectada, permite como fallback."""
+        if not self._memory_state.is_connected:
+            return True
+        return self._memory_state.is_in_game and "Pause" not in self._memory_state.open_menus
+
     # Roda de habilidades: LB + analógico direito escolhe o setor; A confirma o atalho e
     # soltar LB só fecha a roda (a confirmação saiu do soltar em ago/2026).
     def _handle_radial(
@@ -935,7 +943,7 @@ class BridgeEngine(threading.Thread):
         rect: Rect,
         now: float,
     ) -> None:
-        active = state.pressed("lb")
+        active = state.pressed("lb") and self._is_radial_allowed()
         slots = bindings.get("radial_slots", [])
         # Borda de subida do LB: rearma o latch — o próximo aperto reabre a roda do zero.
         if not self._previous.pressed("lb") and active:
@@ -1102,7 +1110,7 @@ class BridgeEngine(threading.Thread):
         curve = float(input_cfg["response_curve"])
         lx, ly, lmag = radial_deadzone(state.lx, state.ly, deadzone, curve)
         rx, ry, rmag = radial_deadzone(state.rx, state.ry, deadzone, curve)
-        radial_active = state.pressed("lb")
+        radial_active = state.pressed("lb") and self._is_radial_allowed()
         auto_move = False
         cursor_active = False
         aim_local: tuple[int, int] | None = None
@@ -1290,7 +1298,7 @@ class BridgeEngine(threading.Thread):
         # Com LT ativo os dois ficam inertes TAMBÉM: A/X pertencem aos combos
         # LT+A (5 / Ctrl+clique) e LT+X (6) — segurar o LT com o A não pode
         # segurar o clique comum.
-        radial_held = state.pressed("lb")
+        radial_held = state.pressed("lb") and self._is_radial_allowed()
         lt_held = self._lt_current
         left_pressed = auto_move or (state.pressed("a") and not radial_held and not lt_held)
         self._set_mouse("left", left_pressed)
