@@ -38,6 +38,13 @@ from .models import (
     title_menu_button_point,
     PAUSE_BUTTONS,
     pause_menu_button_point,
+    LOAD_CHAR_BUTTONS,
+    load_char_button_point,
+    SETTINGS_BUTTONS,
+    SETTINGS_DROPDOWNS,
+    settings_button_point,
+    settings_dropdown_option_point,
+    settings_slider_bounds,
 )
 from .win32 import make_overlay_clickthrough
 
@@ -819,6 +826,135 @@ class GameOverlay(QWidget):
                     painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
                     painter.setBrush(QColor(46, 204, 113, 75))
                 painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+
+        elif state_desc == "Carregar Personagem":
+            # Alvos da Tela de Carregar Personagem (state_id == 3) em modo calibração
+            box_w = 34 * scale * (rect.height / 768.0)
+            box_h = 18 * scale * (rect.height / 768.0)
+
+            if snapshot.load_char_delete_open:
+                # Modal de Confirmação de Exclusão (Delete Character)
+                del_buttons = ("delete_confirm", "delete_cancel")
+                for btn_name in del_buttons:
+                    bx, by = load_char_button_point(rect, btn_name)
+                    lx = bx - rect.left - box_w / 2
+                    ly = by - rect.top - box_h / 2
+                    is_focus = (snapshot.load_char_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 160))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 90))
+                    painter.drawRoundedRect(QRectF(lx, ly, box_w, box_h), 3 * scale, 3 * scale)
+            else:
+                # Tela principal de carregamento de personagens
+                # Slots 1 a 5, setas de scroll e botões inferiores (Delete, Back, Play)
+                active_buttons = ["slot_1", "slot_2", "slot_3", "slot_4", "slot_5", "scroll_up", "scroll_down", "delete", "back", "play"]
+                for btn_name in active_buttons:
+                    bx, by = load_char_button_point(rect, btn_name)
+                    lx = bx - rect.left - box_w / 2
+                    ly = by - rect.top - box_h / 2
+                    is_focus = (snapshot.load_char_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 160))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 90))
+                    painter.drawRoundedRect(QRectF(lx, ly, box_w, box_h), 3 * scale, 3 * scale)
+
+        elif is_settings:
+            # Calibração da Tela de Configurações (Settings)
+            # Conforme assets/images/sreensXcursor/settings/info.md:
+            # - verde: #09B200 (pontos navegáveis)
+            # - amarelo: #E6C12A (ponto de deslocamento padrão do cursor)
+            # - rosa: #B2007C (pontos de dropdown)
+            # - roxo: #5600B2 (sliders de som baseado no volume salvo)
+            # - ciano: #00C7D5 (limites de deslocamento X dos sliders)
+            c_verde = QColor(0x09, 0xB2, 0x00, 220)
+            c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+            c_rosa = QColor(0xB2, 0x00, 0x7C, 220)
+            c_roxo = QColor(0x56, 0x00, 0xB2, 220)
+            c_ciano = QColor(0x00, 0xC7, 0xD5, 220)
+
+            box_size = 18.0 * scale * (rect.height / 768.0)
+
+            if snapshot.settings_dropdown:
+                # Dropdown aberto: desenha apenas o opener rosa, a opção default amarela e opções verdes
+                drop_name = snapshot.settings_dropdown
+                drop_info = SETTINGS_DROPDOWNS.get(drop_name)
+                if drop_info:
+                    # 1. Opener rosa
+                    ox, oy = settings_button_point(rect, drop_name)
+                    olx = ox - rect.left - box_size / 2.0
+                    oly = oy - rect.top - box_size / 2.0
+                    painter.setPen(QPen(c_rosa, 2.0 * scale))
+                    painter.setBrush(QColor(0xB2, 0x00, 0x7C, 140))
+                    painter.drawRoundedRect(QRectF(olx, oly, box_size, box_size), 3 * scale, 3 * scale)
+
+                    # 2. Opções da lista
+                    for idx in range(len(drop_info["options"])):
+                        opt_x, opt_y = settings_dropdown_option_point(rect, drop_name, idx)
+                        opt_lx = opt_x - rect.left - box_size / 2.0
+                        opt_ly = opt_y - rect.top - box_size / 2.0
+                        is_sel = (snapshot.settings_dropdown_idx == idx)
+                        base_color = c_amarelo if idx == 0 else c_verde
+                        if is_sel:
+                            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                            painter.setBrush(base_color)
+                        else:
+                            painter.setPen(QPen(base_color, 1.5 * scale))
+                            painter.setBrush(QColor(base_color.red(), base_color.green(), base_color.blue(), 100))
+                        painter.drawRoundedRect(QRectF(opt_lx, opt_ly, box_size, box_size), 3 * scale, 3 * scale)
+            else:
+                # Tela principal de configurações
+                # 1. Linhas ciano dos sliders
+                (sx1, sy1), (sx2, sy2) = settings_slider_bounds(rect, is_music=False)
+                (mx1, my1), (mx2, my2) = settings_slider_bounds(rect, is_music=True)
+                pen_ciano = QPen(c_ciano, 3.0 * scale)
+                painter.setPen(pen_ciano)
+                painter.drawLine(QPointF(sx1 - rect.left, sy1 - rect.top), QPointF(sx2 - rect.left, sy2 - rect.top))
+                painter.drawLine(QPointF(mx1 - rect.left, my1 - rect.top), QPointF(mx2 - rect.left, my2 - rect.top))
+
+                # 2. Botões da tela principal
+                sound_vol = snapshot.settings_sound_vol
+                music_vol = snapshot.settings_music_vol
+
+                for btn_name in SETTINGS_BUTTONS:
+                    if btn_name == "sound_slider":
+                        bx, by = settings_button_point(rect, btn_name, sound_vol)
+                        color = c_roxo
+                    elif btn_name == "music_slider":
+                        bx, by = settings_button_point(rect, btn_name, music_vol)
+                        color = c_roxo
+                    elif btn_name in ("resolution", "shadows", "particle_detail"):
+                        bx, by = settings_button_point(rect, btn_name)
+                        color = c_rosa
+                    elif btn_name == "row1_col1":
+                        bx, by = settings_button_point(rect, btn_name)
+                        color = c_amarelo
+                    else:
+                        bx, by = settings_button_point(rect, btn_name)
+                        color = c_verde
+
+                    lx = bx - rect.left - box_size / 2.0
+                    ly = by - rect.top - box_size / 2.0
+                    is_focus = (snapshot.settings_focus == btn_name)
+
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(color)
+                    else:
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 120))
+
+                    painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3 * scale, 3 * scale)
+
+                    if is_focus and snapshot.settings_slider_dragging and btn_name in ("sound_slider", "music_slider"):
+                        painter.setPen(QPen(QColor(255, 255, 0, 255), 1.5 * scale, Qt.PenStyle.DashLine))
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.drawEllipse(QPointF(bx - rect.left, by - rect.top), box_size * 0.8, box_size * 0.8)
 
         # Badge de diagnóstico da Memória Interna (visível em todas as telas no modo calibração)
         mem_desc = snapshot.memory_state_desc or "Aguardando jogo..."

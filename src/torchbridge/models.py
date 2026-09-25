@@ -777,6 +777,240 @@ def pause_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# Coordenadas dos botões e slots da tela de Carregar Personagem (state_id == 3) (base 1024x768)
+# Calibradas e validadas a partir de assets/images/sreensXcursor/load-char
+LOAD_CHAR_BUTTONS: tuple[str, ...] = (
+    "slot_1", "slot_2", "slot_3", "slot_4", "slot_5",
+    "scroll_up", "scroll_down",
+    "delete", "back", "play",
+    "delete_confirm", "delete_cancel",
+)
+
+LOAD_CHAR_BUTTON_COORDS: dict[str, tuple[float, float]] = {
+    "slot_1": (971.0, 227.0),
+    "slot_2": (971.0, 299.5),
+    "slot_3": (971.0, 372.0),
+    "slot_4": (971.0, 445.0),
+    "slot_5": (971.0, 517.0),
+    "scroll_up": (979.0, 155.0),
+    "scroll_down": (971.0, 618.0),
+    "delete": (558.0, 663.0),
+    "back": (300.0, 728.0),
+    "play": (859.0, 728.0),
+    "delete_confirm": (576.0, 362.0),
+    "delete_cancel": (576.0, 411.0),
+}
+
+
+def load_char_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão/slot na tela de Carregar Personagem."""
+    if not rect.valid:
+        return (0, 0)
+    btn = button_name.lower()
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+
+    # Slots e setas de rolagem da lista de personagens (ancorados a borda direita)
+    if btn.startswith("slot_") or btn in ("scroll_up", "scroll_down"):
+        base_x, base_y = LOAD_CHAR_BUTTON_COORDS.get(btn, (971.0, 227.0))
+        right_dist = (1024.0 - base_x) * scale
+        x = rect.right - right_dist
+        y = rect.top + base_y * scale
+    else:
+        # Botoes centralizados/inferiores e modal de delete (ancorados ao centro horizontal)
+        base_x, base_y = LOAD_CHAR_BUTTON_COORDS.get(btn, (859.0, 728.0))
+        x = center_x + (base_x - 512.0) * scale
+        y = rect.top + base_y * scale
+
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+# Coordenadas dos botões e controles da tela de Configurações (Settings) (base 1024x768)
+# Calibradas e validadas a partir de assets/images/sreensXcursor/settings
+SETTINGS_BUTTONS: tuple[str, ...] = (
+    "row1_col1", "row1_col2", "row1_col3",
+    "row2_col1", "row2_col2", "row2_col3",
+    "resolution", "shadows",
+    "music_slider", "music_mute", "particle_detail",
+    "row5_col3",
+    "sound_slider", "sound_mute", "row6_col3",
+    "row7_col1", "row7_col3",
+    "cancel", "apply",
+)
+
+SETTINGS_BUTTON_COORDS: dict[str, tuple[float, float]] = {
+    "row1_col1": (238.0, 132.0),
+    "row1_col2": (437.0, 132.0),
+    "row1_col3": (636.0, 132.0),
+    "row2_col1": (238.0, 184.0),
+    "row2_col2": (437.0, 184.0),
+    "row2_col3": (636.0, 184.0),
+    "resolution": (398.0, 247.0),
+    "shadows": (800.0, 247.0),
+    "music_slider": (272.0, 344.0),
+    "music_mute": (486.0, 346.0),
+    "particle_detail": (800.0, 346.0),
+    "row5_col3": (636.0, 401.0),
+    "sound_slider": (304.0, 445.0),
+    "sound_mute": (486.0, 448.0),
+    "row6_col3": (636.0, 444.0),
+    "row7_col1": (238.0, 488.0),
+    "row7_col3": (636.0, 488.0),
+    "cancel": (465.0, 552.0),
+    "apply": (657.0, 552.0),
+}
+
+SETTINGS_SLIDER_X_MIN = 228.0
+SETTINGS_SLIDER_X_MAX = 447.0
+SETTINGS_MUSIC_SLIDER_Y = 344.0
+SETTINGS_SOUND_SLIDER_Y = 445.0
+
+SETTINGS_DROPDOWNS: dict[str, dict[str, Any]] = {
+    "resolution": {
+        "opener": (398.0, 247.0),
+        "options": [
+            (385.0, 296.0),
+            (385.0, 313.0),
+            (385.0, 331.0),
+            (385.0, 348.0),
+            (385.0, 365.0),
+            (385.0, 382.0),
+            (385.0, 399.0),
+            (385.0, 416.0),
+            (385.0, 433.0),
+            (385.0, 450.0),
+            (385.0, 467.0),
+            (385.0, 484.0),
+            (385.0, 501.0),
+            (385.0, 518.0),
+            (385.0, 535.0),
+            (385.0, 552.0),
+            (385.0, 569.0),
+            (385.0, 586.0),
+        ],
+    },
+    "shadows": {
+        "opener": (800.0, 247.0),
+        "options": [
+            (789.0, 293.0),
+            (789.0, 310.0),
+            (789.0, 329.0),
+            (789.0, 346.0),
+            (789.0, 363.0),
+            (789.0, 380.0),
+        ],
+    },
+    "particle_detail": {
+        "opener": (800.0, 346.0),
+        "options": [
+            (785.0, 396.0),
+            (785.0, 413.0),
+            (785.0, 431.0),
+        ],
+    },
+}
+
+SETTINGS_NAV_MAP: dict[str, dict[str, str]] = {
+    # Row 1 (y=132)
+    "row1_col1": {"right": "row1_col2", "down": "row2_col1"},
+    "row1_col2": {"left": "row1_col1", "right": "row1_col3", "down": "row2_col2"},
+    "row1_col3": {"left": "row1_col2", "down": "row2_col3"},
+
+    # Row 2 (y=184)
+    "row2_col1": {"up": "row1_col1", "right": "row2_col2", "down": "resolution"},
+    "row2_col2": {"up": "row1_col2", "left": "row2_col1", "right": "row2_col3", "down": "resolution"},
+    "row2_col3": {"up": "row1_col3", "left": "row2_col2", "down": "shadows"},
+
+    # Row 3 (y=247)
+    "resolution": {"up": "row2_col2", "right": "shadows", "down": "music_slider"},
+    "shadows": {"up": "row2_col3", "left": "resolution", "down": "particle_detail"},
+
+    # Row 4 (y=344..346)
+    "music_slider": {"up": "resolution", "right": "music_mute", "down": "sound_slider"},
+    "music_mute": {"up": "resolution", "left": "music_slider", "right": "particle_detail", "down": "sound_mute"},
+    "particle_detail": {"up": "shadows", "left": "music_mute", "down": "row5_col3"},
+
+    # Row 5 (y=401)
+    "row5_col3": {"up": "particle_detail", "left": "music_mute", "down": "row6_col3"},
+
+    # Row 6 (y=444..448)
+    "sound_slider": {"up": "music_slider", "right": "sound_mute", "down": "row7_col1"},
+    "sound_mute": {"up": "music_mute", "left": "sound_slider", "right": "row6_col3", "down": "cancel"},
+    "row6_col3": {"up": "row5_col3", "left": "sound_mute", "down": "row7_col3"},
+
+    # Row 7 (y=488)
+    "row7_col1": {"up": "sound_slider", "right": "row7_col3", "down": "cancel"},
+    "row7_col3": {"up": "row6_col3", "left": "row7_col1", "down": "apply"},
+
+    # Row 8 (y=552)
+    "cancel": {"up": "row7_col1", "right": "apply"},
+    "apply": {"up": "row7_col3", "left": "cancel"},
+}
+
+
+def settings_button_point(rect: Rect, button_name: str, volume: float | None = None) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão/controle na tela de Configurações."""
+    if not rect.valid:
+        return (0, 0)
+    btn = button_name.lower()
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+
+    if btn == "music_slider":
+        vol = 0.5 if volume is None else clamp(volume, 0.0, 1.0)
+        base_x = SETTINGS_SLIDER_X_MIN + vol * (SETTINGS_SLIDER_X_MAX - SETTINGS_SLIDER_X_MIN)
+        base_y = SETTINGS_MUSIC_SLIDER_Y
+    elif btn == "sound_slider":
+        vol = 0.5 if volume is None else clamp(volume, 0.0, 1.0)
+        base_x = SETTINGS_SLIDER_X_MIN + vol * (SETTINGS_SLIDER_X_MAX - SETTINGS_SLIDER_X_MIN)
+        base_y = SETTINGS_SOUND_SLIDER_Y
+    else:
+        base_x, base_y = SETTINGS_BUTTON_COORDS.get(btn, (238.0, 132.0))
+
+    x = center_x + (base_x - 512.0) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def settings_dropdown_option_point(rect: Rect, dropdown_name: str, option_idx: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de uma opção dentro de um dropdown aberto na tela de Configurações."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    data = SETTINGS_DROPDOWNS.get(dropdown_name.lower())
+    if not data:
+        return (0, 0)
+    options = data["options"]
+    idx = int(clamp(option_idx, 0, len(options) - 1))
+    base_x, base_y = options[idx]
+    x = center_x + (base_x - 512.0) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def settings_slider_bounds(rect: Rect, is_music: bool = True) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Retorna os pontos (x1, y1) e (x2, y2) da linha ciano do slider na tela de Configurações."""
+    if not rect.valid:
+        return ((0, 0), (0, 0))
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    base_y = SETTINGS_MUSIC_SLIDER_Y if is_music else SETTINGS_SOUND_SLIDER_Y
+    y = rect.top + base_y * scale
+
+    x1 = center_x + (SETTINGS_SLIDER_X_MIN - 512.0) * scale
+    x2 = center_x + (SETTINGS_SLIDER_X_MAX - 512.0) * scale
+    p1 = (int(clamp(round(x1), rect.left + 2, rect.right - 2)), int(clamp(round(y), rect.top + 2, rect.bottom - 2)))
+    p2 = (int(clamp(round(x2), rect.left + 2, rect.right - 2)), int(clamp(round(y), rect.top + 2, rect.bottom - 2)))
+    return (p1, p2)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -814,6 +1048,14 @@ class OverlaySnapshot:
     dialog_type: str = ""
     dialog_buttons: list[str] = field(default_factory=list)
     pause_menu_focus: str | None = None
+    load_char_focus: str | None = None
+    load_char_delete_open: bool = False
+    settings_focus: str | None = None
+    settings_dropdown: str | None = None
+    settings_dropdown_idx: int = 0
+    settings_slider_dragging: bool = False
+    settings_sound_vol: float = 1.0
+    settings_music_vol: float = 1.0
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

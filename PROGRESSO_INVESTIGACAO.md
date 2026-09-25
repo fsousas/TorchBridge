@@ -216,3 +216,122 @@ Extraídas diretamente dos marcadores inseridos em `assets/images/menus/in-game 
 - **Botão B**: Atalho direto para focar e clicar em `return_to_game`, fechando o menu e retornando à jogatina.
 - **Modo Calibração (Overlay)**: Exibe os 3 quadradinhos (17x17 px), amarelo no foco ativo e verde nas possibilidades.
 
+---
+
+## 9. Mapeamento da Tela de Carregar Personagem (`state_id == 3`)
+
+### A. Detecção na Memória
+- **Identificador de Estado**: `state_id == 3` (`CMenuManager + 0x0D84`)
+- **Descrição**: `state_desc == "Carregar Personagem"`
+- **Total de Saves Detectados**: `get_save_character_count()` (contagem de arquivos `.svt` em `APPDATA/runic games/torchlight/save`).
+
+### B. Coordenadas Calibradas dos Marcadores (Base 1024x768)
+Extraídas das imagens em `assets/images/sreensXcursor/load-char/`:
+- **Lista de Personagens (Direita)**:
+  - `slot_1` (Default / Amarelo): `(971, 227)`
+  - `slot_2`: `(971, 300)`
+  - `slot_3`: `(971, 372)`
+  - `slot_4`: `(971, 445)`
+  - `slot_5`: `(971, 517)`
+  - `scroll_up` (Seta de Rolagem Superior): `(979, 155)`
+  - `scroll_down` (Seta de Rolagem Inferior): `(971, 618)`
+- **Barra Inferior (Centralizada)**:
+  - `delete` (Botão Pequeno de Exclusão): `(558, 663)`
+  - `back` (Voltar / Cancelar): `(300, 728)`
+  - `play` (Jogar / Play): `(859, 728)`
+- **Modal de Confirmação de Delete (Centro da Tela)**:
+  - `delete_confirm` (Botão Delete): `(576, 362)`
+  - `delete_cancel` (Botão Cancel - Padrão Seguro / Amarelo): `(576, 411)`
+
+### C. Navegação e Regras de Fluxo
+1. **Seleção de Personagem com Ação Rápida**:
+   - Ao pressionar **A ou X** em qualquer slot de personagem (`slot_1`..`slot_5`), o motor executa o clique de seleção no personagem e move imediatamente o cursor para o botão **Play** `(859, 728)`.
+   - Um segundo toque em **A ou X** aciona o Play para iniciar a partida imediatamente.
+2. **Navegação com D-pad**:
+   - **D-pad Esquerda**: Sai da lista de personagens direto para o botão Play na barra inferior. Se já estiver na barra inferior, caminha `Play` $\rightarrow$ `Delete` $\rightarrow$ `Voltar`.
+   - **D-pad Direita**: Caminha `Voltar` $\rightarrow$ `Delete` $\rightarrow$ `Play` $\rightarrow$ retorna ao último slot de personagem visitado.
+   - **D-pad Cima / Baixo (Rolagem Contínua Automática)**:
+     - Percorre os slots de `slot_1` até `slot_5`.
+     - Ao pressionar **D-pad Baixo** no `slot_5`, se houver mais personagens abaixo na lista (`save_count > 5`), o motor clica automaticamente na seta inferior `(971, 618)` para rolar 1 personagem e mantém o cursor no `slot_5`.
+     - Ao pressionar **D-pad Cima** no `slot_1`, se a lista tiver sido rolada, o motor clica automaticamente na seta superior `(979, 155)` para rolar 1 personagem para cima e mantém o cursor no `slot_1`.
+     - Permite percorrer todos os personagens da conta continuamente com o direcional digital sem precisar desviar para os botões de scroll.
+3. **Fluxo do Botão Delete (com Debounce e Auto-Sync)**:
+   - Clicar em `delete` (pequeno) aciona o clique do mouse e aguarda **200 ms** (debounce com cursor retido na posição inferior) para o modal abrir completamente no jogo antes de mover o cursor para `delete_cancel` (amarelo de segurança), prevenindo que a soltura do clique ou o toque no controle feche o popup instantaneamente.
+   - Uma janela de proteção de **250 ms** ignora entradas imediatas ao abrir ou fechar o modal.
+   - Ao confirmar a exclusão (`delete_confirm`) ou cancelar (`delete_cancel` / botão B), o modal fecha no jogo com debounce de 200 ms e o cursor **retorna exatamente para o botão delete pequeno** `(558, 663)`.
+   - O estado do modal é gerenciado pelo ciclo de vida explícito de abertura e confirmação/cancelamento, mantendo o cursor focado no popup até o jogador escolher uma das opções ou apertar B para voltar.
+4. **Modo Calibração (Overlay)**:
+   - Exibe os marcadores de 34x18 px: amarelo no foco atual e verde nas possibilidades disponíveis.
+
+---
+
+## 10. Mapeamento da Tela de Configurações (Settings)
+
+### A. Detecção na Memória
+- **Estrutura C++**: `CSettingsMenu` em `CGameUI + 0x02EC`
+- **Flag de Aberto**: byte `+0x18 == 1`
+- **Valores de Áudio**: Leitura de `SOUND VOLUME`, `MUSIC VOLUME`, `SOUND MUTE`, `MUSIC MUTE` diretamente de `local_settings.txt` e `SETTINGS.TXT`.
+- **Identificação**: `"Configurações"` em `open_menus` (tanto no menu inicial quanto dentro do jogo via Menu de Pause).
+
+### B. Coordenadas e Marcadores de Calibração (Base 1024x768)
+Extraídos e normalizados a partir das imagens em `assets/images/sreensXcursor/settings/`:
+- **Cores Padronizadas**:
+  - `verde`: `#09B200` (pontos navegáveis comuns)
+  - `amarelo`: `#E6C12A` (ponto inicial padrão do cursor e 1ª opção de dropdowns)
+  - `rosa`: `#B2007C` (botões de abertura de dropdown)
+  - `roxo`: `#5600B2` (marcador dos sliders de som e música baseado no volume salvo)
+  - `ciano`: `#00C7D5` (linha horizontal de limites mín/máx dos sliders de volume: $X \in [228, 447]$)
+
+- **Tela Principal**:
+  - `row1_col1` (Default / Amarelo): `(238, 132)`
+  - `row1_col2` (Verde): `(437, 132)`
+  - `row1_col3` (Verde): `(636, 132)`
+  - `row2_col1` (Verde): `(238, 184)`
+  - `row2_col2` (Verde): `(437, 184)`
+  - `row2_col3` (Verde): `(636, 184)`
+  - `resolution` (Dropdown Rosa): `(398, 247)`
+  - `shadows` (Dropdown Rosa): `(800, 247)`
+  - `music_slider` (Music Volume / Slider Roxo Superior): $X = 228 + \text{volume} \times 219$, $Y = 344$
+  - `music_mute` (Mudo Música / Verde): `(486, 346)`
+  - `particle_detail` (Dropdown Rosa): `(800, 346)`
+  - `row5_col3` (Opção Verde): `(636, 401)`
+  - `sound_slider` (Sound Volume / Slider Roxo Inferior): $X = 228 + \text{volume} \times 219$, $Y = 445$
+  - `sound_mute` (Mudo Som / Verde): `(486, 448)`
+  - `row6_col3` (Opção Verde): `(636, 444)`
+  - `row7_col1` (Opção Verde): `(238, 488)`
+  - `row7_col3` (Opção Verde): `(636, 488)`
+  - `cancel` (Cancelar / Verde): `(465, 552)`
+  - `apply` (Salvar/OK / Verde): `(657, 552)`
+
+- **Menus Dropdown (Abertos)**:
+  - **Shadows**:
+    - Rosa (Opener): `(800, 247)`
+    - Amarelo (Opção 0): `(789, 293)`
+    - Verdes (Opções 1 a 5): `(789, 310)`, `(789, 329)`, `(789, 346)`, `(789, 363)`, `(789, 380)`
+  - **Resolution**:
+    - Rosa (Opener): `(398, 247)`
+    - Amarelo (Opção 0): `(385, 296)`
+    - Verdes (Opções 1 a 17): de $Y = 313$ até $Y = 586$ em passos de ~17px ($X = 385$)
+  - **Particle Detail**:
+    - Rosa (Opener): `(800, 346)`
+    - Amarelo (Opção 0): `(785, 396)`
+    - Verdes (Opções 1 a 2): `(785, 413)`, `(785, 431)`
+
+### C. Comportamentos Especiais do Controle
+1. **Comportamento de Slider de Volume (OBS 1)**:
+   - Ao focar no marcador roxo (`sound_slider` ou `music_slider`), pressionar **A ou X** engaja o modo de arrasto (`mouse_button("left", True)` mantido retido).
+   - Com o arrasto ativo, **D-pad Esquerda / Direita** (ou analógico esquerdo) desloca o cursor suavemente em passos de 5% ao longo do segmento ciano ($X \in [228, 447]$), ajustando o volume do jogo.
+   - Pressionar **B ou O** libera o clique esquerdo (`mouse_button("left", False)`), finaliza o arrasto e restaura a navegação livre pelo D-pad.
+2. **Comportamento de Menus Dropdown (OBS 2)**:
+   - Ao pressionar **A ou X** sobre um botão rosa de dropdown (`resolution`, `shadows` ou `particle_detail`), o motor clica para abrir o menu suspenso e move instantaneamente o cursor para o ponto amarelo (opção inicial do dropdown).
+   - O D-pad Cima / Baixo passa a navegar exclusivamente a lista de opções do dropdown.
+   - Ao pressionar **A ou X** em uma das opções, o motor clica na opção selecionada, fecha o dropdown e retorna o cursor para o botão rosa de origem.
+   - Ao pressionar **B ou O** para cancelar o dropdown, o motor posiciona o cursor de volta no botão rosa e realiza o clique para fechar o dropdown no jogo.
+3. **Botão B na Tela Principal**:
+   - Pressionar **B ou O** na tela principal de configurações foca e clica automaticamente no botão Cancelar `(465, 552)`, fechando as configurações.
+4. **Supressão Total de Cliques Residuais e Bloqueio de Overworld/Combat**:
+   - Durante toda a permanência na tela de configurações, o pipeline de `_process_active` retorna imediatamente após o handler `_handle_settings_navigation`. Isso impede que atalhos de overworld (como ESC do B, combos de gatilho LT/RT) e o `_move_pointer` livre do analógico interfiram no menu.
+   - Os cliques de mouse padrão (`_set_mouse`) permanecem suprimidos (`suppress_mouse = True`) de ponta a ponta na tela de configurações, prevenindo que o aperto de X vaze um clique com botão direito que cancelaria o arrasto no CEGUI/Torchlight.
+   - O arrasto pelo analógico conta com limitação de taxa (rate-limiting de 80ms) para ajuste suave e controlado do volume.
+
+

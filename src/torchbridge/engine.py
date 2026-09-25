@@ -21,7 +21,13 @@ from .models import (
     click_zone,
     dialog_button_point,
     difficulty_menu_button_point,
+    load_char_button_point,
     pause_menu_button_point,
+    settings_button_point,
+    settings_dropdown_option_point,
+    SETTINGS_BUTTONS,
+    SETTINGS_DROPDOWNS,
+    SETTINGS_NAV_MAP,
     load_hud_mask,
     panels_x_shift,
     pet_click_point,
@@ -152,7 +158,23 @@ class BridgeEngine(threading.Thread):
         # Navegação no Menu de Pause (COptionsMenu / Options) via D-pad
         self._pause_menu_initialized = False
         self._pause_focus = "return_to_game"
+        # Navegação na Tela de Carregar Personagem (state_id == 3) via D-pad
+        self._load_char_initialized = False
+        self._load_char_focus: str | None = None
+        self._load_char_delete_dialog_open = False
+        self._load_char_last_slot = "slot_1"
+        self._load_char_scroll_offset = 0
+        self._load_char_dialog_debounce: float = 0.0
         self._last_state_id = -1
+        # Navegação na Tela de Configurações (Settings) via D-pad
+        self._settings_initialized = False
+        self._settings_focus: str | None = None
+        self._settings_dropdown: str | None = None
+        self._settings_dropdown_idx = 0
+        self._settings_slider_dragging = False
+        self._settings_slider_last_stick: float = 0.0
+        self._settings_sound_vol: float = 1.0
+        self._settings_music_vol: float = 1.0
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -172,7 +194,27 @@ class BridgeEngine(threading.Thread):
         self._last_dialog_type = ""
         self._pause_menu_initialized = False
         self._pause_focus = None
-        self.shared.update(radial_selection=None, pause_menu_focus=None)
+        self._load_char_initialized = False
+        self._load_char_focus = None
+        self._load_char_delete_dialog_open = False
+        self._load_char_scroll_offset = 0
+        self._load_char_dialog_debounce = 0.0
+        self._settings_initialized = False
+        self._settings_focus = None
+        self._settings_dropdown = None
+        self._settings_dropdown_idx = 0
+        self._settings_slider_dragging = False
+        self._settings_slider_last_stick = 0.0
+        self.shared.update(
+            radial_selection=None,
+            pause_menu_focus=None,
+            load_char_focus=None,
+            load_char_delete_open=False,
+            settings_focus=None,
+            settings_dropdown=None,
+            settings_dropdown_idx=0,
+            settings_slider_dragging=False,
+        )
 
     # Pede a parada; a thread encerra no próximo ciclo.
     def stop(self) -> None:
@@ -240,6 +282,9 @@ class BridgeEngine(threading.Thread):
             self._pet_click_panel_done = False
         # Interrompe o "movimento direto ativo" para o retorno ao centro não disparar no tick de volta.
         self._direct_move_active = False
+        if self._settings_slider_dragging:
+            self.injector.mouse_button("left", False)
+            self._settings_slider_dragging = False
         # A roda fechou (interrupção): a sublinha de pet actions não pode sobreviver aberta.
         self._pet_submenu = False
         self._pet_submenu_selection = PET_SUBMENU_DEFAULT
@@ -264,6 +309,8 @@ class BridgeEngine(threading.Thread):
             char_create_focus=None,
             difficulty_focus=None,
             pause_menu_focus=None,
+            load_char_focus=None,
+            load_char_delete_open=False,
         )
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
@@ -727,6 +774,506 @@ class BridgeEngine(threading.Thread):
             self.injector.move(target_x, target_y)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(pause_menu_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Carregar Personagem (state_id == 3)
+    def _handle_load_char_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        now: float = 0.0,
+    ) -> None:
+        """Gerencia a navegação na Tela de Carregar Personagem (state_id == 3) via D-pad e atalhos."""
+        cur_time = now if now > 0 else time.monotonic()
+        if not self._load_char_initialized or self._last_state_id != 3:
+            self._load_char_initialized = True
+            self._last_state_id = 3
+            self._load_char_delete_dialog_open = False
+            self._load_char_focus = "slot_1"
+            self._load_char_last_slot = "slot_1"
+            self._load_char_dialog_debounce = 0.0
+            target_x, target_y = load_char_button_point(rect, self._load_char_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(load_char_focus=self._load_char_focus, load_char_delete_open=False)
+            return
+
+        current = self._load_char_focus or "slot_1"
+
+        # -------------------------------------------------------------
+        # CASO 1: Modal de Confirmação de Exclusão de Personagem aberto
+        # -------------------------------------------------------------
+        if self._load_char_delete_dialog_open:
+            if cur_time < self._load_char_dialog_debounce:
+                return
+
+            cancel_pressed = (state.pressed("b") and not self._previous.pressed("b"))
+            action_pressed = (
+                (state.pressed("a") and not self._previous.pressed("a"))
+                or (state.pressed("x") and not self._previous.pressed("x"))
+            )
+
+            dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+            dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+            new_focus = current
+            if dpad_up:
+                new_focus = "delete_confirm"
+            elif dpad_down:
+                new_focus = "delete_cancel"
+
+            if new_focus != current:
+                self._load_char_focus = new_focus
+                target_x, target_y = load_char_button_point(rect, new_focus)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(load_char_focus=new_focus, load_char_delete_open=True)
+                return
+
+            if cancel_pressed or (action_pressed and current == "delete_cancel"):
+                # Clica em Cancelar no modal
+                target_x, target_y = load_char_button_point(rect, "delete_cancel")
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.05)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+
+                # Debounce: aguarda o modal fechar no jogo antes de devolver o cursor
+                time.sleep(0.20)
+
+                # Cursor volta para o botão de delete pequeno na parte inferior da tela
+                self._load_char_delete_dialog_open = False
+                self._load_char_focus = "delete"
+                del_x, del_y = load_char_button_point(rect, "delete")
+                self.injector.move(del_x, del_y)
+                self._load_char_dialog_debounce = cur_time + 0.25
+                self.shared.update(load_char_focus="delete", load_char_delete_open=False)
+                return
+
+            if action_pressed and current == "delete_confirm":
+                # Clica em Deletar para confirmar exclusão
+                target_x, target_y = load_char_button_point(rect, "delete_confirm")
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.05)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.06, 0.15, 50)
+
+                # Debounce: aguarda a exclusão assentar antes de devolver o cursor
+                time.sleep(0.20)
+
+                # Cursor volta para o botão de delete pequeno na parte inferior da tela
+                self._load_char_delete_dialog_open = False
+                self._load_char_focus = "delete"
+                if self._load_char_scroll_offset > 0:
+                    self._load_char_scroll_offset -= 1
+                del_x, del_y = load_char_button_point(rect, "delete")
+                self.injector.move(del_x, del_y)
+                self._load_char_dialog_debounce = cur_time + 0.25
+                self.shared.update(load_char_focus="delete", load_char_delete_open=False)
+                return
+
+            return
+
+        # -------------------------------------------------------------
+        # CASO 2: Navegação Normal na Tela de Carregar Personagem
+        # -------------------------------------------------------------
+        # Botão B: atalho direto para Voltar ao Menu Principal
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._load_char_focus = "back"
+            target_x, target_y = load_char_button_point(rect, "back")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(load_char_focus="back", load_char_delete_open=False)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
+        # Ações de Seleção / Clique (Botão A ou X):
+        action_pressed = (
+            (state.pressed("a") and not self._previous.pressed("a"))
+            or (state.pressed("x") and not self._previous.pressed("x"))
+        )
+
+        if action_pressed:
+            # 1. Selecionou um personagem no lado direito da tela:
+            # Clica no slot para selecionar o personagem e move imediatamente o cursor para o botão Play
+            if current.startswith("slot_"):
+                slot_x, slot_y = load_char_button_point(rect, current)
+                self.injector.move(slot_x, slot_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+
+                # Move para o Play na barra inferior
+                self._load_char_last_slot = current
+                self._load_char_focus = "play"
+                play_x, play_y = load_char_button_point(rect, "play")
+                self.injector.move(play_x, play_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(load_char_focus="play", load_char_delete_open=False)
+                return
+
+            # 2. Clicou no botão pequeno de delete:
+            # Abre o modal de confirmação com foco padrão em Cancelar (amarelo)
+            elif current == "delete":
+                if cur_time < self._load_char_dialog_debounce:
+                    return
+
+                del_x, del_y = load_char_button_point(rect, "delete")
+                self.injector.move(del_x, del_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.05)
+                self.injector.mouse_button("left", False)
+
+                # Debounce crucial: aguarda 200ms com o cursor ainda no botão Delete inferior
+                # para o clique físico assentar e o popup abrir no jogo antes de mover para Cancelar.
+                time.sleep(0.20)
+
+                self._load_char_delete_dialog_open = True
+                self._load_char_focus = "delete_cancel"
+                target_x, target_y = load_char_button_point(rect, "delete_cancel")
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self._load_char_dialog_debounce = cur_time + 0.25
+                self.shared.update(load_char_focus="delete_cancel", load_char_delete_open=True)
+                return
+
+            # 3. Clicou em Play, Back ou Scroll
+            elif current in ("play", "back", "scroll_up", "scroll_down"):
+                target_x, target_y = load_char_button_point(rect, current)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                if current == "scroll_down":
+                    self._load_char_scroll_offset += 1
+                elif current == "scroll_up" and self._load_char_scroll_offset > 0:
+                    self._load_char_scroll_offset -= 1
+                return
+
+        # Navegação com D-pad
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        save_count = self._memory_state.save_count
+        max_visible_slots = min(5, max(1, save_count)) if save_count > 0 else 5
+
+        new_focus = current
+
+        # D-pad Cima / Baixo
+        if dpad_down:
+            if current == "scroll_up":
+                new_focus = "slot_1"
+            elif current == "slot_1":
+                new_focus = "slot_2" if max_visible_slots >= 2 else "slot_1"
+            elif current == "slot_2":
+                new_focus = "slot_3" if max_visible_slots >= 3 else "slot_2"
+            elif current == "slot_3":
+                new_focus = "slot_4" if max_visible_slots >= 4 else "slot_3"
+            elif current == "slot_4":
+                new_focus = "slot_5" if max_visible_slots >= 5 else "slot_4"
+            elif current == "slot_5":
+                # Rolagem contínua via D-pad: se houver mais personagens abaixo da página visível,
+                # clica na seta inferior para rolar 1 personagem e mantém o cursor no slot_5.
+                max_offset = max(0, save_count - 5) if save_count > 0 else 0
+                if save_count > 5 and self._load_char_scroll_offset < max_offset:
+                    scroll_x, scroll_y = load_char_button_point(rect, "scroll_down")
+                    self.injector.move(scroll_x, scroll_y)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.04)
+                    self.injector.mouse_button("left", False)
+                    self._load_char_scroll_offset += 1
+
+                    slot_x, slot_y = load_char_button_point(rect, "slot_5")
+                    self.injector.move(slot_x, slot_y)
+                    hub.rumble(0.04, 0.10, 35)
+                    self._load_char_focus = "slot_5"
+                    self._load_char_last_slot = "slot_5"
+                    self.shared.update(load_char_focus="slot_5", load_char_delete_open=False)
+                    return
+        elif dpad_up:
+            if current == "scroll_down":
+                new_focus = "slot_5"
+            elif current == "slot_5":
+                new_focus = "slot_4"
+            elif current == "slot_4":
+                new_focus = "slot_3"
+            elif current == "slot_3":
+                new_focus = "slot_2"
+            elif current == "slot_2":
+                new_focus = "slot_1"
+            elif current == "slot_1":
+                # Rolagem contínua via D-pad: se a lista foi rolada para baixo,
+                # clica na seta superior para rolar 1 personagem para cima e mantém o cursor no slot_1.
+                if self._load_char_scroll_offset > 0:
+                    scroll_x, scroll_y = load_char_button_point(rect, "scroll_up")
+                    self.injector.move(scroll_x, scroll_y)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.04)
+                    self.injector.mouse_button("left", False)
+                    self._load_char_scroll_offset -= 1
+
+                    slot_x, slot_y = load_char_button_point(rect, "slot_1")
+                    self.injector.move(slot_x, slot_y)
+                    hub.rumble(0.04, 0.10, 35)
+                    self._load_char_focus = "slot_1"
+                    self._load_char_last_slot = "slot_1"
+                    self.shared.update(load_char_focus="slot_1", load_char_delete_open=False)
+                    return
+            elif current in ("back", "delete", "play"):
+                new_focus = self._load_char_last_slot or "slot_1"
+
+        # D-pad Esquerda / Direita
+        elif dpad_left:
+            if current.startswith("slot_") or current in ("scroll_up", "scroll_down"):
+                self._load_char_last_slot = current if current.startswith("slot_") else "slot_1"
+                new_focus = "play"
+            elif current == "play":
+                new_focus = "delete"
+            elif current == "delete":
+                new_focus = "back"
+        elif dpad_right:
+            if current == "back":
+                new_focus = "delete"
+            elif current == "delete":
+                new_focus = "play"
+            elif current == "play":
+                new_focus = self._load_char_last_slot or "slot_1"
+
+        if new_focus != current:
+            self._load_char_focus = new_focus
+            if new_focus.startswith("slot_"):
+                self._load_char_last_slot = new_focus
+            target_x, target_y = load_char_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(load_char_focus=new_focus, load_char_delete_open=False)
+
+    # Navegação por D-pad na Tela de Configurações (Settings)
+    def _handle_settings_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        now: float = 0.0,
+    ) -> None:
+        """Gerencia a navegação na Tela de Configurações (Settings) via D-pad e atalhos."""
+        if not self._settings_initialized:
+            self._settings_initialized = True
+            self._settings_focus = "row1_col1"
+            self._settings_dropdown = None
+            self._settings_dropdown_idx = 0
+            self._settings_slider_dragging = False
+            self._settings_sound_vol = self._memory_state.sound_volume
+            self._settings_music_vol = self._memory_state.music_volume
+            target_x, target_y = settings_button_point(rect, self._settings_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(
+                settings_focus=self._settings_focus,
+                settings_dropdown=None,
+                settings_dropdown_idx=0,
+                settings_slider_dragging=False,
+                settings_sound_vol=self._settings_sound_vol,
+                settings_music_vol=self._settings_music_vol,
+            )
+            return
+
+        current = self._settings_focus or "row1_col1"
+
+        btn_a_pressed = (state.pressed("a") and not self._previous.pressed("a"))
+        btn_b_pressed = (state.pressed("b") and not self._previous.pressed("b"))
+        btn_x_pressed = (state.pressed("x") and not self._previous.pressed("x"))
+        action_pressed = (btn_a_pressed or btn_x_pressed)
+
+        dpad_up = (state.pressed("dpad_up") and not self._previous.pressed("dpad_up"))
+        dpad_down = (state.pressed("dpad_down") and not self._previous.pressed("dpad_down"))
+        dpad_left = (state.pressed("dpad_left") and not self._previous.pressed("dpad_left"))
+        dpad_right = (state.pressed("dpad_right") and not self._previous.pressed("dpad_right"))
+
+        # -------------------------------------------------------------
+        # CASO 1: Slider Dragging (ajuste horizontal com clique segurado)
+        # -------------------------------------------------------------
+        if self._settings_slider_dragging:
+            if btn_b_pressed or action_pressed:
+                # OBS 1: Apertar B (ou A/X) solta o clique esquerdo e libera navegação
+                self._settings_slider_dragging = False
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(settings_slider_dragging=False)
+                return
+
+            stick_left = (state.lx < -0.4 and (now - self._settings_slider_last_stick >= 0.08))
+            stick_right = (state.lx > 0.4 and (now - self._settings_slider_last_stick >= 0.08))
+
+            if dpad_left or stick_left:
+                if stick_left:
+                    self._settings_slider_last_stick = now
+                step = 0.05
+                if current == "music_slider":
+                    self._settings_music_vol = clamp(self._settings_music_vol - step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "music_slider", self._settings_music_vol)
+                else:
+                    self._settings_sound_vol = clamp(self._settings_sound_vol - step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "sound_slider", self._settings_sound_vol)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                hub.rumble(0.02, 0.05, 20)
+                self.shared.update(
+                    settings_sound_vol=self._settings_sound_vol,
+                    settings_music_vol=self._settings_music_vol,
+                )
+            elif dpad_right or stick_right:
+                if stick_right:
+                    self._settings_slider_last_stick = now
+                step = 0.05
+                if current == "music_slider":
+                    self._settings_music_vol = clamp(self._settings_music_vol + step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "music_slider", self._settings_music_vol)
+                else:
+                    self._settings_sound_vol = clamp(self._settings_sound_vol + step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "sound_slider", self._settings_sound_vol)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                hub.rumble(0.02, 0.05, 20)
+                self.shared.update(
+                    settings_sound_vol=self._settings_sound_vol,
+                    settings_music_vol=self._settings_music_vol,
+                )
+            return
+
+        # -------------------------------------------------------------
+        # CASO 2: Dropdown Aberto (Resolution, Shadows, Particle Detail)
+        # -------------------------------------------------------------
+        if self._settings_dropdown is not None:
+            dropdown_name = self._settings_dropdown
+            drop_info = SETTINGS_DROPDOWNS.get(dropdown_name, {})
+            options = drop_info.get("options", [])
+            total_options = len(options)
+
+            if btn_b_pressed:
+                # OBS 2: Apertar B volta ao ponto rosa e clica nele para fechar o dropdown
+                pink_btn = dropdown_name
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self._settings_focus = pink_btn
+                target_x, target_y = settings_button_point(rect, pink_btn)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_focus=pink_btn,
+                )
+                return
+
+            if action_pressed:
+                # OBS 2: Pressionar A/X em uma opção clica nela e volta para a opção rosa
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                pink_btn = dropdown_name
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self._settings_focus = pink_btn
+                target_x, target_y = settings_button_point(rect, pink_btn)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_focus=pink_btn,
+                )
+                return
+
+            if dpad_up and self._settings_dropdown_idx > 0:
+                self._settings_dropdown_idx -= 1
+                target_x, target_y = settings_dropdown_option_point(rect, dropdown_name, self._settings_dropdown_idx)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(settings_dropdown_idx=self._settings_dropdown_idx)
+            elif dpad_down and self._settings_dropdown_idx < total_options - 1:
+                self._settings_dropdown_idx += 1
+                target_x, target_y = settings_dropdown_option_point(rect, dropdown_name, self._settings_dropdown_idx)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(settings_dropdown_idx=self._settings_dropdown_idx)
+            return
+
+        # -------------------------------------------------------------
+        # CASO 3: Tela Principal de Configurações
+        # -------------------------------------------------------------
+        if btn_b_pressed:
+            # Botão B fecha as configurações clicando no botão Cancelar
+            target_x, target_y = settings_button_point(rect, "cancel")
+            self.injector.move(target_x, target_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            self._settings_focus = "cancel"
+            hub.rumble(0.05, 0.12, 40)
+            self.shared.update(settings_focus="cancel")
+            return
+
+        if action_pressed:
+            if current in ("sound_slider", "music_slider"):
+                # OBS 1: Apertar A/X sobre o roxo inicia o hold do clique esquerdo
+                vol = self._settings_music_vol if current == "music_slider" else self._settings_sound_vol
+                target_x, target_y = settings_button_point(rect, current, vol)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                self._settings_slider_dragging = True
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(settings_slider_dragging=True)
+                return
+            elif current in ("resolution", "shadows", "particle_detail"):
+                # OBS 2: Apertar A/X no botão rosa abre o dropdown e move cursor pro amarelo
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                self._settings_dropdown = current
+                self._settings_dropdown_idx = 0
+                target_x, target_y = settings_dropdown_option_point(rect, current, 0)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(
+                    settings_dropdown=current,
+                    settings_dropdown_idx=0,
+                )
+                return
+            else:
+                # Botões normais (checkboxes, mute, cancel, apply)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                return
+
+        # Navegação no grafo de posições
+        new_focus = current
+        nav_options = SETTINGS_NAV_MAP.get(current, {})
+        if dpad_up and "up" in nav_options:
+            new_focus = nav_options["up"]
+        elif dpad_down and "down" in nav_options:
+            new_focus = nav_options["down"]
+        elif dpad_left and "left" in nav_options:
+            new_focus = nav_options["left"]
+        elif dpad_right and "right" in nav_options:
+            new_focus = nav_options["right"]
+
+        if new_focus != current:
+            self._settings_focus = new_focus
+            if new_focus == "sound_slider":
+                target_x, target_y = settings_button_point(rect, new_focus, self._settings_sound_vol)
+            elif new_focus == "music_slider":
+                target_x, target_y = settings_button_point(rect, new_focus, self._settings_music_vol)
+            else:
+                target_x, target_y = settings_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(settings_focus=new_focus)
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
@@ -1369,6 +1916,15 @@ class BridgeEngine(threading.Thread):
                 self._difficulty_initialized = False
                 self.shared.update(difficulty_focus=None)
 
+            if state_id == 3:
+                self._handle_load_char_navigation(state, rect, hub, now)
+            elif self._load_char_initialized:
+                self._load_char_initialized = False
+                self._load_char_focus = None
+                self._load_char_delete_dialog_open = False
+                self._load_char_scroll_offset = 0
+                self.shared.update(load_char_focus=None, load_char_delete_open=False)
+
             # Diálogos de NPCs, Missões e Telas de História
             if self._memory_state.dialog_type:
                 self._handle_dialog_navigation(state, rect, hub)
@@ -1389,6 +1945,31 @@ class BridgeEngine(threading.Thread):
                 self._pause_menu_initialized = False
                 self._pause_focus = None
                 self.shared.update(pause_menu_focus=None)
+
+            # Tela de Configurações (Settings) em qualquer estado (in-game ou menu principal)
+            is_settings = (
+                "Configurações" in (self._memory_state.open_menus or [])
+                or any("configura" in m.lower() or "setting" in m.lower() for m in (self._memory_state.open_menus or []))
+                or (bool(self._memory_state.state_desc) and ("configura" in self._memory_state.state_desc.lower() or "setting" in self._memory_state.state_desc.lower()))
+            )
+            if is_settings:
+                self._handle_settings_navigation(state, rect, hub, now)
+                self._previous_panels = (self._active_panels[0], self._active_panels[1])
+                return
+            elif self._settings_initialized:
+                if self._settings_slider_dragging:
+                    self.injector.mouse_button("left", False)
+                    self._settings_slider_dragging = False
+                self._settings_initialized = False
+                self._settings_focus = None
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self.shared.update(
+                    settings_focus=None,
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_slider_dragging=False,
+                )
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -1399,6 +1980,12 @@ class BridgeEngine(threading.Thread):
             if self._difficulty_initialized:
                 self._difficulty_initialized = False
                 self.shared.update(difficulty_focus=None)
+            if self._load_char_initialized:
+                self._load_char_initialized = False
+                self._load_char_focus = None
+                self._load_char_delete_dialog_open = False
+                self._load_char_scroll_offset = 0
+                self.shared.update(load_char_focus=None, load_char_delete_open=False)
             if self._dialog_initialized:
                 self._dialog_initialized = False
                 self._last_dialog_type = ""
@@ -1408,6 +1995,20 @@ class BridgeEngine(threading.Thread):
                 self._pause_menu_initialized = False
                 self._pause_focus = None
                 self.shared.update(pause_menu_focus=None)
+            if self._settings_initialized:
+                if self._settings_slider_dragging:
+                    self.injector.mouse_button("left", False)
+                    self._settings_slider_dragging = False
+                self._settings_initialized = False
+                self._settings_focus = None
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self.shared.update(
+                    settings_focus=None,
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_slider_dragging=False,
+                )
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -1459,9 +2060,19 @@ class BridgeEngine(threading.Thread):
         # segurar o clique comum.
         radial_held = state.pressed("lb") and self._is_radial_allowed()
         lt_held = self._lt_current
-        left_pressed = auto_move or (state.pressed("a") and not radial_held and not lt_held)
+        # Na tela de Carregar Personagem (state_id == 3) e na tela de Configurações, as ações
+        # dos botões A e X são tratadas inteiramente pelos respectivos handlers (que realizam o
+        # clique e movem o cursor para o próximo destino). Suprimimos o mouse aqui para que o botão
+        # ainda segurado no controle não dispare um clique falso/residual no destino do cursor.
+        suppress_mouse = self._load_char_initialized or self._settings_initialized
+        left_pressed = auto_move or (
+            state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
+        )
+        right_pressed = (
+            state.pressed("x") and not radial_held and not lt_held and not suppress_mouse
+        )
         self._set_mouse("left", left_pressed)
-        self._set_mouse("right", state.pressed("x") and not radial_held and not lt_held)
+        self._set_mouse("right", right_pressed)
         # Borda de subida do clique esquerdo: sincroniza com o fechamento de menus do jogo
         # (mesma regra do ESC/Alt+F4). Botão do painel = fecha só aquele lado; zona central
         # com os dois abertos = fechou tudo.
