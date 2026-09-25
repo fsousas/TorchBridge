@@ -521,8 +521,22 @@ class GameOverlay(QWidget):
                 for x, y in close_tab_vertices(rect, side)
             ])
 
-        is_in_game = snapshot.memory_is_in_game or not snapshot.memory_state_desc
         state_desc = snapshot.memory_state_desc
+
+        # Telas que NÃO devem exibir HUD inferior nem Pet Actions:
+        # - Configurações (Settings)
+        # - Telas de Carregamento (Loading)
+        is_settings = (
+            "Configurações" in (snapshot.memory_open_menus or [])
+            or any("configura" in m.lower() or "setting" in m.lower() for m in (snapshot.memory_open_menus or []))
+            or (bool(state_desc) and ("configura" in state_desc.lower() or "setting" in state_desc.lower()))
+        )
+        is_loading = (
+            snapshot.memory_is_loading
+            or (bool(state_desc) and "carregando" in state_desc.lower())
+        )
+
+        is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading
 
         if is_in_game:
             regions = panel_regions(rect)

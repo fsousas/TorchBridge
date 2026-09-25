@@ -171,6 +171,45 @@ class OverlayCalibrationTests(unittest.TestCase):
             finally:
                 painter.end()
 
+    def test_draw_calibration_settings_screen_hides_hud_and_pet(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_state_desc="Configurações (Settings)",
+                memory_open_menus=["Configurações"],
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            painter.drawPixmap = MagicMock()
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                # Não deve desenhar a HUD pixmap nem Pet Actions pixmap
+                painter.drawPixmap.assert_not_called()
+            finally:
+                painter.end()
+
+    def test_draw_calibration_loading_screen_hides_hud_and_pet(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_is_loading=True,
+                memory_state_desc="Carregando...",
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            painter.drawPixmap = MagicMock()
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                painter.drawPixmap.assert_not_called()
+            finally:
+                painter.end()
+
 
 if __name__ == "__main__":
     unittest.main()
