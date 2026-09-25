@@ -22,7 +22,9 @@ from .models import (
     dialog_button_point,
     difficulty_menu_button_point,
     load_char_button_point,
+    modal_ok_point,
     pause_menu_button_point,
+    fishing_hook_point,
     settings_button_point,
     settings_dropdown_option_point,
     SETTINGS_BUTTONS,
@@ -175,6 +177,9 @@ class BridgeEngine(threading.Thread):
         self._settings_slider_last_stick: float = 0.0
         self._settings_sound_vol: float = 1.0
         self._settings_music_vol: float = 1.0
+        # Navegação na Interface de Pesca e Modal de Confirmação (Peixe/Mensagens)
+        self._fishing_initialized: bool = False
+        self._modal_confirm_initialized: bool = False
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -214,7 +219,11 @@ class BridgeEngine(threading.Thread):
             settings_dropdown=None,
             settings_dropdown_idx=0,
             settings_slider_dragging=False,
+            fishing_focus=None,
+            modal_confirm_focus=None,
         )
+        self._fishing_initialized = False
+        self._modal_confirm_initialized = False
 
     # Pede a parada; a thread encerra no próximo ciclo.
     def stop(self) -> None:
@@ -1275,6 +1284,62 @@ class BridgeEngine(threading.Thread):
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(settings_focus=new_focus)
 
+    # Navegação e Interação na Interface de Pesca (minigame do anzol)
+    def _handle_fishing_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia o posicionamento e interação na interface de pesca."""
+        target_x, target_y = fishing_hook_point(rect)
+        if not self._fishing_initialized:
+            self._fishing_initialized = True
+            self.injector.move(target_x, target_y)
+            self.shared.update(fishing_focus="hook")
+
+        # Mantém o cursor fixo no anzol como única opção
+        cur_x, cur_y = self.injector.cursor_position()
+        if abs(cur_x - target_x) > 4 or abs(cur_y - target_y) > 4:
+            self.injector.move(target_x, target_y)
+
+        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
+        if btn_a_pressed or btn_x_pressed:
+            self.injector.move(target_x, target_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.04, 0.10, 35)
+
+    # Navegação e Interação no Modal de Confirmação (Resultado de Pesca / Popups com Ok)
+    def _handle_modal_confirm_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia o posicionamento e confirmação no popup modal (Ok do peixe/mensagem)."""
+        target_x, target_y = modal_ok_point(rect)
+        if not self._modal_confirm_initialized:
+            self._modal_confirm_initialized = True
+            self.injector.move(target_x, target_y)
+            self.shared.update(modal_confirm_focus="ok")
+
+        # Garante o cursor sobre o botão Ok
+        cur_x, cur_y = self.injector.cursor_position()
+        if abs(cur_x - target_x) > 4 or abs(cur_y - target_y) > 4:
+            self.injector.move(target_x, target_y)
+
+        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
+        btn_b_pressed = state.pressed("b") and not self._previous.pressed("b")
+
+        if btn_a_pressed or btn_x_pressed or btn_b_pressed:
+            self.injector.move(target_x, target_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.04, 0.10, 35)
+
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
     # para 0..1; o mesmo limiar vale no caminho raw (trigger_value devolve 0..1).
@@ -1603,11 +1668,19 @@ class BridgeEngine(threading.Thread):
 
     def _is_radial_allowed(self) -> bool:
         """Determina se a roda de habilidades pode ser aberta.
-        Regra: somente permitida quando em gameplay (is_in_game) e sem o menu Pause aberto.
+        Regra: somente permitida quando em gameplay (is_in_game) e sem menus especiais (Pause, Pesca, Confirmação, Settings).
         Se a leitura de memória não estiver conectada, permite como fallback."""
         if not self._memory_state.is_connected:
             return True
-        return self._memory_state.is_in_game and "Pause" not in self._memory_state.open_menus
+        if not self._memory_state.is_in_game:
+            return False
+        blocked_menus = {"Pause", "Pesca", "Confirmação Sair", "Configurações"}
+        if any(m in blocked_menus for m in (self._memory_state.open_menus or [])):
+            return False
+        desc = (self._memory_state.state_desc or "").lower()
+        if "confirma" in desc or "setting" in desc or "configura" in desc:
+            return False
+        return True
 
     # Roda de habilidades: LB + analógico direito escolhe o setor; A confirma o atalho e
     # soltar LB só fecha a roda (a confirmação saiu do soltar em ago/2026).
@@ -1970,6 +2043,29 @@ class BridgeEngine(threading.Thread):
                     settings_dropdown_idx=0,
                     settings_slider_dragging=False,
                 )
+
+            # Modal de Confirmação (Resultado de Pesca, Avisos e Sair)
+            is_modal = (
+                "Confirmação Sair" in (self._memory_state.open_menus or [])
+                or "confirma" in (self._memory_state.state_desc or "").lower()
+            )
+            if is_modal:
+                self._handle_modal_confirm_navigation(state, rect, hub)
+                self._previous_panels = (self._active_panels[0], self._active_panels[1])
+                return
+            elif self._modal_confirm_initialized:
+                self._modal_confirm_initialized = False
+                self.shared.update(modal_confirm_focus=None)
+
+            # Interface de Pesca (minigame do anzol)
+            is_fishing = "Pesca" in (self._memory_state.open_menus or [])
+            if is_fishing:
+                self._handle_fishing_navigation(state, rect, hub)
+                self._previous_panels = (self._active_panels[0], self._active_panels[1])
+                return
+            elif self._fishing_initialized:
+                self._fishing_initialized = False
+                self.shared.update(fishing_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -2009,6 +2105,12 @@ class BridgeEngine(threading.Thread):
                     settings_dropdown_idx=0,
                     settings_slider_dragging=False,
                 )
+            if self._modal_confirm_initialized:
+                self._modal_confirm_initialized = False
+                self.shared.update(modal_confirm_focus=None)
+            if self._fishing_initialized:
+                self._fishing_initialized = False
+                self.shared.update(fishing_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -2064,7 +2166,12 @@ class BridgeEngine(threading.Thread):
         # dos botões A e X são tratadas inteiramente pelos respectivos handlers (que realizam o
         # clique e movem o cursor para o próximo destino). Suprimimos o mouse aqui para que o botão
         # ainda segurado no controle não dispare um clique falso/residual no destino do cursor.
-        suppress_mouse = self._load_char_initialized or self._settings_initialized
+        suppress_mouse = (
+            self._load_char_initialized
+            or self._settings_initialized
+            or self._fishing_initialized
+            or self._modal_confirm_initialized
+        )
         left_pressed = auto_move or (
             state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
         )

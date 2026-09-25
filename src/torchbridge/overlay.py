@@ -40,6 +40,8 @@ from .models import (
     pause_menu_button_point,
     LOAD_CHAR_BUTTONS,
     load_char_button_point,
+    fishing_hook_point,
+    modal_ok_point,
     SETTINGS_BUTTONS,
     SETTINGS_DROPDOWNS,
     settings_button_point,
@@ -955,6 +957,33 @@ class GameOverlay(QWidget):
                         painter.setPen(QPen(QColor(255, 255, 0, 255), 1.5 * scale, Qt.PenStyle.DashLine))
                         painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawEllipse(QPointF(bx - rect.left, by - rect.top), box_size * 0.8, box_size * 0.8)
+
+        # 11. Modal de Confirmação (Resultado de Pesca / Popups com Ok)
+        if snapshot.modal_confirm_focus:
+            btn_w = 125 * scale * (rect.height / 768.0)
+            btn_h = 24 * scale * (rect.height / 768.0)
+            bx, by = modal_ok_point(rect)
+            lx = bx - rect.left - btn_w / 2.0
+            ly = by - rect.top - btn_h / 2.0
+            painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+            painter.setBrush(QColor(255, 215, 0, 110))
+            painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+            painter.setFont(self._font(max(7, round(8 * scale)), True))
+            painter.setPen(QColor(255, 255, 255, 240))
+            painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, "OK")
+
+        # 12. Interface de Pesca (Anzol de Pescaria)
+        if snapshot.fishing_focus:
+            hook_size = 40.0 * scale * (rect.height / 768.0)
+            hx, hy = fishing_hook_point(rect)
+            lx = hx - rect.left - hook_size / 2.0
+            ly = hy - rect.top - hook_size / 2.0
+            painter.setPen(QPen(QColor(255, 30, 30, 240), 2.5 * scale))
+            painter.setBrush(QColor(255, 30, 30, 60))
+            painter.drawRect(QRectF(lx, ly, hook_size, hook_size))
+            painter.setFont(self._font(max(7, round(8 * scale)), True))
+            painter.setPen(QColor(255, 255, 255, 240))
+            painter.drawText(QRectF(lx, ly - 14 * scale, hook_size, 14 * scale), Qt.AlignmentFlag.AlignCenter, "PESCA")
 
         # Badge de diagnóstico da Memória Interna (visível em todas as telas no modo calibração)
         mem_desc = snapshot.memory_state_desc or "Aguardando jogo..."

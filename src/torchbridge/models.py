@@ -680,6 +680,40 @@ def dialog_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# Coordenadas calibradas para Pesca e Diálogo Modal de Confirmação (base 1024x768)
+FISHING_HOOK_COORD: tuple[float, float] = (512.0, 498.0)
+MODAL_OK_COORD: tuple[float, float] = (509.0, 467.0)
+
+
+def fishing_hook_point(rect: Rect) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do botão de anzol na interface de pesca."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    base_x, base_y = FISHING_HOOK_COORD
+    x = center_x + (base_x - 512.0) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def modal_ok_point(rect: Rect) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do botão Ok no modal de confirmação / mensagem de pesca."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    base_x, base_y = MODAL_OK_COORD
+    x = center_x + (base_x - 512.0) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+
 # Coordenadas base dos botões e slots de interfaces de crafting (painel esquerdo, base 1024x768)
 # Calibradas e validadas pixel a pixel a partir dos elementos visuais reais in-game
 CRAFTING_BUTTONS: dict[str, dict[str, tuple[float, float]]] = {
@@ -1056,6 +1090,8 @@ class OverlaySnapshot:
     settings_slider_dragging: bool = False
     settings_sound_vol: float = 1.0
     settings_music_vol: float = 1.0
+    fishing_focus: str | None = None
+    modal_confirm_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

@@ -334,4 +334,29 @@ Extraídos e normalizados a partir das imagens em `assets/images/sreensXcursor/s
    - Os cliques de mouse padrão (`_set_mouse`) permanecem suprimidos (`suppress_mouse = True`) de ponta a ponta na tela de configurações, prevenindo que o aperto de X vaze um clique com botão direito que cancelaria o arrasto no CEGUI/Torchlight.
    - O arrasto pelo analógico conta com limitação de taxa (rate-limiting de 80ms) para ajuste suave e controlado do volume.
 
+---
+
+## 11. Interface de Pescaria e Modal de Confirmação (Resultado de Pesca / Mensagens)
+
+### A. Interface de Pesca (Minigame do Anzol)
+- **Detecção via RAM**: Menu `"Pesca"` ativo em `CGameUI + 0x031C` (byte `+0x18 == 1`).
+- **Coordenada do Anzol (1024x768)**:
+  - Centro do botão octogonal de anzol com ondas de água: `(512, 498)`.
+- **Comportamento do Motor**:
+  - O cursor vai automaticamente para o anzol `(512, 498)` e permanece fixo nele como **única opção**, impedindo que o cursor se perca na tela durante a pescaria.
+  - Pressionar **A ou X** no controle dispara o clique esquerdo (`mouse_button("left", True)` seguido de `False`), fisgando o peixe.
+  - Abertura da **roda de habilidades (LB)** é **estritamente bloqueada** durante a pescaria.
+  - Comandos de combate, atalhos de overworld e cliques residuais são suprimidos.
+
+### B. Modal de Confirmação (Resultado da Pesca / Mensagens com botão Ok)
+- **Detecção via RAM**: `CModalMenu` ativo em `CGameUI + 0x0304` (`is_modal_open == True` / menu `"Confirmação Sair"`).
+- **Coordenada do Botão Ok (1024x768)**:
+  - Centro do botão Ok vermelho no pergaminho de resultado ("You caught a Bat Fish!" ou "You caught nothing!"): `(509, 467)`.
+- **Comportamento do Motor**:
+  - O cursor posiciona-se automaticamente no centro do botão **Ok** `(509, 467)`.
+  - Pressionar **A, X ou B** aciona o clique no botão Ok para confirmar e fechar o diálogo.
+  - Abertura da **roda de habilidades (LB)** é **estritamente bloqueada** no modal de confirmação.
+  - Comandos de combate e movimento de cursor livre são suprimidos.
+
+
 
