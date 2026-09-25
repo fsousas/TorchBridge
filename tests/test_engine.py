@@ -1738,6 +1738,50 @@ class CharCreateNavigationTests(unittest.TestCase):
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_left"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._char_create_focus, "destroyer")
 
+    def test_b_button_clicks_back_char_create(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            # Inicializa foco em destroyer
+            engine._handle_char_create_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "destroyer")
+
+            # Aperta B (Bolinha): move para back e clica
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"b"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "back")
+            self.assertEqual(shared.get().char_create_focus, "back")
+            # Verifica que o cursor moveu para o botão back e clicou (down + up)
+            from torchbridge.models import char_create_button_point
+            expected_pos = char_create_button_point(rect, "back")
+            self.assertEqual(injector.moved[-1], expected_pos)
+            self.assertIn(("mouse", "left", True), injector.events)
+            self.assertIn(("mouse", "left", False), injector.events)
+
+    def test_char_create_does_not_fire_combat_key_2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1, is_in_game=False)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            # Inicializa em Criar Personagem
+            engine._handle_char_create_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            cfg = engine.config.get()
+
+            # Executa tick com B pressionado através de _process_active
+            engine._previous = ControllerState()
+            engine._process_active(hub, ControllerState(buttons={"b"}), rect, cfg, now=1.0, dt=0.008)  # type: ignore[arg-type]
+
+            # Garante que a tecla '2' NÃO foi digitada
+            self.assertNotIn("2", injector.tapped)
+            self.assertEqual(engine._char_create_focus, "back")
+
 
 class DifficultyNavigationTests(unittest.TestCase):
     def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
@@ -1807,4 +1851,28 @@ class DifficultyNavigationTests(unittest.TestCase):
             engine._previous = ControllerState()
             engine._handle_difficulty_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._difficulty_focus, "hardcore")
+
+    def test_b_button_clicks_back_difficulty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=2)
+            rect = Rect(0, 0, 1024, 768)
+            hub = FakeHub()
+
+            # Inicializa foco em hardcore
+            engine._handle_difficulty_navigation(ControllerState(), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "hardcore")
+
+            # Aperta B (Bolinha): move para back e clica
+            engine._previous = ControllerState()
+            engine._handle_difficulty_navigation(ControllerState(buttons={"b"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._difficulty_focus, "back")
+            self.assertEqual(shared.get().difficulty_focus, "back")
+            from torchbridge.models import difficulty_menu_button_point
+            expected_pos = difficulty_menu_button_point(rect, "back")
+            self.assertEqual(injector.moved[-1], expected_pos)
+            self.assertIn(("mouse", "left", True), injector.events)
+            self.assertIn(("mouse", "left", False), injector.events)
+
 

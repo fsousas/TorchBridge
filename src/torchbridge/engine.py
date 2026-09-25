@@ -436,6 +436,18 @@ class BridgeEngine(threading.Thread):
         current = self._char_create_focus
         new_focus = current
 
+        # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Cancelar / Voltar
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._char_create_focus = "back"
+            target_x, target_y = char_create_button_point(rect, "back")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(char_create_focus="back")
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
         dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
         dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
         dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
@@ -518,6 +530,18 @@ class BridgeEngine(threading.Thread):
 
         current = self._difficulty_focus
         new_focus = current
+
+        # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Voltar
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._difficulty_focus = "back"
+            target_x, target_y = difficulty_menu_button_point(rect, "back")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(difficulty_focus="back")
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
 
         dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
         dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
@@ -1212,9 +1236,12 @@ class BridgeEngine(threading.Thread):
         # roda: com LB de pé eles se auto-suprimem lá dentro. O cronômetro do clique
         # modificado roda DEPOIS: um Y/LT+A do próprio tick arma a sequência e o
         # _handle_modifier_release já executa as fases já vencidas (determinístico).
-        self._handle_trigger_combos(state, bindings, now)
-        self._handle_overworld_remap(state, rect, bindings, now)
-        self._handle_modifier_release(now)
+        # Pertencem exclusivamente ao gameplay in-game: fora do jogo (telas iniciais e menus)
+        # esses atalhos não devem vazar teclas de combate/habilidade (1, 2, 3..0).
+        if not self._memory_state.is_connected or self._memory_state.is_in_game:
+            self._handle_trigger_combos(state, bindings, now)
+            self._handle_overworld_remap(state, rect, bindings, now)
+            self._handle_modifier_release(now)
 
         # Posiciona o cursor; retorna True quando o movimento direto deve segurar o clique esquerdo.
         # Com a sequência do pet em curso os sticks estão bloqueados: nenhum move, nenhum
