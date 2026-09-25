@@ -462,6 +462,8 @@ class BridgeEngine(threading.Thread):
                 new_focus = "ferret"
             elif current == "back":
                 new_focus = "character_name"
+            elif current == "character_name":
+                new_focus = "ok"
         elif dpad_left:
             if current == "dog":
                 new_focus = "destroyer"
@@ -473,6 +475,8 @@ class BridgeEngine(threading.Thread):
                 new_focus = "alchemist"
             elif current == "character_name":
                 new_focus = "back"
+            elif current == "ok":
+                new_focus = "character_name"
         elif dpad_down:
             if current == "destroyer":
                 new_focus = "vanquisher"
@@ -487,11 +491,11 @@ class BridgeEngine(threading.Thread):
             elif current == "ferret":
                 new_focus = "pet_name"
             elif current == "pet_name":
-                new_focus = "character_name"
+                new_focus = "ok"
         elif dpad_up:
             if current == "back":
                 new_focus = "alchemist"
-            elif current == "character_name":
+            elif current in ("character_name", "ok"):
                 new_focus = "pet_name"
             elif current == "alchemist":
                 new_focus = "vanquisher"

@@ -448,7 +448,7 @@ class CharCreateButtonTests(unittest.TestCase):
     def test_char_create_button_points_768p(self):
         from torchbridge.models import CREATE_CHAR_BUTTONS, char_create_button_point
         rect = Rect(0, 0, 1024, 768)
-        self.assertEqual(len(CREATE_CHAR_BUTTONS), 9)
+        self.assertEqual(len(CREATE_CHAR_BUTTONS), 10)
 
         # Classes (ancoradas na esquerda)
         dx, dy = char_create_button_point(rect, "destroyer")
@@ -489,6 +489,10 @@ class CharCreateButtonTests(unittest.TestCase):
         self.assertAlmostEqual(cn_x, round(512 + 768 * 0.052), delta=1)
         self.assertAlmostEqual(cn_y, round(768 * 0.948), delta=1)
 
+        ok_x, ok_y = char_create_button_point(rect, "ok")
+        self.assertAlmostEqual(ok_x, round(512 + 768 * 0.454), delta=1)
+        self.assertAlmostEqual(ok_y, round(768 * 0.948), delta=1)
+
     def test_char_create_button_points_1080p(self):
         from torchbridge.models import char_create_button_point
         rect = Rect(0, 0, 1920, 1080)
@@ -505,6 +509,9 @@ class CharCreateButtonTests(unittest.TestCase):
         # Rodapé
         bk_x, bk_y = char_create_button_point(rect, "back")
         self.assertAlmostEqual(bk_x, round(960 - 1080 * 0.266), delta=1)
+
+        ok_x, ok_y = char_create_button_point(rect, "ok")
+        self.assertAlmostEqual(ok_x, round(960 + 1080 * 0.454), delta=1)
 
     def test_char_create_invalid_rect(self):
         from torchbridge.models import char_create_button_point

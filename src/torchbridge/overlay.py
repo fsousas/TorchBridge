@@ -648,7 +648,7 @@ class GameOverlay(QWidget):
                     btn_w, btn_h = 44 * scale, 38 * scale
                 elif btn_name in ("dog", "cat", "ferret", "pet_name"):
                     btn_w, btn_h = 34 * scale, 18 * scale
-                else:  # back, character_name
+                else:  # back, character_name, ok
                     btn_w, btn_h = 47 * scale, 37 * scale
 
                 bx, by = char_create_button_point(rect, btn_name)

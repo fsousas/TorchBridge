@@ -518,6 +518,7 @@ CHAR_CREATE_PET_NAME_Y_FRACTION = 0.719
 CHAR_CREATE_BOTTOM_Y_FRACTION = 0.948  # Âncora no rodapé / centro
 CHAR_CREATE_BACK_X_OFFSET_FRACTION = -0.266
 CHAR_CREATE_NAME_X_OFFSET_FRACTION = 0.052
+CHAR_CREATE_OK_X_OFFSET_FRACTION = 0.454
 
 CREATE_CHAR_BUTTONS = (
     "destroyer",
@@ -529,6 +530,7 @@ CREATE_CHAR_BUTTONS = (
     "pet_name",
     "back",
     "character_name",
+    "ok",
 )
 
 
@@ -565,6 +567,9 @@ def char_create_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
         y = rect.top + rect.height * CHAR_CREATE_BOTTOM_Y_FRACTION
     elif button_name == "character_name":
         x = center_x + rect.height * CHAR_CREATE_NAME_X_OFFSET_FRACTION
+        y = rect.top + rect.height * CHAR_CREATE_BOTTOM_Y_FRACTION
+    elif button_name == "ok":
+        x = center_x + rect.height * CHAR_CREATE_OK_X_OFFSET_FRACTION
         y = rect.top + rect.height * CHAR_CREATE_BOTTOM_Y_FRACTION
     else:
         x = rect.left + rect.height * CHAR_CREATE_CLASSES_X_FRACTION

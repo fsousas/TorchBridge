@@ -1713,6 +1713,21 @@ class CharCreateNavigationTests(unittest.TestCase):
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
             self.assertEqual(engine._char_create_focus, "character_name")
 
+            # 5b. D-pad direita -> ok
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "ok")
+
+            # 5c. D-pad esquerda -> character_name
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_left"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "character_name")
+
+            # 5d. D-pad direita -> ok novamente
+            engine._previous = ControllerState()
+            engine._handle_char_create_navigation(ControllerState(buttons={"dpad_right"}), rect, hub)  # type: ignore[arg-type]
+            self.assertEqual(engine._char_create_focus, "ok")
+
             # 6. D-pad cima -> pet_name
             engine._previous = ControllerState()
             engine._handle_char_create_navigation(ControllerState(buttons={"dpad_up"}), rect, hub)  # type: ignore[arg-type]
