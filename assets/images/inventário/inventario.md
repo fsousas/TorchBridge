@@ -109,4 +109,21 @@ cursor na posicao x1 y1 se mover para a esquerda no dpad, faz ele mover o cursor
   - Linha 2 Col 1 `(2, 1)` + Esquerda $\to$ Linha 1 Col 7 `(1, 7)` do Pet.
   - Linha 3 Col 1 `(3, 1)` + Esquerda $\to$ Linha 2 Col 7 `(2, 7)` do Pet.
 
+---
+
+## Tratamento de Hover Residual e Fechamento Limpo de Tooltips (Spells e Travessias)
+#### Causa Raiz
+No motor gráfico do Torchlight (CEGUI/Runic UI), os slots de spell (`spell_1..4`, `pet_spell_1..2`) são botões que instanciam janelas de descrição flutuante (`SpellTooltip`) e só as destroem quando recebem um evento `EventMouseLeavesArea` / `OnMouseLeave`.
+Ao mover o mouse fisicamente ou pelo analógico, o cursor cruza os pixels do pergaminho neutro fora do botão, acionando o `OnMouseLeave` de forma orgânica. Porém, com o D-pad, o teletransporte instantâneo do cursor (saltando 40px–500px em 0ms via `SendInput`) para outro slot ou para o painel oposto faz com que o Windows coalesce os eventos e o widget do spell nunca receba a saída de mouse — fazendo a descrição do spell ficar presa na tela e seguir o cursor.
+
+#### Solução Implementada (`_move_cursor_with_leave_step`)
+1. **Ao sair de qualquer slot de spell (`is_leaving_spell`):**
+   - O cursor dá um micro-passo de 35px para baixo (`origin_y + 35 * scale`), caindo exatamente no pergaminho neutro do painel (sem slots nem botões).
+   - Pausa calibrada de **25ms** (1–2 frames a 60 FPS) para o message pump do jogo processar o evento de saída e fechar o `SpellTooltip`.
+2. **Ao cruzar entre painéis opostos (Pet $\leftrightarrow$ Inventário):**
+   - O cursor transita pelo centro da tela (`(mid_x, mid_y)` no mundo 3D aberto) por 25ms para desengajar o foco do painel anterior e fechar quaisquer tooltips de itens.
+3. **Navegação comum dentro do Grid:**
+   - Movimentação direta instantânea (0ms de atraso), mantendo a resposta rápida e sem impacto na fluidez.
+
+
 

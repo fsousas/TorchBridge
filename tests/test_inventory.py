@@ -792,6 +792,54 @@ class DualInventoryTests(unittest.TestCase):
         self.assertEqual(self.engine._inventory_focus, (1, 1))
 
 
+class MoveCursorWithLeaveStepTests(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.config = ConfigManager(Path(self._temp_dir.name) / "perfil.json")
+        self.shared = SharedOverlayState()
+        self.engine = BridgeEngine(self.config, self.shared)
+        self.engine.injector = MagicMock()
+        self.rect = Rect(left=0, top=0, width=1024, height=768)
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
+
+    def test_grid_to_grid_normal_snappy_zero_delay(self):
+        self.engine._move_cursor_with_leave_step((1, 1), 740, 520, 780, 520, self.rect)
+        self.assertEqual(self.engine.injector.move.call_count, 1)
+        self.engine.injector.move.assert_called_with(780, 520)
+
+    def test_leaving_spell_within_same_panel(self):
+        sp2_x, sp2_y = inventory_upper_point(self.rect, "spell_2")
+        target_x, target_y = inventory_slot_point(self.rect, 1, 3)
+        self.engine._move_cursor_with_leave_step("spell_2", sp2_x, sp2_y, target_x, target_y, self.rect)
+        self.assertEqual(self.engine.injector.move.call_count, 2)
+        self.assertEqual(self.engine.injector.move.call_args_list[0][0], (sp2_x, sp2_y + 35))
+        self.assertEqual(self.engine.injector.move.call_args_list[1][0], (target_x, target_y))
+
+    def test_leaving_spell_cross_screen(self):
+        sp1_x, sp1_y = inventory_upper_point(self.rect, "spell_1")
+        target_x, target_y = pet_inventory_upper_point(self.rect, "pet_spell_2")
+        self.engine._move_cursor_with_leave_step("spell_1", sp1_x, sp1_y, target_x, target_y, self.rect)
+        self.assertEqual(self.engine.injector.move.call_count, 3)
+        self.assertEqual(self.engine.injector.move.call_args_list[0][0], (sp1_x, sp1_y + 35))
+        mid_x = (sp1_x + target_x) // 2
+        mid_y = (sp1_y + 35 + target_y) // 2
+        self.assertEqual(self.engine.injector.move.call_args_list[1][0], (mid_x, mid_y))
+        self.assertEqual(self.engine.injector.move.call_args_list[2][0], (target_x, target_y))
+
+    def test_grid_cross_screen_bridge(self):
+        cur_x, cur_y = pet_inventory_slot_point(self.rect, 1, 7)
+        target_x, target_y = inventory_slot_point(self.rect, 1, 1)
+        self.engine._move_cursor_with_leave_step((1, 7), cur_x, cur_y, target_x, target_y, self.rect)
+        self.assertEqual(self.engine.injector.move.call_count, 2)
+        mid_x = (cur_x + target_x) // 2
+        mid_y = (cur_y + target_y) // 2
+        self.assertEqual(self.engine.injector.move.call_args_list[0][0], (mid_x, mid_y))
+        self.assertEqual(self.engine.injector.move.call_args_list[1][0], (target_x, target_y))
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

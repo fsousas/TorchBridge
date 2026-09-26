@@ -1384,6 +1384,62 @@ class BridgeEngine(threading.Thread):
             self.injector.mouse_button("left", False)
             hub.rumble(0.04, 0.10, 35)
 
+    def _move_cursor_with_leave_step(
+        self,
+        current_focus: Any,
+        cur_x: int,
+        cur_y: int,
+        target_x: int,
+        target_y: int,
+        rect: Rect,
+    ) -> None:
+        """Move o cursor para o alvo garantindo o encerramento limpo de tooltips de spells e travessias entre telas.
+
+        No Torchlight (CEGUI), slots de spell são botões que só fecham o tooltip quando
+        recebem um evento OnMouseLeave. Saltos instantâneos via SendInput para outro widget
+        ou outra tela ignoram a borda neutra, deixando o tooltip preso na tela.
+        """
+        scale = rect.height / 768.0 if (rect and rect.valid) else 1.0
+        is_leaving_spell = False
+        origin_x, origin_y = cur_x, cur_y
+
+        if current_focus is not None:
+            f_str = str(current_focus)
+            if f_str.startswith("spell_"):
+                is_leaving_spell = True
+                if rect and rect.valid:
+                    origin_x, origin_y = inventory_upper_point(rect, f_str)
+            elif f_str.startswith("pet_spell_"):
+                is_leaving_spell = True
+                if rect and rect.valid:
+                    origin_x, origin_y = pet_inventory_upper_point(rect, f_str)
+
+        is_cross_screen = abs(target_x - origin_x) > 250 * scale
+
+        if is_leaving_spell:
+            # 1. Passo neutro no pergaminho logo abaixo do spell para forçar OnMouseLeave
+            leave_x = origin_x
+            leave_y = origin_y + int(35 * scale)
+            self.injector.move(leave_x, leave_y)
+            time.sleep(0.025)
+
+            # 2. Se for travessia de painéis (Pet <-> Inventário), passa pelo centro neutro da tela
+            if is_cross_screen:
+                mid_x = (leave_x + target_x) // 2
+                mid_y = (leave_y + target_y) // 2
+                self.injector.move(mid_x, mid_y)
+                time.sleep(0.025)
+
+        elif is_cross_screen:
+            # Travessia entre painéis: passa pelo centro neutro da tela (mundo 3D)
+            mid_x = (cur_x + target_x) // 2
+            mid_y = (cur_y + target_y) // 2
+            self.injector.move(mid_x, mid_y)
+            time.sleep(0.025)
+
+        # Movimento final até o slot de destino
+        self.injector.move(target_x, target_y)
+
     # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
     def _handle_inventory_navigation(
         self,
@@ -1488,7 +1544,7 @@ class BridgeEngine(threading.Thread):
                     # Ponte para o Pet: Coluna 1 do Inventário -> Coluna 7 do Pet
                     target_x, target_y = pet_inventory_slot_point(rect, row, 7)
                     self._pet_inventory_focus = (row, 7)
-                    self.injector.move(target_x, target_y)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
                     hub.rumble(0.03, 0.08, 30)
                     self.shared.update(
                         pet_inventory_open=True,
@@ -1524,7 +1580,7 @@ class BridgeEngine(threading.Thread):
                 # Ponte para o Pet: Borda esquerda superior do Inventário -> pet_spell_2 do Pet
                 target_x, target_y = pet_inventory_upper_point(rect, "pet_spell_2")
                 self._pet_inventory_focus = "pet_spell_2"
-                self.injector.move(target_x, target_y)
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
                 hub.rumble(0.03, 0.08, 30)
                 self.shared.update(
                     pet_inventory_open=True,
@@ -1545,7 +1601,7 @@ class BridgeEngine(threading.Thread):
             else:
                 target_x, target_y = inventory_upper_point(rect, str(new_focus))
 
-            self.injector.move(target_x, target_y)
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(
                 inventory_open=True,
@@ -1648,7 +1704,7 @@ class BridgeEngine(threading.Thread):
                     # Ponte para o Inventário: Coluna 7 do Pet -> Coluna 1 do Inventário
                     target_x, target_y = inventory_slot_point(rect, row, 1)
                     self._inventory_focus = (row, 1)
-                    self.injector.move(target_x, target_y)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
                     hub.rumble(0.03, 0.08, 30)
                     self.shared.update(
                         inventory_open=True,
@@ -1695,7 +1751,7 @@ class BridgeEngine(threading.Thread):
                 # Ponte para o Inventário: pet_spell_2 do Pet -> spell_1 do Inventário
                 target_x, target_y = inventory_upper_point(rect, "spell_1")
                 self._inventory_focus = "spell_1"
-                self.injector.move(target_x, target_y)
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
                 hub.rumble(0.03, 0.08, 30)
                 self.shared.update(
                     inventory_open=True,
@@ -1716,7 +1772,7 @@ class BridgeEngine(threading.Thread):
             else:
                 target_x, target_y = pet_inventory_upper_point(rect, str(new_focus))
 
-            self.injector.move(target_x, target_y)
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(
                 pet_inventory_open=True,
