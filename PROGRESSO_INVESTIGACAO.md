@@ -5,10 +5,13 @@ Este documento registra o avanço técnico da engenharia reversa do executável 
 ---
 
 ## 1. Resumo Executivo
-- O executável do Torchlight 1 (versão GOG/Steam) é **32-bit (x86)** e **NÃO possui ASLR** (Dynamic Base). Todos os endereços de código e dados globais são **estáticos e fixos na memória RAM** a cada execução.
-- Eliminamos totalmente o método de varredura ampla de RAM (`VirtualQueryEx`), que causava instabilidade, e mapeamos a **cadeia exata de ponteiros estáticos**.
-- O leitor lê diretamente da RAM via ponteiros fixos em microssegundos com privilégio mínimo (`PROCESS_VM_READ`), com **risco zero de reinício ou crash**.
-- Implementado modo de monitoramento contínuo em tempo real (loop de atualização a cada 300ms) com **reconexão automática de processo** (caso o jogo seja fechado e reaberto).
+- O executável do Torchlight 1 é **32-bit (x86)** em ambas as edições (GOG e Steam), mas com diferenças de empacotamento:
+  - **Versão GOG (Standalone)**: **NÃO possui ASLR** (Dynamic Base desativado, tamanho ~9,13 MB). Carrega no endereço base fixo `0x00400000`, e o ponteiro mestre `CGame` reside no RVA `0x0081AD64` (endereço estático `0x00C1AD64`).
+  - **Versão Steam**: Possui **ASLR ativado** (`IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = True`, tamanho ~10,71 MB por conta das camadas Steamworks). O endereço base é dinâmico a cada inicialização, e o ponteiro mestre `CGame` reside no RVA `0x007F0E0C`.
+- **Compatibilidade Universal**: Implementamos resolução dinâmica de base de módulo (`TH32CS_SNAPMODULE`) e auto-detecção de versão (GOG / Steam) com validação de ponteiros ativos.
+- Toda a estrutura interna das classes C++ (`CGameClient`, `CPlayer`, `CLevel`, `CGameUI`, `CMenuManager`), offsets de membros e todos os 14 menus CEGUI são **100% IDÊNTICOS** entre as versões GOG e Steam!
+- O leitor lê diretamente da RAM via ponteiros em microssegundos com privilégio mínimo (`PROCESS_VM_READ`), com **risco zero de reinício ou crash**.
+- Implementado modo de monitoramento contínuo em tempo real com **reconexão automática de processo** (caso o jogo seja fechado e reaberto).
 
 ---
 
@@ -24,7 +27,9 @@ Este documento registra o avanço técnico da engenharia reversa do executável 
 A hierarquia real de objetos do motor do Torchlight é:
 
 ```
-[0x00C1AD64] (Ponteiro Estático Global em .data)
+[ModuleBase + RVA]
+  • GOG:   0x00400000 + 0x0081AD64 = 0x00C1AD64 (Fixo)
+  • Steam: [Base Dinâmica ASLR] + 0x007F0E0C
      │
      ▼
   CGame

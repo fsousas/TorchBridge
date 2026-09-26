@@ -21,8 +21,11 @@ TH32CS_SNAPPROCESS = 0x00000002
 
 kernel32 = ctypes.windll.kernel32
 
-# Endereços estáticos e offsets mapeados por engenharia reversa (.data sem ASLR)
-ADDR_CGAME_GLOBAL = 0x00C1AD64
+# Endereços estáticos e offsets mapeados por engenharia reversa (.data)
+ADDR_CGAME_GLOBAL = 0x00C1AD64  # Base fixa GOG (0x00400000 + RVA 0x0081AD64)
+RVA_CGAME_GOG     = 0x0081AD64  # RVA CGame na versão GOG (standalone)
+RVA_CGAME_STEAM   = 0x007F0E0C  # RVA CGame na versão Steam (Steamworks/ASLR)
+
 OFFSET_GAMECLIENT = 0x64
 OFFSET_PLAYER     = 0x2C
 OFFSET_LEVEL      = 0x38
@@ -118,6 +121,10 @@ def get_audio_settings() -> dict[str, float | bool]:
     return out
 
 
+TH32CS_SNAPMODULE   = 0x00000008
+TH32CS_SNAPMODULE32 = 0x00000010
+
+
 class PROCESSENTRY32(ctypes.Structure):
     _fields_ = [
         ("dwSize", wintypes.DWORD),
@@ -133,11 +140,27 @@ class PROCESSENTRY32(ctypes.Structure):
     ]
 
 
+class MODULEENTRY32(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("th32ModuleID", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("GlblcntUsage", wintypes.DWORD),
+        ("ProccntUsage", wintypes.DWORD),
+        ("modBaseAddr", ctypes.c_void_p),
+        ("modBaseSize", wintypes.DWORD),
+        ("hModule", wintypes.HMODULE),
+        ("szModule", ctypes.c_char * 256),
+        ("szExePath", ctypes.c_char * 260),
+    ]
+
+
 @dataclass(frozen=True)
 class GameMemoryState:
     """Estado do jogo obtido diretamente da memória RAM e configurações locais."""
     is_connected: bool = False
     pid: int | None = None
+    game_version: str = ""  # "GOG", "Steam", etc.
     state_id: int = -1
     state_desc: str = "Aguardando jogo..."
     is_loading: bool = False
@@ -157,11 +180,16 @@ class GameMemoryState:
 
 
 class TorchlightMemoryReader:
-    """Gerencia a leitura segura da memória do processo Torchlight.exe."""
+    """Gerencia a leitura segura da memória do processo Torchlight.exe (GOG e Steam)."""
 
     def __init__(self) -> None:
         self.pid: int | None = None
         self._handle: int | None = None
+        self._module_base: int = 0x00400000
+        self._module_size: int = 0
+        self._exe_path: str = ""
+        self._cgame_address: int | None = None
+        self.game_version: str = ""
         self._cached_save_count: int = 0
         self._cached_audio: dict[str, float | bool] = {
             "sound_volume": 1.0,
@@ -179,6 +207,23 @@ class TorchlightMemoryReader:
                 pass
             self._handle = None
             self.pid = None
+            self._cgame_address = None
+            self.game_version = ""
+
+    def _get_module_info(self, pid: int) -> tuple[int, int, str]:
+        """Obtém (base_address, base_size, exe_path) do módulo principal Torchlight.exe."""
+        snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
+        if snap == -1 or snap == 0:
+            return (0x00400000, 0, "")
+        try:
+            me = MODULEENTRY32()
+            me.dwSize = ctypes.sizeof(MODULEENTRY32)
+            if kernel32.Module32First(snap, ctypes.byref(me)):
+                base_addr = me.modBaseAddr or 0x00400000
+                return (int(base_addr), int(me.modBaseSize), me.szExePath.decode("latin1", errors="ignore"))
+        finally:
+            kernel32.CloseHandle(snap)
+        return (0x00400000, 0, "")
 
     def _find_pid(self) -> int | None:
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
@@ -210,10 +255,57 @@ class TorchlightMemoryReader:
             if h:
                 self.pid = current_pid
                 self._handle = h
-                log.info(f"[MemoryReader] Conectado ao Torchlight (PID {current_pid})")
+                self._module_base, self._module_size, self._exe_path = self._get_module_info(current_pid)
+                log.info(
+                    f"[MemoryReader] Conectado ao Torchlight (PID {current_pid}) | Base 0x{self._module_base:08X} | Path: {self._exe_path}"
+                )
                 return True
             return False
         return True
+
+    def _resolve_cgame_address(self) -> int | None:
+        """Descobre dinamicamente o endereço do ponteiro CGame para Steam ou GOG."""
+        if self._cgame_address:
+            p_game = self.read_u32(self._cgame_address)
+            if p_game and p_game > 0x10000:
+                p_client = self.read_u32(p_game + OFFSET_GAMECLIENT)
+                if p_client and p_client > 0x10000:
+                    return self._cgame_address
+
+        # Teste 1: Steam RVA (com module base dinâmico)
+        addr_steam = self._module_base + RVA_CGAME_STEAM
+        p_steam = self.read_u32(addr_steam)
+        if p_steam and p_steam > 0x10000:
+            p_client = self.read_u32(p_steam + OFFSET_GAMECLIENT)
+            if p_client and p_client > 0x10000:
+                if self.game_version != "Steam":
+                    self.game_version = "Steam"
+                    log.info(
+                        f"[MemoryReader] Versão detectada: Steam (Base 0x{self._module_base:08X}, CGame 0x{addr_steam:08X})"
+                    )
+                self._cgame_address = addr_steam
+                return addr_steam
+
+        # Teste 2: GOG RVA (ou endereço fixo padrão ADDR_CGAME_GLOBAL)
+        for addr_gog in (self._module_base + RVA_CGAME_GOG, ADDR_CGAME_GLOBAL):
+            p_gog = self.read_u32(addr_gog)
+            if p_gog and p_gog > 0x10000:
+                p_client = self.read_u32(p_gog + OFFSET_GAMECLIENT)
+                if p_client and p_client > 0x10000:
+                    if self.game_version != "GOG":
+                        self.game_version = "GOG"
+                        log.info(
+                            f"[MemoryReader] Versão detectada: GOG (Base 0x{self._module_base:08X}, CGame 0x{addr_gog:08X})"
+                        )
+                    self._cgame_address = addr_gog
+                    return addr_gog
+
+        # Fallback se o jogo ainda estiver carregando a engine no boot
+        if "steam" in self._exe_path.lower():
+            self.game_version = "Steam"
+            return self._module_base + RVA_CGAME_STEAM
+        self.game_version = "GOG"
+        return ADDR_CGAME_GLOBAL
 
     def read_u32(self, address: int) -> int | None:
         if not self._handle or not address:
@@ -263,16 +355,19 @@ class TorchlightMemoryReader:
 
         if not self._ensure_handle():
             return GameMemoryState(
+                game_version=self.game_version,
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
                 music_volume=music_vol,
             )
 
-        p_game = self.read_u32(ADDR_CGAME_GLOBAL)
+        cgame_addr = self._resolve_cgame_address()
+        p_game = self.read_u32(cgame_addr) if cgame_addr else None
         if not p_game:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_desc="Inicializando CGame...",
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
@@ -284,6 +379,7 @@ class TorchlightMemoryReader:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_desc="Inicializando CGameClient...",
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
@@ -295,6 +391,7 @@ class TorchlightMemoryReader:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_desc="Inicializando CGameUI...",
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
@@ -324,6 +421,7 @@ class TorchlightMemoryReader:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_id=main_state_id,
                 state_desc="Configurações (Settings)",
                 is_in_game=(main_state_id == 6),
@@ -339,6 +437,7 @@ class TorchlightMemoryReader:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_id=main_state_id,
                 state_desc="Confirmação / Sair",
                 is_in_game=(main_state_id == 6),
@@ -355,6 +454,7 @@ class TorchlightMemoryReader:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_id=main_state_id,
                 state_desc="Carregando...",
                 is_loading=True,
@@ -380,6 +480,7 @@ class TorchlightMemoryReader:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
+                game_version=self.game_version,
                 state_id=main_state_id,
                 state_desc=state_desc,
                 is_in_game=False,
@@ -497,6 +598,7 @@ class TorchlightMemoryReader:
         return GameMemoryState(
             is_connected=True,
             pid=self.pid,
+            game_version=self.game_version,
             state_id=6,
             state_desc="Em Jogo",
             is_in_game=True,

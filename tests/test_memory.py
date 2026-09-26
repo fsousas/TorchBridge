@@ -97,6 +97,49 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertIsInstance(audio["sound_volume"], float)
         self.assertIsInstance(audio["music_volume"], float)
 
+    def test_rva_constants_defined(self):
+        from torchbridge.memory import RVA_CGAME_GOG, RVA_CGAME_STEAM, OFFSET_GAMECLIENT
+        self.assertEqual(RVA_CGAME_GOG, 0x0081AD64)
+        self.assertEqual(RVA_CGAME_STEAM, 0x007F0E0C)
+        self.assertEqual(OFFSET_GAMECLIENT, 0x64)
+
+    def test_resolve_cgame_address_steam(self):
+        reader = TorchlightMemoryReader()
+        reader._module_base = 0x008F0000
+        reader._exe_path = r"E:\SteamLibrary\steamapps\common\Torchlight\Torchlight.exe"
+        
+        # Simula read_u32 retornando ponteiros válidos para o RVA Steam
+        def fake_read_u32(addr):
+            if addr == reader._module_base + 0x007F0E0C:
+                return 0x054E24B8  # p_game
+            if addr == 0x054E24B8 + 0x64:
+                return 0x14CE7D58  # p_client
+            return None
+
+        reader.read_u32 = fake_read_u32
+        resolved = reader._resolve_cgame_address()
+        self.assertEqual(resolved, 0x008F0000 + 0x007F0E0C)
+        self.assertEqual(reader.game_version, "Steam")
+
+    def test_resolve_cgame_address_gog(self):
+        reader = TorchlightMemoryReader()
+        reader._module_base = 0x00400000
+        reader._exe_path = r"C:\GOG Games\Torchlight\Torchlight.exe"
+        
+        # Simula read_u32 retornando ponteiros válidos para o RVA GOG
+        def fake_read_u32(addr):
+            if addr in (0x00C1AD64, reader._module_base + 0x0081AD64):
+                return 0x044E24B8  # p_game
+            if addr == 0x044E24B8 + 0x64:
+                return 0x13CE7D58  # p_client
+            return None
+
+        reader.read_u32 = fake_read_u32
+        resolved = reader._resolve_cgame_address()
+        self.assertEqual(resolved, 0x00C1AD64)
+        self.assertEqual(reader.game_version, "GOG")
+
 
 if __name__ == "__main__":
     unittest.main()
+
