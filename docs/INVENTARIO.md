@@ -342,7 +342,7 @@ O menu do Baú é composto por duas seções verticais integradas:
 
 ---
 
-### NPCs que Compartilham esta Interface Idêntica
+### NPCs Mercadores com Interface Padrão de Loja (6x7 + 3 Abas Rosa + Pet)
 O TorchBridge lê o nome do NPC ativo em tempo real diretamente da memória interna do jogo (`p_merchant + 0x28` $\to$ `+0x34` da janela CEGUI), definindo automaticamente a aba padrão ao abrir a loja:
 
 | NPC | Nome na Memória | Aba Default ao Abrir | Índice da Aba |
@@ -354,7 +354,100 @@ O TorchBridge lê o nome do NPC ativo em tempo real diretamente da memória inte
 
 ---
 
-### Próximos NPCs com Interfaces Diferentes (Mapeamentos Específicos Futuros)
-- **GOREN** - Enchanter
-- **DURAN** - The Transmuter
-- **GORN e FURL** - Sockets
+## Interfaces de Crafting (Painel Esquerdo Suspenso)
+
+Ao interagir com NPCs de crafting, o jogo abre um painel de madeira suspenso à esquerda e o Inventário do Jogador à direita. Diferente dos mercadores e do baú, essas interfaces não possuem abas no painel esquerdo nem o grid do Pet na parte inferior.
+
+```
++-----------------------------------------------------------------------------------+
+|               PAINEL ESQUERDO                     |      INVENTÁRIO DO JOGADOR    |
+|                                                   |                               |
+|   [ GOREN / GORN / FURL ]    [ DURAN THE TRANSMUTER ]    [ Equipamentos / Spells ]|
+|                                                   |                               |
+|         +-----------+          +-----+ +-----+    |    [Cap] [Arm] [Luvas] [Bota] |
+|         |  SLOT 1   |          | S 1 | | S 2 |    |    [Colar] [Anel1] [Anel2]    |
+|         |  (Ciano)  |          +-----+ +-----+    |    [Arma 1] [Arma 2]          |
+|         +-----------+          | S 3 | | S 4 |    |                               |
+|                                +-----+ +-----+    |    [========================] |
+|         +-----------+          +-----------+      |    |        GRID 3x7        | |
+|         |  FECHAR   |          |  FECHAR   |      |    |  (Item Slots 1 a 21)   | |
+|         +-----------+          +-----------+      |    +------------------------+ |
+|         | AÇÃO NPC  |          | TRANSMUTAR|      |                               |
+|         +-----------+          +-----------+      |                               |
++-----------------------------------------------------------------------------------+
+```
+
+---
+
+### 1. GOREN (Encantador), GORN e FURL (Sockets)
+
+Compartilham a mesma interface de slot único central para inserir o item (`CEnchantMenu` em `p_ui + 0x02DC`):
+* **GOREN THE ENCHANTER:** Modo `0x15` / `0x16` na memória $\to$ botão de ação `"ENCANTAR"`.
+* **GORN e FURL (Sockets):** Modos `0x19`, `0x1A`, `0x1B` na memória $\to$ botão de ação `"RECUPERAR"`.
+
+#### Coordenadas dos Elementos (Base 1024x768)
+| Elemento | Identificador | Coordenadas (X, Y) | Dimensões no Overlay | Cor Padrão |
+| :--- | :--- | :--- | :--- | :--- |
+| **Slot de Item** | `slot_0` | `(240.0, 314.0)` | `96x96` | Ciano (`#6FD2EB`), Amarelo quando focado |
+| **Botão Fechar** | `decline` | `(240.0, 402.0)` | `128x24` | Laranja (`#FF9F43`), Amarelo quando focado |
+| **Botão de Ação** | `action` | `(240.0, 447.0)` | `128x24` | Laranja (`#FF9F43`), Amarelo quando focado |
+
+#### Esquema de Navegação via D-pad
+* **Foco Inicial:** Abre automaticamente sobre o **Slot de Item** `slot_0`.
+* **Navegação Vertical:**
+  - `slot_0 + Baixo` $\to$ Botão `decline` ("FECHAR")
+  - `decline + Baixo` $\to$ Botão `action` ("ENCANTAR" / "RECUPERAR")
+  - `action + Cima` $\to$ Botão `decline` ("FECHAR")
+  - `decline + Cima` $\to$ `slot_0`
+* **Ponte para o Inventário (Direita):**
+  - `slot_0 + Direita` $\to$ Inventário Grid Linha 1 `(1, 1)`
+  - `decline + Direita` $\to$ Inventário Grid Linha 2 `(2, 1)`
+  - `action + Direita` $\to$ Inventário Grid Linha 3 `(3, 1)`
+* **Ponte do Inventário de Volta para o Crafting (Esquerda):**
+  - Pressionar **D-pad Esquerda** na Coluna 1 do inventário ou nos equipamentos da borda esquerda (`helmet`, `gloves`, `belt`, `main_hand`, `spell_1`) retorna o cursor para o elemento de crafting na mesma altura.
+
+---
+
+### 2. DURAN (The Transmuter / Transmutador)
+
+Interface de combinação de 4 itens (`CCombineMenu` em `p_ui + 0x02E0`), estruturada em um **Grid 2x2** com dois botões abaixo:
+
+#### Coordenadas dos Elementos (Base 1024x768)
+| Elemento | Posição no Grid 2x2 | Identificador | Coordenadas (X, Y) | Dimensões | Cor Padrão |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Slot 1** | Topo - Esquerda | `slot_0` | `(216.0, 266.0)` | `48x68` | Ciano, Amarelo quando focado |
+| **Slot 2** | Topo - Direita | `slot_1` | `(268.0, 266.0)` | `48x68` | Ciano, Amarelo quando focado |
+| **Slot 3** | Baixo - Esquerda | `slot_2` | `(216.0, 339.0)` | `48x68` | Ciano, Amarelo quando focado |
+| **Slot 4** | Baixo - Direita | `slot_3` | `(268.0, 339.0)` | `48x68` | Ciano, Amarelo quando focado |
+| **Botão Fechar** | Abaixo dos slots | `decline` | `(240.0, 405.0)` | `128x24` | Laranja, Amarelo quando focado |
+| **Botão Transmutar** | Inferior | `action` | `(240.0, 450.0)` | `128x24` | Laranja, Amarelo quando focado |
+
+#### Esquema de Navegação via D-pad
+* **Foco Inicial:** Abre automaticamente sobre o **Slot 1** (`slot_0`, topo-esquerda).
+* **Navegação no Grid 2x2:**
+  - `slot_0 + Direita` $\to$ `slot_1` | `slot_0 + Baixo` $\to$ `slot_2`
+  - `slot_1 + Esquerda` $\to$ `slot_0` | `slot_1 + Baixo` $\to$ `slot_3`
+  - `slot_2 + Cima` $\to$ `slot_0` | `slot_2 + Direita` $\to$ `slot_3` | `slot_2 + Baixo` $\to$ `decline`
+  - `slot_3 + Cima` $\to$ `slot_1` | `slot_3 + Esquerda` $\to$ `slot_2` | `slot_3 + Baixo` $\to$ `decline`
+* **Navegação nos Botões:**
+  - `decline + Cima` $\to$ Retorna para `slot_2`
+  - `decline + Baixo` $\to$ Botão `action` ("TRANSMUTAR")
+  - `action + Cima` $\to$ Botão `decline` ("FECHAR")
+* **Ponte para o Inventário (Direita):**
+  - Pressionar **D-pad Direita** na coluna direita do crafting (`slot_1`, `slot_3`, `decline`, `action`) pula diretamente para o Inventário do Jogador:
+    - `slot_1 + Direita` $\to$ Inventário Grid Linha 1 `(1, 1)`
+    - `slot_3 + Direita` $\to$ Inventário Grid Linha 2 `(2, 1)`
+    - `decline + Direita` $\to$ Inventário Grid Linha 2 `(2, 1)`
+    - `action + Direita` $\to$ Inventário Grid Linha 3 `(3, 1)`
+* **Ponte do Inventário para o Transmutador (Esquerda):**
+  - `(1, 1) + Esquerda` ou `helmet / gloves + Esquerda` $\to$ `slot_1` (topo-direita)
+  - `(2, 1) + Esquerda` ou `belt + Esquerda` $\to$ `slot_3` (baixo-direita)
+  - `(3, 1) + Esquerda` ou `main_hand / spell_1 + Esquerda` $\to$ `decline` / `action`
+
+---
+
+### 3. Atalhos L2 e R2 nas Telas de Crafting
+Como os painéis de crafting não possuem abas próprias:
+* Pressionar **L2** ou **R2** em qualquer momento enquanto a tela de crafting estiver aberta **troca automaticamente as abas do Inventário do Jogador à direita** (`Misc` $\leftrightarrow$ `Weapons` $\leftrightarrow$ `Armor`), clicando na aba e devolvendo o cursor instantaneamente para o elemento de crafting ativo.
+* **Gatilhos e Combos Suprimidos:** Combos de habilidades (como RT/LT tocando skills de combate) ficam 100% bloqueados no painel esquerdo para evitar acionamentos acidentais.
+

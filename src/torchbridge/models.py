@@ -727,16 +727,19 @@ CRAFTING_BUTTONS: dict[str, dict[str, tuple[float, float]]] = {
         "decline": (240.0, 405.0),
         "transmute": (240.0, 450.0),
         "accept": (240.0, 450.0),
+        "action": (240.0, 450.0),
     },
     "Sockets": {
         "decline": (240.0, 402.0),
         "recover": (240.0, 447.0),
         "accept": (240.0, 447.0),
+        "action": (240.0, 447.0),
     },
     "Encantador": {
         "decline": (240.0, 402.0),
         "enchant": (240.0, 447.0),
         "accept": (240.0, 447.0),
+        "action": (240.0, 447.0),
     },
 }
 
@@ -1403,6 +1406,9 @@ class OverlaySnapshot:
     merchant_tab: str | None = None
     merchant_focus: str | None = None
     merchant_npc_name: str = ""
+    crafting_open: bool = False
+    crafting_menu: str | None = None
+    crafting_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

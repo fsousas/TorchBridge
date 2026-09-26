@@ -51,6 +51,8 @@ from .models import (
     MERCHANT_GRID_COLS,
     merchant_slot_point,
     merchant_tab_point,
+    crafting_button_point,
+    crafting_slot_point,
 )
 from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
@@ -212,6 +214,10 @@ class BridgeEngine(threading.Thread):
         self._merchant_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
         self._merchant_focus: tuple[Any, ...] | None = None
         self._merchant_npc_name: str = ""
+        # Navegação nos Menus de Crafting (Transmutador, Sockets, Encantador)
+        self._crafting_initialized: bool = False
+        self._crafting_menu: str | None = None
+        self._crafting_focus: str | None = None
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -255,6 +261,9 @@ class BridgeEngine(threading.Thread):
         self._merchant_tab = None
         self._merchant_focus = None
         self._merchant_npc_name = ""
+        self._crafting_initialized = False
+        self._crafting_menu = None
+        self._crafting_focus = None
         self.shared.update(
             radial_selection=None,
             pause_menu_focus=None,
@@ -279,6 +288,9 @@ class BridgeEngine(threading.Thread):
             merchant_tab=None,
             merchant_focus=None,
             merchant_npc_name="",
+            crafting_open=False,
+            crafting_menu=None,
+            crafting_focus=None,
         )
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
@@ -391,6 +403,9 @@ class BridgeEngine(threading.Thread):
             merchant_tab=None,
             merchant_focus=None,
             merchant_npc_name="",
+            crafting_open=False,
+            crafting_menu=None,
+            crafting_focus=None,
         )
         self._inventory_initialized = False
         self._inventory_tab = None
@@ -405,6 +420,9 @@ class BridgeEngine(threading.Thread):
         self._merchant_tab = None
         self._merchant_focus = None
         self._merchant_npc_name = ""
+        self._crafting_initialized = False
+        self._crafting_menu = None
+        self._crafting_focus = None
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -1574,6 +1592,7 @@ class BridgeEngine(threading.Thread):
         is_pet_open = "Pet" in (self._memory_state.open_menus or [])
         is_stash_open = "Baú" in (self._memory_state.open_menus or [])
         is_merchant_open = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
+        is_crafting_open = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
 
         if isinstance(current, tuple):
             row, col = current
@@ -1589,6 +1608,38 @@ class BridgeEngine(threading.Thread):
             elif dpad_left:
                 if col > 1:
                     new_focus = (row, col - 1)
+                elif is_crafting_open:
+                    # Ponte para Crafting (Transmutador / Sockets / Encantador)
+                    active_craft = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
+                    if active_craft == "Transmutador":
+                        if row == 1:
+                            craft_focus = "slot_1"
+                            target_x, target_y = crafting_slot_point(rect, active_craft, 1)
+                        elif row == 2:
+                            craft_focus = "slot_3"
+                            target_x, target_y = crafting_slot_point(rect, active_craft, 3)
+                        else:
+                            craft_focus = "decline"
+                            target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                    else:
+                        if row == 1:
+                            craft_focus = "slot_0"
+                            target_x, target_y = crafting_slot_point(rect, active_craft, 0)
+                        elif row == 2:
+                            craft_focus = "decline"
+                            target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                        else:
+                            craft_focus = "action"
+                            target_x, target_y = crafting_button_point(rect, active_craft, "action")
+                    self._crafting_focus = craft_focus
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        crafting_open=True,
+                        crafting_menu=active_craft,
+                        crafting_focus=self._crafting_focus,
+                    )
+                    return
                 elif is_merchant_open:
                     # Ponte para o Mercador (Pet inferior): Coluna 1 do Inventário -> Coluna 7 do Pet
                     target_x, target_y = pet_inventory_slot_point(rect, row, 7)
@@ -1649,7 +1700,41 @@ class BridgeEngine(threading.Thread):
                     else:
                         new_focus = "spell_4"
         else:
-            if is_merchant_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+            if is_crafting_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                active_craft = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
+                if active_craft == "Transmutador":
+                    if str(current) in ("helmet", "gloves"):
+                        craft_focus = "slot_1"
+                        target_x, target_y = crafting_slot_point(rect, active_craft, 1)
+                    elif str(current) == "belt":
+                        craft_focus = "slot_3"
+                        target_x, target_y = crafting_slot_point(rect, active_craft, 3)
+                    elif str(current) == "main_hand":
+                        craft_focus = "decline"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                    else:  # spell_1
+                        craft_focus = "action"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "action")
+                else:
+                    if str(current) in ("helmet", "gloves"):
+                        craft_focus = "slot_0"
+                        target_x, target_y = crafting_slot_point(rect, active_craft, 0)
+                    elif str(current) == "belt":
+                        craft_focus = "decline"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                    else:
+                        craft_focus = "action"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "action")
+                self._crafting_focus = craft_focus
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    crafting_open=True,
+                    crafting_menu=active_craft,
+                    crafting_focus=self._crafting_focus,
+                )
+                return
+            elif is_merchant_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
                 # Ponte para o Mercador: Borda esquerda superior do Inventário -> Coluna 7 do Mercador Superior
                 INV_TO_MERCHANT_MAP = {
                     "helmet": 1,
@@ -2370,6 +2455,241 @@ class BridgeEngine(threading.Thread):
                 merchant_focus=str(new_focus),
             )
 
+    # Navegação nos Menus de Crafting (Transmutador, Sockets, Encantador) via D-pad e L2/R2
+    def _handle_crafting_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots de itens e botões de ação nas telas de Transmutador, Sockets e Encantador."""
+        if not rect.valid:
+            return
+
+        active_menu = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
+
+        # 1. Inicialização ao abrir o menu de Crafting
+        if not self._crafting_initialized:
+            self._crafting_initialized = True
+            self._crafting_menu = active_menu
+            self._crafting_focus = "slot_0"
+            target_x, target_y = crafting_slot_point(rect, active_menu, 0)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                crafting_open=True,
+                crafting_menu=self._crafting_menu,
+                crafting_focus="slot_0",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+
+        # 2. Troca de abas do Inventário do Jogador via L2 ou R2
+        # Como o menu de crafting não possui abas próprias, L2 e R2 ciclam as abas do Inventário à direita
+        if self._rt_edge_up or self._lt_edge_up:
+            curr_tab_num = 1
+            if self._inventory_tab:
+                try:
+                    curr_tab_num = int(self._inventory_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = inventory_tab_point(rect, new_tab_num)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._inventory_tab = f"tab-{new_tab_num}"
+
+            # Retorna o cursor para o elemento ativo do crafting
+            cur_focus = self._crafting_focus or "slot_0"
+            if cur_focus.startswith("slot_"):
+                idx = int(cur_focus.replace("slot_", ""))
+                slot_x, slot_y = crafting_slot_point(rect, active_menu, idx)
+            elif cur_focus == "decline":
+                slot_x, slot_y = crafting_button_point(rect, active_menu, "decline")
+            else:
+                slot_x, slot_y = crafting_button_point(rect, active_menu, "action")
+
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab,
+                crafting_open=True,
+                crafting_menu=self._crafting_menu,
+                crafting_focus=self._crafting_focus,
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._crafting_focus or "slot_0"
+        new_focus = current
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+
+        if active_menu == "Transmutador":
+            # Grid 2x2: slot_0 (1, 1), slot_1 (1, 2), slot_2 (2, 1), slot_3 (2, 2)
+            # Botões: decline (FECHAR), action (TRANSMUTAR)
+            if current == "slot_0":
+                if dpad_right:
+                    new_focus = "slot_1"
+                elif dpad_down:
+                    new_focus = "slot_2"
+            elif current == "slot_1":
+                if dpad_left:
+                    new_focus = "slot_0"
+                elif dpad_down:
+                    new_focus = "slot_3"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 1, 1)
+                    self._inventory_focus = (1, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(1, 1)",
+                    )
+                    return
+            elif current == "slot_2":
+                if dpad_up:
+                    new_focus = "slot_0"
+                elif dpad_right:
+                    new_focus = "slot_3"
+                elif dpad_down:
+                    new_focus = "decline"
+            elif current == "slot_3":
+                if dpad_up:
+                    new_focus = "slot_1"
+                elif dpad_left:
+                    new_focus = "slot_2"
+                elif dpad_down:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 2, 1)
+                    self._inventory_focus = (2, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(2, 1)",
+                    )
+                    return
+            elif current == "decline":
+                if dpad_up:
+                    new_focus = "slot_2"
+                elif dpad_down:
+                    new_focus = "action"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 2, 1)
+                    self._inventory_focus = (2, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(2, 1)",
+                    )
+                    return
+            elif current == "action":
+                if dpad_up:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 3, 1)
+                    self._inventory_focus = (3, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(3, 1)",
+                    )
+                    return
+        else:
+            # Sockets e Encantador (Goren / Gorn / Furl)
+            # 1 Slot Central: slot_0
+            # Botões: decline (FECHAR), action (ENCANTAR / RECUPERAR)
+            if current == "slot_0":
+                if dpad_down:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 1, 1)
+                    self._inventory_focus = (1, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(1, 1)",
+                    )
+                    return
+            elif current == "decline":
+                if dpad_up:
+                    new_focus = "slot_0"
+                elif dpad_down:
+                    new_focus = "action"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 2, 1)
+                    self._inventory_focus = (2, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(2, 1)",
+                    )
+                    return
+            elif current == "action":
+                if dpad_up:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 3, 1)
+                    self._inventory_focus = (3, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(3, 1)",
+                    )
+                    return
+
+        if new_focus != current:
+            self._crafting_focus = new_focus
+            if new_focus.startswith("slot_"):
+                idx = int(new_focus.replace("slot_", ""))
+                target_x, target_y = crafting_slot_point(rect, active_menu, idx)
+            elif new_focus == "decline":
+                target_x, target_y = crafting_button_point(rect, active_menu, "decline")
+            else:
+                target_x, target_y = crafting_button_point(rect, active_menu, "action")
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                crafting_open=True,
+                crafting_menu=self._crafting_menu,
+                crafting_focus=self._crafting_focus,
+            )
+
 
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
@@ -2513,7 +2833,7 @@ class BridgeEngine(threading.Thread):
         mid_x = rect.left + rect.width * 0.5
         if "Inventário" in open_menus and cur_x >= mid_x:
             return
-        if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus) and cur_x < mid_x:
+        if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus or any(m in open_menus for m in ("Transmutador", "Sockets", "Encantador"))) and cur_x < mid_x:
             return
         lt_now = self._lt_current
         # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
@@ -3117,13 +3437,16 @@ class BridgeEngine(threading.Thread):
                 self._fishing_initialized = False
                 self.shared.update(fishing_focus=None)
 
-            # Inventário do Jogador, Menu do Pet, Baú (Stash) e Mercador (Loja)
+            # Inventário do Jogador, Menu do Pet, Baú (Stash), Mercador (Loja) e Crafting (Transmutador, Sockets, Encantador)
             is_inventory = "Inventário" in (self._memory_state.open_menus or [])
             is_pet = "Pet" in (self._memory_state.open_menus or [])
             is_stash = "Baú" in (self._memory_state.open_menus or [])
             is_merchant = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
+            is_crafting = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
 
-            if is_merchant and not self._merchant_initialized:
+            if is_crafting and not self._crafting_initialized:
+                self._handle_crafting_navigation(state, rect, hub)
+            elif is_merchant and not self._merchant_initialized:
                 self._handle_merchant_navigation(state, rect, hub)
             elif is_stash and not self._stash_initialized:
                 self._handle_stash_navigation(state, rect, hub)
@@ -3131,11 +3454,13 @@ class BridgeEngine(threading.Thread):
                 self._handle_pet_inventory_navigation(state, rect, hub)
             elif is_inventory and not self._inventory_initialized:
                 self._handle_inventory_navigation(state, rect, hub)
-            elif (is_pet or is_stash or is_merchant) and is_inventory:
+            elif (is_pet or is_stash or is_merchant or is_crafting) and is_inventory:
                 cur_x, _ = self.injector.cursor_position()
                 mid_x = rect.left + rect.width * 0.5
                 if cur_x < mid_x:
-                    if is_merchant:
+                    if is_crafting:
+                        self._handle_crafting_navigation(state, rect, hub)
+                    elif is_merchant:
                         self._handle_merchant_navigation(state, rect, hub)
                     elif is_stash:
                         self._handle_stash_navigation(state, rect, hub)
@@ -3143,6 +3468,8 @@ class BridgeEngine(threading.Thread):
                         self._handle_pet_inventory_navigation(state, rect, hub)
                 else:
                     self._handle_inventory_navigation(state, rect, hub)
+            elif is_crafting:
+                self._handle_crafting_navigation(state, rect, hub)
             elif is_merchant:
                 self._handle_merchant_navigation(state, rect, hub)
             elif is_stash:
@@ -3180,6 +3507,16 @@ class BridgeEngine(threading.Thread):
                     merchant_tab=None,
                     merchant_focus=None,
                     merchant_npc_name="",
+                )
+
+            if not is_crafting and self._crafting_initialized:
+                self._crafting_initialized = False
+                self._crafting_menu = None
+                self._crafting_focus = None
+                self.shared.update(
+                    crafting_open=False,
+                    crafting_menu=None,
+                    crafting_focus=None,
                 )
         else:
             if self._title_screen_initialized:
@@ -3241,6 +3578,17 @@ class BridgeEngine(threading.Thread):
                 self._stash_tab = None
                 self._stash_focus = None
                 self.shared.update(stash_open=False, stash_tab=None, stash_focus=None)
+            if self._merchant_initialized:
+                self._merchant_initialized = False
+                self._merchant_tab = None
+                self._merchant_focus = None
+                self._merchant_npc_name = ""
+                self.shared.update(merchant_open=False, merchant_tab=None, merchant_focus=None, merchant_npc_name="")
+            if self._crafting_initialized:
+                self._crafting_initialized = False
+                self._crafting_menu = None
+                self._crafting_focus = None
+                self.shared.update(crafting_open=False, crafting_menu=None, crafting_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.

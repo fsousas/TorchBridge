@@ -752,12 +752,13 @@ class GameOverlay(QWidget):
                     painter.setPen(QColor(255, 255, 255, 240))
                     painter.drawText(QRectF(rlx, rly, slot_size, slot_size), Qt.AlignmentFlag.AlignCenter, "ITEM")
 
-            # 7. Alvos de Crafting (Transmutador, Sockets, Encantador) em modo calibração
+            # 7. Alvos de Crafting (Transmutador, Sockets, Encantador) com foco ativo
             crafting_menu = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (snapshot.memory_open_menus or [])), None)
-            if crafting_menu:
+            if crafting_menu or snapshot.crafting_open:
+                active_menu = snapshot.crafting_menu or crafting_menu or "Transmutador"
                 # Desenha slots de itens
-                slots = CRAFTING_SLOTS.get(crafting_menu, [])
-                if crafting_menu == "Transmutador":
+                slots = CRAFTING_SLOTS.get(active_menu, [])
+                if active_menu == "Transmutador":
                     slot_w = 48 * scale * (rect.height / 768.0)
                     slot_h = 68 * scale * (rect.height / 768.0)
                 else:
@@ -765,11 +766,16 @@ class GameOverlay(QWidget):
                     slot_h = 96 * scale * (rect.height / 768.0)
 
                 for s_idx in range(len(slots)):
-                    sx, sy = crafting_slot_point(rect, crafting_menu, s_idx)
+                    sx, sy = crafting_slot_point(rect, active_menu, s_idx)
                     lx = sx - rect.left - slot_w / 2
                     ly = sy - rect.top - slot_h / 2
-                    painter.setPen(QPen(QColor(111, 210, 235, 230), 1.5 * scale))
-                    painter.setBrush(QColor(111, 210, 235, 50))
+                    is_focus = (snapshot.crafting_focus == f"slot_{s_idx}")
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 160))
+                    else:
+                        painter.setPen(QPen(QColor(111, 210, 235, 230), 1.5 * scale))
+                        painter.setBrush(QColor(111, 210, 235, 50))
                     painter.drawRoundedRect(QRectF(lx, ly, slot_w, slot_h), 4 * scale, 4 * scale)
                     painter.setFont(self._font(max(7, round(8 * scale)), True))
                     painter.setPen(QColor(255, 255, 255, 240))
@@ -777,17 +783,25 @@ class GameOverlay(QWidget):
                     painter.drawText(QRectF(lx, ly, slot_w, slot_h), Qt.AlignmentFlag.AlignCenter, slot_label)
 
                 # Desenha botões de ação (Decline, Transmute / Recover / Enchant)
-                buttons = CRAFTING_BUTTONS.get(crafting_menu, {})
+                buttons = CRAFTING_BUTTONS.get(active_menu, {})
                 btn_w = 128 * scale * (rect.height / 768.0)
                 btn_h = 24 * scale * (rect.height / 768.0)
                 for b_name in buttons:
-                    if b_name == "accept":
-                        continue  # accept é a mesma posição do botão principal
-                    bx, by = crafting_button_point(rect, crafting_menu, b_name)
+                    if b_name in ("accept", "action"):
+                        continue  # accept / action é a mesma posição do botão principal
+                    bx, by = crafting_button_point(rect, active_menu, b_name)
                     lx = bx - rect.left - btn_w / 2
                     ly = by - rect.top - btn_h / 2
-                    painter.setPen(QPen(QColor(255, 159, 67, 230), 1.5 * scale))
-                    painter.setBrush(QColor(255, 159, 67, 75))
+                    is_focus = (
+                        snapshot.crafting_focus == b_name
+                        or (snapshot.crafting_focus == "action" and b_name in ("transmute", "recover", "enchant"))
+                    )
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 160))
+                    else:
+                        painter.setPen(QPen(QColor(255, 159, 67, 230), 1.5 * scale))
+                        painter.setBrush(QColor(255, 159, 67, 75))
                     painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
                     painter.setFont(self._font(max(7, round(8 * scale)), True))
                     painter.setPen(QColor(255, 255, 255, 240))
@@ -850,7 +864,8 @@ class GameOverlay(QWidget):
                 is_pet_also_open = snapshot.pet_inventory_open or ("Pet" in (snapshot.memory_open_menus or []))
                 is_stash_also_open = snapshot.stash_open or ("Baú" in (snapshot.memory_open_menus or []))
                 is_merchant_also_open = snapshot.merchant_open or ("Vendedor (Loja)" in (snapshot.memory_open_menus or []))
-                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open
+                is_crafting_also_open = snapshot.crafting_open or any(m in (snapshot.memory_open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
+                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open or is_crafting_also_open
                 for r in range(1, INVENTORY_GRID_ROWS + 1):
                     for c in range(1, INVENTORY_GRID_COLS + 1):
                         sx, sy = inventory_slot_point(rect, r, c)

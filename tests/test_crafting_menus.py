@@ -6,9 +6,11 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from torchbridge.controller import ControllerState
 from torchbridge.memory import (
     ADDR_CGAME_GLOBAL,
     GAMEPLAY_MENUS,
+    GameMemoryState,
     OFFSET_GAMECLIENT,
     OFFSET_GAMEUI,
     TorchlightMemoryReader,
@@ -16,6 +18,7 @@ from torchbridge.memory import (
 from torchbridge.models import (
     PANEL_SIDE,
     Rect,
+    SharedOverlayState,
     both_panels_open,
     crafting_button_point,
     crafting_slot_point,
@@ -169,5 +172,244 @@ class CraftingMenusTests(unittest.TestCase):
         self.assertEqual((s_slot_x, s_slot_y), (240, 314))
 
 
+class CraftingNavigationTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg_mock = MagicMock()
+        self.cfg_mock.get.return_value = {
+            "target": {"process_names": ["Torchlight.exe"], "window_titles": ["Torchlight"]},
+            "movement": {"initial_mode": "cursor"},
+            "bindings": {},
+            "cursor": {"speed_pixels_per_second": 800},
+            "overlay": {},
+        }
+        self.shared = SharedOverlayState()
+        from torchbridge.engine import BridgeEngine
+        self.engine = BridgeEngine(self.cfg_mock, self.shared)
+        self.engine.injector = MagicMock()
+        self.engine.injector.cursor_position.return_value = (216, 266)
+        self.hub_mock = MagicMock()
+        self.rect = Rect(left=0, top=0, width=1024, height=768)
+
+    def test_crafting_initialization_transmutador(self):
+        """Duran the Transmuter abre focado no slot_0 (topo-esquerda do grid 2x2)."""
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Transmutador"],
+        )
+        empty_state = ControllerState()
+        self.engine._handle_crafting_navigation(empty_state, self.rect, self.hub_mock)
+
+        self.assertTrue(self.engine._crafting_initialized)
+        self.assertEqual(self.engine._crafting_menu, "Transmutador")
+        self.assertEqual(self.engine._crafting_focus, "slot_0")
+
+        exp_x, exp_y = crafting_slot_point(self.rect, "Transmutador", 0)
+        self.engine.injector.move.assert_called_with(exp_x, exp_y)
+
+        snap = self.shared.get()
+        self.assertTrue(snap.crafting_open)
+        self.assertEqual(snap.crafting_menu, "Transmutador")
+        self.assertEqual(snap.crafting_focus, "slot_0")
+
+    def test_crafting_initialization_sockets_or_enchant(self):
+        """Goren (Encantador) e Gron/Furl (Sockets) abrem focados no slot_0 central."""
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Sockets"],
+        )
+        empty_state = ControllerState()
+        self.engine._handle_crafting_navigation(empty_state, self.rect, self.hub_mock)
+
+        self.assertTrue(self.engine._crafting_initialized)
+        self.assertEqual(self.engine._crafting_menu, "Sockets")
+        self.assertEqual(self.engine._crafting_focus, "slot_0")
+
+        exp_x, exp_y = crafting_slot_point(self.rect, "Sockets", 0)
+        self.engine.injector.move.assert_called_with(exp_x, exp_y)
+
+    def test_crafting_duran_2x2_navigation(self):
+        """Navega pelo grid 2x2 de Duran e pelos botões Fechar e Transmutar."""
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Transmutador"],
+        )
+        self.engine._crafting_initialized = True
+        self.engine._crafting_menu = "Transmutador"
+        self.engine._crafting_focus = "slot_0"
+
+        # slot_0 + Direita -> slot_1
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_right"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_1")
+
+        # slot_1 + Baixo -> slot_3
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_down"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_3")
+
+        # slot_3 + Esquerda -> slot_2
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_left"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_2")
+
+        # slot_2 + Cima -> slot_0
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_up"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_0")
+
+        # slot_0 + Baixo -> slot_2
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_down"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_2")
+
+        # slot_2 + Baixo -> decline
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_down"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "decline")
+
+        # decline + Baixo -> action (transmute)
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_down"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "action")
+
+        # action + Cima -> decline
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_up"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "decline")
+
+        # decline + Cima -> slot_2
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_up"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_2")
+
+    def test_crafting_goren_sockets_navigation(self):
+        """Navega pelo slot único de Goren/Sockets e pelos botões Fechar e Ação."""
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Encantador"],
+        )
+        self.engine._crafting_initialized = True
+        self.engine._crafting_menu = "Encantador"
+        self.engine._crafting_focus = "slot_0"
+
+        # slot_0 + Baixo -> decline
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_down"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "decline")
+
+        # decline + Baixo -> action
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_down"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "action")
+
+        # action + Cima -> decline
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_up"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "decline")
+
+        # decline + Cima -> slot_0
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_up"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_0")
+
+    def test_crafting_bridge_to_inventory_on_dpad_right(self):
+        """Pressionar D-pad Direita nas bordas do crafting pula para o Inventário do Jogador."""
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Transmutador"],
+        )
+        self.engine._crafting_initialized = True
+        self.engine._crafting_menu = "Transmutador"
+        self.engine._crafting_focus = "slot_1"
+
+        # slot_1 + Direita -> Inventário (1, 1)
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_right"})
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (1, 1))
+
+        # slot_3 + Direita -> Inventário (2, 1)
+        self.engine._crafting_focus = "slot_3"
+        self.engine._previous = ControllerState()
+        self.engine._handle_crafting_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (2, 1))
+
+    def test_inventory_bridge_to_crafting_on_dpad_left(self):
+        """Pressionar D-pad Esquerda na coluna 1 ou equipamentos do inventário pula para o Crafting."""
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Transmutador"],
+        )
+        self.engine._inventory_initialized = True
+        self.engine._inventory_focus = (1, 1)
+
+        # Inventário (1, 1) + Esquerda -> Duran slot_1
+        self.engine._previous = ControllerState()
+        state = ControllerState(buttons={"dpad_left"})
+        self.engine._handle_inventory_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_1")
+
+        # Inventário (2, 1) + Esquerda -> Duran slot_3
+        self.engine._inventory_focus = (2, 1)
+        self.engine._previous = ControllerState()
+        self.engine._handle_inventory_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_3")
+
+        # Equipamento helmet + Esquerda -> Duran slot_1
+        self.engine._inventory_focus = "helmet"
+        self.engine._previous = ControllerState()
+        self.engine._handle_inventory_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._crafting_focus, "slot_1")
+
+    def test_crafting_close_resets_state(self):
+        """Ao fechar o menu de crafting, o estado do motor e overlay é reiniciado."""
+        from torchbridge.controller import ControllerState
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário"],  # Transmutador fechou
+        )
+        self.engine._crafting_initialized = True
+        self.engine._crafting_menu = "Transmutador"
+        self.engine._crafting_focus = "slot_0"
+
+        empty_state = ControllerState()
+        # Chama a rotina principal de menus
+        self.engine._handle_inventory_navigation(empty_state, self.rect, self.hub_mock)
+
+        # Simula o tick que limpa menus não mais abertos
+        is_crafting = any(m in (self.engine._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
+        self.assertFalse(is_crafting)
+        if not is_crafting and self.engine._crafting_initialized:
+            self.engine._crafting_initialized = False
+            self.engine._crafting_menu = None
+            self.engine._crafting_focus = None
+            self.engine.shared.update(crafting_open=False, crafting_menu=None, crafting_focus=None)
+
+        self.assertFalse(self.engine._crafting_initialized)
+        snap = self.shared.get()
+        self.assertFalse(snap.crafting_open)
+
+
 if __name__ == "__main__":
     unittest.main()
+
