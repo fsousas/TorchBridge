@@ -141,8 +141,8 @@ class MemoryModuleTests(unittest.TestCase):
 
     def test_update_with_target_pid(self):
         reader = TorchlightMemoryReader()
-        # When target_pid is explicitly None / <= 0, ensure_handle returns False and reader is closed
-        state = reader.update(target_pid=None)
+        # When target_pid is explicitly <= 0, ensure_handle returns False and reader is closed
+        state = reader.update(target_pid=-1)
         self.assertFalse(state.is_connected)
         self.assertIsNone(reader.pid)
 

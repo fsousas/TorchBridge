@@ -12,6 +12,8 @@ Amarelo - #E6C12A | Demarca o slot inicial do cursor ao:
 
 Laranja - #FD6100 | Demarca os slots de transição/ponte entre menus opostos (Pet e Inventário)
 
+Rosa - #FD62CE | demarca a posição que o cursor deve ir para trocar de aba quando estivermos interagindo com algum npc de venda te itens.
+
 ### Imagens de referencia
 > Aba 1 - Slots de equipamentos(Sempre abre nessa aba quando o inventario abre, nao importa a ação que dispare a abertura do inventario)
 assets\images\inventário\inventario-4x3-tab-1.png
@@ -231,14 +233,128 @@ O menu do Baú é composto por duas seções verticais integradas:
 * **Analógico Esquerdo / Direito:** Modo mouse livre com sensibilidade acelerada sempre disponível caso o jogador deseje apontar manualmente para qualquer elemento fora do grid.
 
 
-# NPCS que ainda faltam mapear oinventario para alternar entre os lados da tela
-### npcs com interfaces diferentes
-- GOREN - Enchanter
-- DURAN - The Transmuter
-- GORN e FURL - Sockets
+---
 
-### npcs com interfaces iguais com abas 
-- DUROS THE BLADE - Gambler - aba default WEAPONS
-- TRIYA - Gem Seller - aba default MISC
-- TARN THE MERCHANT - aba default MISC
-- KOLOS BLACKSMITH - aba default WEAPONS
+## Mapeamento de Pontos Navegáveis no Menu do Mercador (Vendedores / Lojas) no ESTADO = In-game
+#### Meta - Navegação fluida e intuitiva pelas lojas de mercadores/ferreiros (grid 6x7 de 42 slots com 3 abas no topo) e pelo Inventário do Pet integrado na metade esquerda da tela (rect.left), com seleção de abas rosa via D-pad/Ação e pontes bidirecionais para o Inventário do Jogador na metade direita.
+
+### Imagem de Referência
+> `assets\images\inventário\mercador-4x3.png`
+
+```
++-------------------------------------------------------------+-------------------------------------------------------------+
+|                      PAINEL ESQUERDO                        |                       PAINEL DIREITO                        |
+|                     (Mercador + Pet)                        |                    (Inventário do Jogador)                  |
++-------------------------------------------------------------+-------------------------------------------------------------+
+|  [MERCADOR SUPERIOR: 3 Abas Rosa + 6 Linhas x 7 Colunas]    |  [EQUIPAMENTOS E MAGIAS: 16 Slots]                          |
+|  Abas: [Misc (Rosa)] [Weapon (Rosa)] [Armor (Rosa)]         |  helmet                                                     |
+|  L1: [1,1 (Amarelo)] [1,2] ... [1,6] [1,7 (Ponte)]     ---> |  gloves                                                     |
+|  L2: [2,1]           [2,2] ... [2,6] [2,7 (Ponte)]     ---> |  belt                                                       |
+|  L3: [3,1]           [3,2] ... [3,6] [3,7 (Ponte)]     ---> |  belt                                                       |
+|  L4: [4,1]           [4,2] ... [4,6] [4,7 (Ponte)]     ---> |  main_hand                                                  |
+|  L5: [5,1]           [5,2] ... [5,6] [5,7 (Ponte)]     ---> |  spell_1                                                    |
+|  L6: [6,1]           [6,2] ... [6,6] [6,7 (Ponte)]     ---> |                                                             |
+|           ^                   |                             |                                                             |
+|   (D-pad Cima)         (D-pad Baixo)                        |                                                             |
+|           |                   v                             |                                                             |
+|  [PET INFERIOR: 3 Abas Ciano + 3 Linhas x 7 Colunas = 21]   |  [INVENTÁRIO INFERIOR: 3 Abas + 3 Linhas x 7 Colunas]       |
+|  Abas: [Equip (Ciano)] [Spells (Ciano)] [Fish (Ciano)]      |  Abas: [Equipment] [Spells] [Fish]  (L2/R2)                 |
+|  L1: [1,1] [1,2] ... [1,6] [1,7 (Ponte)]               ---> |  L1: [1,1] [1,2] ... [1,6] [1,7 (Wrap)]                     |
+|  L2: [2,1] [2,2] ... [2,6] [2,7 (Ponte)]               ---> |  L2: [2,1] [2,2] ... [2,6] [2,7 (Wrap)]                     |
+|  L3: [3,1] [3,2] ... [3,6] [3,7 (Ponte)]               ---> |  L3: [3,1] [3,2] ... [3,6] [3,7 (Wrap)]                     |
++-------------------------------------------------------------+-------------------------------------------------------------+
+```
+
+---
+
+### Tabela de Cores e Funções no Overlay do Mercador
+| Cor | Hex | Função / Significado | Quantidade no Mercador |
+| :--- | :--- | :--- | :--- |
+| **Rosa** | `#FD62CE` | Posição exata que o cursor navega para trocar de abas da loja (`Misc`, `Weapon`, `Armor`) | 3 abas (`merchant_tab_1..3`) |
+| **Amarelo** | `#E6C12A` | Foco inicial ao abrir a loja ou após confirmar a troca de aba | 1 slot (`('merchant', 1, 1)`) |
+| **Ciano** | `#0BE0EF` | Abas de navegação do Pet clicáveis via L2 / R2 | 3 abas (`pet_tab_1..3`) |
+| **Verde** | `#09B200` | Slots regulares de navegação interna via D-pad | 53 slots (36 loja + 17 pet) |
+| **Laranja** | `#FD6100` | Pontes centrais de transição inter-menus (Coluna 7) | 9 slots (6 loja + 3 pet) |
+
+---
+
+### Estrutura do Painel Esquerdo (Mercador)
+1. **Seção Superior (Loja do Mercador):**
+   - **3 Abas Rosa (`#FD62CE`):**
+     - Aba 1 (`Misc`): `(117.0, 110.0)`
+     - Aba 2 (`Weapon`): `(216.0, 110.0)`
+     - Aba 3 (`Armor`): `(317.0, 110.0)`
+   - **Grid de 6 linhas x 7 colunas (42 slots):**
+     - Posição inicial (Amarelo): Slot `(1, 1)` em `(65.0, 138.0)`.
+     - Colunas 1 a 7: `x = rect.left + (65.0 + (col - 1) * 40.0) * scale`.
+     - Alturas base das 6 linhas (centro calibrado em 1024x768):
+       - Linha 1: `138.0`
+       - Linha 2: `193.0` (+55.0)
+       - Linha 3: `248.0` (+55.0)
+       - Linha 4: `306.0` (+58.0 - divisor intermediário)
+       - Linha 5: `361.0` (+55.0)
+       - Linha 6: `416.0` (+55.0)
+2. **Seção Inferior (Pet Inventory integrado):**
+   - 3 abas em Ciano (`#0BE0EF`): `Equipment`, `Spells`, `Fish` (controladas por L2/R2 na metade esquerda).
+   - Grid de **3 linhas x 7 colunas** (total de **21 slots** do inventário do pet).
+
+---
+
+### Regras de Navegação no Mercador
+
+#### 1. Navegação e Troca de Abas da Loja (Abas Rosa - Opção A)
+* **Subir para as Abas:** Estando na **Linha 1 do Mercador** e pressionando **D-pad Cima**, o cursor sobe diretamente para o ponto rosa da **aba atualmente ativa** do mercador (`_merchant_tab`).
+* **Navegação Horizontal entre Abas (com Wrap):** Estando sobre as abas rosa:
+  - **D-pad Direita:** `Misc` $\to$ `Weapon` $\to$ `Armor` $\to$ `Misc` (wrap cíclico).
+  - **D-pad Esquerda:** `Armor` $\to$ `Weapon` $\to$ `Misc` $\to$ `Armor` (wrap cíclico).
+* **Descer das Abas sem Trocar:** Pressionar **D-pad Baixo** a partir de uma aba rosa desce o cursor para a Linha 1 do grid na respectiva coluna (Aba 1 $\to$ Col 1, Aba 2 $\to$ Col 4, Aba 3 $\to$ Col 7).
+* **Confirmar Troca de Aba (Botão X / A):**
+  - O cursor executa o clique com botão esquerdo sobre o ponto rosa da aba selecionada.
+  - Atualiza a variável de controle `merchant_tab`.
+  - **Teleporta o cursor imediatamente para o ponto amarelo (Linha 1, Coluna 1)** do grid do mercador.
+
+#### 2. Navegação Vertical Contínua (Pet $\leftrightarrow$ Mercador Superior)
+* **Pet para Mercador:** Estando na Linha 1 do Pet (`('pet', 1, col)`) e pressionando **D-pad Cima**, o cursor sobe para a Linha 6 do Mercador (`('merchant', 6, col)`), preservando a coluna.
+* **Mercador para Pet:** Estando na Linha 6 do Mercador (`('merchant', 6, col)`) e pressionando **D-pad Baixo**, o cursor desce para a Linha 1 do Pet (`('pet', 1, col)`), preservando a coluna.
+* **Bloqueio no Fundo:** Estando na Linha 3 do Pet Inferior e pressionando **D-pad Baixo**, o cursor permanece onde está.
+
+#### 3. Tabela Mestra de Pontes Centrais (Coluna 7 $\leftrightarrow$ Inventário)
+| Origem (Painel Esquerdo - Col 7) | Ação D-pad | Destino (Inventário Direito) | Retorno (D-pad Esquerda) |
+| :--- | :--- | :--- | :--- |
+| Mercador Superior Linha 1 `('merchant', 1, 7)` | **Direita** | `helmet` | Retorna para `('merchant', 1, 7)` |
+| Mercador Superior Linha 2 `('merchant', 2, 7)` | **Direita** | `gloves` | Retorna para `('merchant', 2, 7)` |
+| Mercador Superior Linha 3 `('merchant', 3, 7)` | **Direita** | `belt` | Retorna para `('merchant', 3, 7)` |
+| Mercador Superior Linha 4 `('merchant', 4, 7)` | **Direita** | `belt` | Retorna para `('merchant', 3, 7)` |
+| Mercador Superior Linha 5 `('merchant', 5, 7)` | **Direita** | `main_hand` | Retorna para `('merchant', 5, 7)` |
+| Mercador Superior Linha 6 `('merchant', 6, 7)` | **Direita** | `spell_1` | Retorna para `('merchant', 6, 7)` |
+| Pet Inferior Linha 1 `('pet', 1, 7)` | **Direita** | Inventário Grid Linha 1 `(1, 1)` | Retorna para `('pet', 1, 7)` |
+| Pet Inferior Linha 2 `('pet', 2, 7)` | **Direita** | Inventário Grid Linha 2 `(2, 1)` | Retorna para `('pet', 2, 7)` |
+| Pet Inferior Linha 3 `('pet', 3, 7)` | **Direita** | Inventário Grid Linha 3 `(3, 1)` | Retorna para `('pet', 3, 7)` |
+
+#### 4. Regra da Opção 3 — Extremidades Externas Isoladas
+* **Coluna 1 do Mercador Superior (Esquerda):** Pressionar **D-pad Esquerda** realiza quebra de linha interna dentro do Mercador:
+  - `(1, 1) + Esquerda` $\to$ `(6, 7)`
+  - `(row, 1) + Esquerda` $\to$ `(row - 1, 7)`
+* **Coluna 1 do Pet Inferior (Esquerda):** Pressionar **D-pad Esquerda** realiza quebra de linha interna dentro do Pet:
+  - `(1, 1) + Esquerda` $\to$ `(3, 7)`
+  - `(row, 1) + Esquerda` $\to$ `(row - 1, 7)`
+* **Coluna 7 do Inventário (Direita):** Pressionar **D-pad Direita** continua dando quebra de linha interna dentro do próprio Inventário (`(row, 7) + Direita` $\to$ `(row + 1, 1)`), mantendo a borda externa da direita 100% isolada.
+
+---
+
+### NPCs que Compartilham esta Interface Idêntica
+O TorchBridge lê o nome do NPC ativo em tempo real diretamente da memória interna do jogo (`p_merchant + 0x28` $\to$ `+0x34` da janela CEGUI), definindo automaticamente a aba padrão ao abrir a loja:
+
+| NPC | Nome na Memória | Aba Default ao Abrir | Índice da Aba |
+| :--- | :--- | :--- | :--- |
+| **KOLOS BLACKSMITH** | `"Kolos the Smith"` | `WEAPONS` | Aba 2 |
+| **DUROS THE BLADE** | `"Duros the Blade"` | `WEAPONS` | Aba 2 |
+| **TARN THE MERCHANT** | `"Tarn the Merchant"` | `MISC` | Aba 1 |
+| **TRIYA** | `"Triya the Gem Seller"` / `"Triya"` | `MISC` | Aba 1 |
+
+---
+
+### Próximos NPCs com Interfaces Diferentes (Mapeamentos Específicos Futuros)
+- **GOREN** - Enchanter
+- **DURAN** - The Transmuter
+- **GORN e FURL** - Sockets

@@ -47,6 +47,10 @@ from .models import (
     STASH_GRID_ROWS,
     STASH_GRID_COLS,
     stash_upper_slot_point,
+    MERCHANT_GRID_ROWS,
+    MERCHANT_GRID_COLS,
+    merchant_slot_point,
+    merchant_tab_point,
 )
 from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
@@ -203,6 +207,11 @@ class BridgeEngine(threading.Thread):
         self._stash_initialized: bool = False
         self._stash_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
         self._stash_focus: tuple[str, int, int] | None = None
+        # Navegação no Menu do Mercador (Lojas 6x7 superior com 3 abas rosa + Pet 3x7 inferior)
+        self._merchant_initialized: bool = False
+        self._merchant_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._merchant_focus: tuple[Any, ...] | None = None
+        self._merchant_npc_name: str = ""
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -242,6 +251,10 @@ class BridgeEngine(threading.Thread):
         self._stash_initialized = False
         self._stash_tab = None
         self._stash_focus = None
+        self._merchant_initialized = False
+        self._merchant_tab = None
+        self._merchant_focus = None
+        self._merchant_npc_name = ""
         self.shared.update(
             radial_selection=None,
             pause_menu_focus=None,
@@ -262,6 +275,10 @@ class BridgeEngine(threading.Thread):
             stash_open=False,
             stash_tab=None,
             stash_focus=None,
+            merchant_open=False,
+            merchant_tab=None,
+            merchant_focus=None,
+            merchant_npc_name="",
         )
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
@@ -370,6 +387,10 @@ class BridgeEngine(threading.Thread):
             stash_open=False,
             stash_tab=None,
             stash_focus=None,
+            merchant_open=False,
+            merchant_tab=None,
+            merchant_focus=None,
+            merchant_npc_name="",
         )
         self._inventory_initialized = False
         self._inventory_tab = None
@@ -380,6 +401,10 @@ class BridgeEngine(threading.Thread):
         self._stash_initialized = False
         self._stash_tab = None
         self._stash_focus = None
+        self._merchant_initialized = False
+        self._merchant_tab = None
+        self._merchant_focus = None
+        self._merchant_npc_name = ""
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -1548,6 +1573,7 @@ class BridgeEngine(threading.Thread):
 
         is_pet_open = "Pet" in (self._memory_state.open_menus or [])
         is_stash_open = "Baú" in (self._memory_state.open_menus or [])
+        is_merchant_open = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
 
         if isinstance(current, tuple):
             row, col = current
@@ -1563,6 +1589,18 @@ class BridgeEngine(threading.Thread):
             elif dpad_left:
                 if col > 1:
                     new_focus = (row, col - 1)
+                elif is_merchant_open:
+                    # Ponte para o Mercador (Pet inferior): Coluna 1 do Inventário -> Coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, row, 7)
+                    self._merchant_focus = ("pet", row, 7)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        merchant_open=True,
+                        merchant_tab=self._merchant_tab or "tab-1",
+                        merchant_focus=f"('pet', {row}, 7)",
+                    )
+                    return
                 elif is_stash_open:
                     # Ponte para o Baú (Pet inferior): Coluna 1 do Inventário -> Coluna 7 do Pet
                     target_x, target_y = pet_inventory_slot_point(rect, row, 7)
@@ -1611,7 +1649,27 @@ class BridgeEngine(threading.Thread):
                     else:
                         new_focus = "spell_4"
         else:
-            if is_stash_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+            if is_merchant_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Mercador: Borda esquerda superior do Inventário -> Coluna 7 do Mercador Superior
+                INV_TO_MERCHANT_MAP = {
+                    "helmet": 1,
+                    "gloves": 2,
+                    "belt": 3,
+                    "main_hand": 5,
+                    "spell_1": 6,
+                }
+                merchant_row = INV_TO_MERCHANT_MAP.get(str(current), 6)
+                target_x, target_y = merchant_slot_point(rect, merchant_row, 7)
+                self._merchant_focus = ("merchant", merchant_row, 7)
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    merchant_open=True,
+                    merchant_tab=self._merchant_tab or "tab-1",
+                    merchant_focus=f"('merchant', {merchant_row}, 7)",
+                )
+                return
+            elif is_stash_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
                 # Ponte para o Baú: Borda esquerda superior do Inventário -> Coluna 7 do Baú Superior
                 INV_TO_STASH_MAP = {
                     "helmet": 1,
@@ -2041,6 +2099,277 @@ class BridgeEngine(threading.Thread):
                 stash_focus=str(new_focus),
             )
 
+    # Navegação no Menu do Mercador (Lojas 6x7 superior com 3 abas rosa + Pet 3x7 inferior + Abas Ciano)
+    def _handle_merchant_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots do Mercador (grid 6x7), 3 abas rosa e Pet inferior via D-pad, L2/R2 e X/A."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o Mercador
+        if not self._merchant_initialized:
+            self._merchant_initialized = True
+            npc_name = self._memory_state.merchant_npc_name or ""
+            self._merchant_npc_name = npc_name
+            # Determina a aba default pelo nome do NPC lido da memória:
+            # Kolos e Duros -> WEAPONS (tab-2)
+            # Tarn e Triya -> MISC (tab-1)
+            name_lower = npc_name.lower()
+            if any(k in name_lower for k in ("kolos", "duros", "blacksmith", "blade", "smith")):
+                self._merchant_tab = "tab-2"
+            else:
+                self._merchant_tab = "tab-1"
+
+            self._merchant_focus = ("merchant", 1, 1)
+            target_x, target_y = merchant_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab,
+                merchant_focus="('merchant', 1, 1)",
+                merchant_npc_name=self._merchant_npc_name,
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_left_half = (cur_x < rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas Ciano do Pet via L2 ou R2 (somente se o cursor estiver na metade esquerda da tela)
+        # L2 e R2 continuam trocando as abas em ciano
+        if is_left_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._stash_tab:
+                try:
+                    curr_tab_num = int(self._stash_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._stash_tab = f"tab-{new_tab_num}"
+            self._merchant_focus = ("pet", 1, 1)
+
+            slot_x, slot_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab or "tab-1",
+                merchant_focus="('pet', 1, 1)",
+            )
+            return
+
+        # 3. Interação com Botão X / A quando o cursor estiver em uma das abas rosa ("merchant_tab", tab_idx)
+        # Opção A: Ao pressionar X/A, clica na aba rosa e retorna imediatamente para o ponto amarelo (1, 1) do grid do mercador
+        current = self._merchant_focus or ("merchant", 1, 1)
+        sec = current[0]
+
+        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
+
+        if sec == "merchant_tab" and (btn_a_pressed or btn_x_pressed):
+            tab_idx = int(current[1])
+            tab_x, tab_y = merchant_tab_point(rect, tab_idx)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._merchant_tab = f"tab-{tab_idx}"
+            self._merchant_focus = ("merchant", 1, 1)
+            yellow_x, yellow_y = merchant_slot_point(rect, 1, 1)
+            self.injector.move(yellow_x, yellow_y)
+            hub.rumble(0.05, 0.12, 40)
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab,
+                merchant_focus="('merchant', 1, 1)",
+            )
+            return
+
+        # 4. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+        new_focus = current
+
+        if sec == "pet":
+            _, row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("pet", row, col + 1)
+                elif is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, row, 1)
+                    self._inventory_focus = (row, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("pet", 2, 1)
+                elif row == 2:
+                    new_focus = ("pet", 3, 1)
+                elif row == 3:
+                    new_focus = ("pet", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("pet", row, col - 1)
+                elif row == 1:
+                    new_focus = ("pet", 3, 7)
+                elif row == 2:
+                    new_focus = ("pet", 1, 7)
+                elif row == 3:
+                    new_focus = ("pet", 2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = ("pet", row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("pet", row - 1, col)
+                else:
+                    # Transição vertical para a Linha 6 do Mercador
+                    new_focus = ("merchant", 6, col)
+
+        elif sec == "merchant":
+            _, row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("merchant", row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário Direito
+                    MERCHANT_TO_INV_MAP = {
+                        1: "helmet",
+                        2: "gloves",
+                        3: "belt",
+                        4: "belt",
+                        5: "main_hand",
+                        6: "spell_1",
+                    }
+                    target_slot = MERCHANT_TO_INV_MAP.get(row, "spell_1")
+                    target_x, target_y = inventory_upper_point(rect, target_slot)
+                    self._inventory_focus = target_slot
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=target_slot,
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("merchant", 2, 1)
+                elif row == 2:
+                    new_focus = ("merchant", 3, 1)
+                elif row == 3:
+                    new_focus = ("merchant", 4, 1)
+                elif row == 4:
+                    new_focus = ("merchant", 5, 1)
+                elif row == 5:
+                    new_focus = ("merchant", 6, 1)
+                elif row == 6:
+                    new_focus = ("merchant", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("merchant", row, col - 1)
+                elif row == 1:
+                    new_focus = ("merchant", 6, 7)
+                elif row == 2:
+                    new_focus = ("merchant", 1, 7)
+                elif row == 3:
+                    new_focus = ("merchant", 2, 7)
+                elif row == 4:
+                    new_focus = ("merchant", 3, 7)
+                elif row == 5:
+                    new_focus = ("merchant", 4, 7)
+                elif row == 6:
+                    new_focus = ("merchant", 5, 7)
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("merchant", row - 1, col)
+                else:
+                    # Sobe para a aba ativa rosa do mercador!
+                    active_tab_num = 1
+                    if self._merchant_tab:
+                        try:
+                            active_tab_num = int(self._merchant_tab.replace("tab-", ""))
+                        except Exception:
+                            active_tab_num = 1
+                    new_focus = ("merchant_tab", active_tab_num)
+            elif dpad_down:
+                if row < 6:
+                    new_focus = ("merchant", row + 1, col)
+                else:
+                    # Transição vertical para o Pet Linha 1
+                    new_focus = ("pet", 1, col)
+
+        elif sec == "merchant_tab":
+            tab_idx = int(current[1])
+            if dpad_right:
+                # Wrap cíclico 1 -> 2 -> 3 -> 1
+                new_tab_idx = (tab_idx % 3) + 1
+                new_focus = ("merchant_tab", new_tab_idx)
+            elif dpad_left:
+                # Wrap cíclico 1 -> 3 -> 2 -> 1
+                new_tab_idx = 3 if tab_idx == 1 else tab_idx - 1
+                new_focus = ("merchant_tab", new_tab_idx)
+            elif dpad_down:
+                # Desce para a Linha 1 do grid do mercador na coluna correspondente à aba
+                TAB_TO_COL = {1: 1, 2: 4, 3: 7}
+                target_col = TAB_TO_COL.get(tab_idx, 1)
+                new_focus = ("merchant", 1, target_col)
+            elif dpad_up:
+                # Bloqueio no topo
+                new_focus = current
+
+        if new_focus != current:
+            self._merchant_focus = new_focus
+            if new_focus[0] == "pet":
+                target_x, target_y = pet_inventory_slot_point(rect, new_focus[1], new_focus[2])
+            elif new_focus[0] == "merchant":
+                target_x, target_y = merchant_slot_point(rect, new_focus[1], new_focus[2])
+            elif new_focus[0] == "merchant_tab":
+                target_x, target_y = merchant_tab_point(rect, new_focus[1])
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab or "tab-1",
+                merchant_focus=str(new_focus),
+            )
+
 
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
@@ -2184,7 +2513,7 @@ class BridgeEngine(threading.Thread):
         mid_x = rect.left + rect.width * 0.5
         if "Inventário" in open_menus and cur_x >= mid_x:
             return
-        if ("Pet" in open_menus or "Baú" in open_menus) and cur_x < mid_x:
+        if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus) and cur_x < mid_x:
             return
         lt_now = self._lt_current
         # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
@@ -2788,27 +3117,34 @@ class BridgeEngine(threading.Thread):
                 self._fishing_initialized = False
                 self.shared.update(fishing_focus=None)
 
-            # Inventário do Jogador, Menu do Pet e Baú (Stash)
+            # Inventário do Jogador, Menu do Pet, Baú (Stash) e Mercador (Loja)
             is_inventory = "Inventário" in (self._memory_state.open_menus or [])
             is_pet = "Pet" in (self._memory_state.open_menus or [])
             is_stash = "Baú" in (self._memory_state.open_menus or [])
+            is_merchant = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
 
-            if is_stash and not self._stash_initialized:
+            if is_merchant and not self._merchant_initialized:
+                self._handle_merchant_navigation(state, rect, hub)
+            elif is_stash and not self._stash_initialized:
                 self._handle_stash_navigation(state, rect, hub)
             elif is_pet and not self._pet_inventory_initialized:
                 self._handle_pet_inventory_navigation(state, rect, hub)
             elif is_inventory and not self._inventory_initialized:
                 self._handle_inventory_navigation(state, rect, hub)
-            elif (is_pet or is_stash) and is_inventory:
+            elif (is_pet or is_stash or is_merchant) and is_inventory:
                 cur_x, _ = self.injector.cursor_position()
                 mid_x = rect.left + rect.width * 0.5
                 if cur_x < mid_x:
-                    if is_stash:
+                    if is_merchant:
+                        self._handle_merchant_navigation(state, rect, hub)
+                    elif is_stash:
                         self._handle_stash_navigation(state, rect, hub)
                     else:
                         self._handle_pet_inventory_navigation(state, rect, hub)
                 else:
                     self._handle_inventory_navigation(state, rect, hub)
+            elif is_merchant:
+                self._handle_merchant_navigation(state, rect, hub)
             elif is_stash:
                 self._handle_stash_navigation(state, rect, hub)
             elif is_pet:
@@ -2833,6 +3169,18 @@ class BridgeEngine(threading.Thread):
                 self._stash_tab = None
                 self._stash_focus = None
                 self.shared.update(stash_open=False, stash_tab=None, stash_focus=None)
+
+            if not is_merchant and self._merchant_initialized:
+                self._merchant_initialized = False
+                self._merchant_tab = None
+                self._merchant_focus = None
+                self._merchant_npc_name = ""
+                self.shared.update(
+                    merchant_open=False,
+                    merchant_tab=None,
+                    merchant_focus=None,
+                    merchant_npc_name="",
+                )
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False

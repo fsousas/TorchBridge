@@ -64,6 +64,11 @@ from .models import (
     STASH_GRID_ROWS,
     STASH_GRID_COLS,
     stash_upper_slot_point,
+    MERCHANT_TABS_COORDS,
+    MERCHANT_GRID_ROWS,
+    MERCHANT_GRID_COLS,
+    merchant_slot_point,
+    merchant_tab_point,
 )
 from .win32 import make_overlay_clickthrough
 
@@ -844,7 +849,8 @@ class GameOverlay(QWidget):
                 slot_box = 18.0 * scale * (rect.height / 768.0)
                 is_pet_also_open = snapshot.pet_inventory_open or ("Pet" in (snapshot.memory_open_menus or []))
                 is_stash_also_open = snapshot.stash_open or ("Baú" in (snapshot.memory_open_menus or []))
-                is_left_also_open = is_pet_also_open or is_stash_also_open
+                is_merchant_also_open = snapshot.merchant_open or ("Vendedor (Loja)" in (snapshot.memory_open_menus or []))
+                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open
                 for r in range(1, INVENTORY_GRID_ROWS + 1):
                     for c in range(1, INVENTORY_GRID_COLS + 1):
                         sx, sy = inventory_slot_point(rect, r, c)
@@ -991,6 +997,89 @@ class GameOverlay(QWidget):
                         is_focus = (snapshot.stash_focus in (f"('stash', {r}, {c})", f"('stash',{r},{c})"))
                         is_bridge = is_inv_also_open and (c == 7)
                         color = c_laranja if is_bridge else c_verde
+                        if is_focus:
+                            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                            painter.setBrush(color)
+                        else:
+                            painter.setPen(QPen(color, 1.5 * scale))
+                            painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
+                        painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+            # 12. Alvos do Menu do Mercador (Loja 6x7 + Pet 3x7 + Abas Rosa + Abas Ciano)
+            is_merchant_open = snapshot.merchant_open or ("Vendedor (Loja)" in (snapshot.memory_open_menus or []))
+            if is_merchant_open:
+                c_rosa = QColor(0xFD, 0x62, 0xCE, 220)
+                c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
+                c_verde = QColor(0x09, 0xB2, 0x00, 220)
+                c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+                c_laranja = QColor(0xFD, 0x61, 0x00, 220)
+
+                # 3 Abas Rosa da Loja (1=Misc, 2=Weapon, 3=Armor) (#FD62CE)
+                tab_w = 88.0 * scale * (rect.height / 768.0)
+                tab_h = 18.0 * scale * (rect.height / 768.0)
+                for tab_idx in (1, 2, 3):
+                    tx, ty = merchant_tab_point(rect, tab_idx)
+                    lx = tx - rect.left - tab_w / 2.0
+                    ly = ty - rect.top - tab_h / 2.0
+                    is_active_tab = (snapshot.merchant_tab == f"tab-{tab_idx}")
+                    is_focus = (snapshot.merchant_focus in (f"('merchant_tab', {tab_idx})", f"('merchant_tab',{tab_idx})"))
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(c_rosa)
+                    elif is_active_tab:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 1.8 * scale))
+                        painter.setBrush(QColor(0xFD, 0x62, 0xCE, 180))
+                    else:
+                        painter.setPen(QPen(c_rosa, 1.5 * scale))
+                        painter.setBrush(QColor(0xFD, 0x62, 0xCE, 100))
+                    painter.drawRoundedRect(QRectF(lx, ly, tab_w, tab_h), 3.0 * scale, 3.0 * scale)
+
+                # Abas do menu de pet (1, 2, 3) em ciano (#0BE0EF)
+                pet_tab_w = 95.0 * scale * (rect.height / 768.0)
+                pet_tab_h = 18.0 * scale * (rect.height / 768.0)
+                for tab_idx in (1, 2, 3):
+                    tx, ty = pet_inventory_tab_point(rect, tab_idx)
+                    lx = tx - rect.left - pet_tab_w / 2.0
+                    ly = ty - rect.top - pet_tab_h / 2.0
+                    is_active_tab = (snapshot.pet_inventory_tab == f"tab-{tab_idx}" or snapshot.stash_tab == f"tab-{tab_idx}")
+                    if is_active_tab:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.0 * scale))
+                        painter.setBrush(c_ciano)
+                    else:
+                        painter.setPen(QPen(c_ciano, 1.5 * scale))
+                        painter.setBrush(QColor(0x0B, 0xE0, 0xEF, 100))
+                    painter.drawRoundedRect(QRectF(lx, ly, pet_tab_w, pet_tab_h), 3.0 * scale, 3.0 * scale)
+
+                # Slots do Grid Inferior do Pet (Linha 1..3, Coluna 1..7)
+                slot_box = 18.0 * scale * (rect.height / 768.0)
+                is_inv_also_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
+                for r in range(1, PET_GRID_ROWS + 1):
+                    for c in range(1, PET_GRID_COLS + 1):
+                        sx, sy = pet_inventory_slot_point(rect, r, c)
+                        lx = sx - rect.left - slot_box / 2.0
+                        ly = sy - rect.top - slot_box / 2.0
+                        is_slot1 = (r == 1 and c == 1)
+                        is_focus = (snapshot.merchant_focus in (f"('pet', {r}, {c})", f"('pet',{r},{c})"))
+                        is_bridge = is_inv_also_open and (c == 7)
+                        color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
+                        if is_focus:
+                            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                            painter.setBrush(color)
+                        else:
+                            painter.setPen(QPen(color, 1.5 * scale))
+                            painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
+                        painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+                # Slots do Grid Superior do Mercador (Linha 1..6, Coluna 1..7)
+                for r in range(1, MERCHANT_GRID_ROWS + 1):
+                    for c in range(1, MERCHANT_GRID_COLS + 1):
+                        sx, sy = merchant_slot_point(rect, r, c)
+                        lx = sx - rect.left - slot_box / 2.0
+                        ly = sy - rect.top - slot_box / 2.0
+                        is_slot1 = (r == 1 and c == 1)
+                        is_focus = (snapshot.merchant_focus in (f"('merchant', {r}, {c})", f"('merchant',{r},{c})"))
+                        is_bridge = is_inv_also_open and (c == 7)
+                        color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
                             painter.setBrush(color)

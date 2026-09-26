@@ -179,6 +179,7 @@ class GameMemoryState:
     dialog_quest_name: str = ""
     dialog_quest_title: str = ""
     dialog_has_item_reward: bool = False
+    merchant_npc_name: str = ""
 
 
 class TorchlightMemoryReader:
@@ -575,12 +576,19 @@ class TorchlightMemoryReader:
 
         # Em gameplay: verificar todos os menus
         open_menus: list[str] = []
+        merchant_npc_name: str = ""
         for name, (ui_offset, open_offset) in GAMEPLAY_MENUS.items():
             p_menu = self.read_u32(p_ui + ui_offset)
             if not p_menu:
                 continue
             if self.read_u8(p_menu + open_offset) == 1:
-                if name == "Encantador":
+                if name == "Vendedor (Loja)":
+                    open_menus.append(name)
+                    p_title_win = self.read_u32(p_menu + 0x28)
+                    p_str = self.read_u32(p_title_win + 0x34) if p_title_win else None
+                    if p_str:
+                        merchant_npc_name = strip_torchlight_formatting(self.read_wstring(p_str))
+                elif name == "Encantador":
                     # Distingue Sockets (Gron / Furl) de Encantador (Goren) pelo modo em +0x90
                     # Modos 0x19 (25), 0x1A (26), 0x1B (27) correspondem a Sockets
                     mode = self.read_u32(p_menu + 0x90)
@@ -693,4 +701,5 @@ class TorchlightMemoryReader:
             dialog_quest_name=dialog_quest_name,
             dialog_quest_title=dialog_quest_title,
             dialog_has_item_reward=dialog_has_item_reward,
+            merchant_npc_name=merchant_npc_name,
         )

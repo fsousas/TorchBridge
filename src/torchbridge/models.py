@@ -1283,6 +1283,65 @@ def stash_upper_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# ==============================================================================
+# Menu / Painel do Mercador (Lojas / Vendedores) (Base 1024x768 - painel esquerdo)
+# ==============================================================================
+# Calibrado a partir de assets/images/inventário/mercador-4x3.png
+# Painel esquerdo ancorado a rect.left:
+# 3 Abas Rosa no topo (Misc, Weapon, Armor)
+# Grid da Loja de 6 linhas x 7 colunas (42 slots)
+# Grid do Pet de 3 linhas x 7 colunas (21 slots) + 3 Abas Ciano
+
+MERCHANT_TABS_COORDS: dict[int, tuple[float, float]] = {
+    1: (117.0, 110.0),  # Misc
+    2: (216.0, 110.0),  # Weapon
+    3: (317.0, 110.0),  # Armor
+}
+
+MERCHANT_GRID_ROWS = 6
+MERCHANT_GRID_COLS = 7
+MERCHANT_GRID_ORIGIN_X = 65.0
+MERCHANT_GRID_STEP_X = 40.0
+MERCHANT_GRID_ROW_Y: dict[int, float] = {
+    1: 138.0,
+    2: 193.0,
+    3: 248.0,
+    4: 306.0,
+    5: 361.0,
+    6: 416.0,
+}
+
+
+def merchant_tab_point(rect: Rect, tab_index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do ponto rosa de uma aba do Mercador (1=Misc, 2=Weapon, 3=Armor)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    idx = int(clamp(tab_index, 1, 3))
+    base_x, base_y = MERCHANT_TABS_COORDS.get(idx, (117.0, 110.0))
+    x = rect.left + base_x * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def merchant_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do centro de um slot do grid do Mercador (row 1..6, col 1..7)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    r = int(clamp(row, 1, MERCHANT_GRID_ROWS))
+    c = int(clamp(col, 1, MERCHANT_GRID_COLS))
+    base_x = MERCHANT_GRID_ORIGIN_X + (c - 1) * MERCHANT_GRID_STEP_X
+    base_y = MERCHANT_GRID_ROW_Y.get(r, 138.0 + (r - 1) * 55.0)
+    x = rect.left + base_x * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -1340,6 +1399,10 @@ class OverlaySnapshot:
     stash_open: bool = False
     stash_tab: str | None = None
     stash_focus: str | None = None
+    merchant_open: bool = False
+    merchant_tab: str | None = None
+    merchant_focus: str | None = None
+    merchant_npc_name: str = ""
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).
