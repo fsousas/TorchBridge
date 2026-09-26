@@ -407,5 +407,156 @@ class HudMaskAssetTests(unittest.TestCase):
         self.assertEqual(click_zone(rect, 960, 1070), "center")
 
 
+class TitleMenuButtonTests(unittest.TestCase):
+    def test_title_menu_button_points_768p(self):
+        from torchbridge.models import TITLE_BUTTONS, title_menu_button_point
+        rect = Rect(0, 0, 1024, 768)
+        self.assertEqual(len(TITLE_BUTTONS), 5)
+        
+        # New character (lado esquerdo inferior)
+        nx, ny = title_menu_button_point(rect, "new_character")
+        self.assertEqual(ny, round(768 * 0.9466))
+        self.assertAlmostEqual(nx, 212.5, delta=1.5)
+        
+        # Load character
+        lx, ly = title_menu_button_point(rect, "load_character")
+        self.assertEqual(ly, round(768 * 0.9466))
+        self.assertAlmostEqual(lx, 467.5, delta=1.5)
+        
+        # Settings
+        sx, sy = title_menu_button_point(rect, "settings")
+        self.assertEqual(sy, round(768 * 0.9466))
+        self.assertAlmostEqual(sx, 718.5, delta=1.5)
+        
+        # Quit game
+        qx, qy = title_menu_button_point(rect, "quit_game")
+        self.assertEqual(qy, round(768 * 0.9466))
+        self.assertAlmostEqual(qx, 969.5, delta=1.5)
+        
+        # Continue (acima do Quit Game)
+        cx, cy = title_menu_button_point(rect, "continue")
+        self.assertEqual(cy, round(768 * 0.8464))
+        self.assertAlmostEqual(cx, 969.5, delta=1.5)
+
+    def test_title_menu_invalid_rect(self):
+        from torchbridge.models import title_menu_button_point
+        invalid_rect = Rect(0, 0, 0, 0)
+        self.assertEqual(title_menu_button_point(invalid_rect, "continue"), (0, 0))
+
+
+class CharCreateButtonTests(unittest.TestCase):
+    def test_char_create_button_points_768p(self):
+        from torchbridge.models import CREATE_CHAR_BUTTONS, char_create_button_point
+        rect = Rect(0, 0, 1024, 768)
+        self.assertEqual(len(CREATE_CHAR_BUTTONS), 10)
+
+        # Classes (ancoradas na esquerda)
+        dx, dy = char_create_button_point(rect, "destroyer")
+        self.assertAlmostEqual(dx, round(768 * 0.1855), delta=1)
+        self.assertAlmostEqual(dy, round(768 * 0.382), delta=1)
+
+        vx, vy = char_create_button_point(rect, "vanquisher")
+        self.assertAlmostEqual(vx, round(768 * 0.1855), delta=1)
+        self.assertAlmostEqual(vy, round(768 * 0.558), delta=1)
+
+        ax, ay = char_create_button_point(rect, "alchemist")
+        self.assertAlmostEqual(ax, round(768 * 0.1855), delta=1)
+        self.assertAlmostEqual(ay, round(768 * 0.733), delta=1)
+
+        # Pet (ancorados na direita)
+        dog_x, dog_y = char_create_button_point(rect, "dog")
+        self.assertAlmostEqual(dog_x, round(1024 - 768 * 0.072), delta=1)
+        self.assertAlmostEqual(dog_y, round(768 * 0.552), delta=1)
+
+        cat_x, cat_y = char_create_button_point(rect, "cat")
+        self.assertAlmostEqual(cat_x, round(1024 - 768 * 0.072), delta=1)
+        self.assertAlmostEqual(cat_y, round(768 * 0.591), delta=1)
+
+        fer_x, fer_y = char_create_button_point(rect, "ferret")
+        self.assertAlmostEqual(fer_x, round(1024 - 768 * 0.072), delta=1)
+        self.assertAlmostEqual(fer_y, round(768 * 0.631), delta=1)
+
+        pn_x, pn_y = char_create_button_point(rect, "pet_name")
+        self.assertAlmostEqual(pn_x, round(1024 - 768 * 0.072), delta=1)
+        self.assertAlmostEqual(pn_y, round(768 * 0.719), delta=1)
+
+        # Rodapé / Centro
+        bk_x, bk_y = char_create_button_point(rect, "back")
+        self.assertAlmostEqual(bk_x, round(512 - 768 * 0.266), delta=1)
+        self.assertAlmostEqual(bk_y, round(768 * 0.948), delta=1)
+
+        cn_x, cn_y = char_create_button_point(rect, "character_name")
+        self.assertAlmostEqual(cn_x, round(512 + 768 * 0.052), delta=1)
+        self.assertAlmostEqual(cn_y, round(768 * 0.948), delta=1)
+
+        ok_x, ok_y = char_create_button_point(rect, "ok")
+        self.assertAlmostEqual(ok_x, round(512 + 768 * 0.454), delta=1)
+        self.assertAlmostEqual(ok_y, round(768 * 0.948), delta=1)
+
+    def test_char_create_button_points_1080p(self):
+        from torchbridge.models import char_create_button_point
+        rect = Rect(0, 0, 1920, 1080)
+
+        # Classes
+        dx, dy = char_create_button_point(rect, "destroyer")
+        self.assertAlmostEqual(dx, round(1080 * 0.1855), delta=1)
+        self.assertAlmostEqual(dy, round(1080 * 0.382), delta=1)
+
+        # Pet
+        dog_x, dog_y = char_create_button_point(rect, "dog")
+        self.assertAlmostEqual(dog_x, round(1920 - 1080 * 0.072), delta=1)
+
+        # Rodapé
+        bk_x, bk_y = char_create_button_point(rect, "back")
+        self.assertAlmostEqual(bk_x, round(960 - 1080 * 0.266), delta=1)
+
+        ok_x, ok_y = char_create_button_point(rect, "ok")
+        self.assertAlmostEqual(ok_x, round(960 + 1080 * 0.454), delta=1)
+
+    def test_char_create_invalid_rect(self):
+        from torchbridge.models import char_create_button_point
+        invalid_rect = Rect(0, 0, 0, 0)
+        self.assertEqual(char_create_button_point(invalid_rect, "destroyer"), (0, 0))
+
+
+class DifficultyMenuButtonTests(unittest.TestCase):
+    def test_difficulty_menu_button_points_768p(self):
+        from torchbridge.models import DIFFICULTY_BUTTONS, difficulty_menu_button_point
+        rect = Rect(0, 0, 1024, 768)
+        self.assertEqual(len(DIFFICULTY_BUTTONS), 6)
+
+        # Dificuldades
+        ex, ey = difficulty_menu_button_point(rect, "easy")
+        self.assertAlmostEqual(ex, round(768 * 0.239), delta=1)
+        self.assertAlmostEqual(ey, round(768 * 0.378), delta=1)
+
+        nx, ny = difficulty_menu_button_point(rect, "normal")
+        self.assertAlmostEqual(nx, round(768 * 0.239), delta=1)
+        self.assertAlmostEqual(ny, round(768 * 0.428), delta=1)
+
+        hx, hy = difficulty_menu_button_point(rect, "hard")
+        self.assertAlmostEqual(hx, round(768 * 0.239), delta=1)
+        self.assertAlmostEqual(hy, round(768 * 0.481), delta=1)
+
+        vx, vy = difficulty_menu_button_point(rect, "very_hard")
+        self.assertAlmostEqual(vx, round(768 * 0.239), delta=1)
+        self.assertAlmostEqual(vy, round(768 * 0.532), delta=1)
+
+        # Hardcore (Checkbox)
+        hc_x, hc_y = difficulty_menu_button_point(rect, "hardcore")
+        self.assertAlmostEqual(hc_x, round(768 * 0.1068), delta=1)
+        self.assertAlmostEqual(hc_y, round(768 * 0.631), delta=1)
+
+        # Voltar
+        bk_x, bk_y = difficulty_menu_button_point(rect, "back")
+        self.assertAlmostEqual(bk_x, round(512 - 768 * 0.266), delta=1)
+        self.assertAlmostEqual(bk_y, round(768 * 0.948), delta=1)
+
+    def test_difficulty_menu_invalid_rect(self):
+        from torchbridge.models import difficulty_menu_button_point
+        invalid_rect = Rect(0, 0, 0, 0)
+        self.assertEqual(difficulty_menu_button_point(invalid_rect, "hardcore"), (0, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

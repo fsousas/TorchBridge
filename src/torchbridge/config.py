@@ -49,7 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_aim_marker": True,
         "show_mode_badge": True,
         # Zonas de calibração dos painéis (caixas de fechar/central) visíveis no overlay.
-        "show_calibration": True,
+        "show_calibration": False,
     },
     # Botões → teclas do Torchlight; radial_slots são os atalhos da roda (1..N, N = tamanho da lista).
     # Mapa do overworld (spec docs/REMAP-BOTOES): A/X = cliques de mouse; Y/B/RB/RT tocam
@@ -300,3 +300,12 @@ class ConfigManager:
             data["raw_controller"] = mapping
             self._write(data)
         self.reload(force=True)
+
+    # Altera a exibição do modo de calibração no overlay e grava no perfil.
+    def set_show_calibration(self, enabled: bool) -> None:
+        with self._lock:
+            data = deepcopy(self._data)
+            data["overlay"]["show_calibration"] = bool(enabled)
+            self._write(data)
+        self.reload(force=True)
+

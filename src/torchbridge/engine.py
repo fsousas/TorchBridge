@@ -17,13 +17,44 @@ from .models import (
     Rect,
     SharedOverlayState,
     both_panels_open,
+    char_create_button_point,
     click_zone,
+    dialog_button_point,
+    difficulty_menu_button_point,
+    load_char_button_point,
+    modal_ok_point,
+    pause_menu_button_point,
+    fishing_hook_point,
+    settings_button_point,
+    settings_dropdown_option_point,
+    SETTINGS_BUTTONS,
+    SETTINGS_DROPDOWNS,
+    SETTINGS_NAV_MAP,
     load_hud_mask,
     panels_x_shift,
     pet_click_point,
     pet_submenu_open,
+    title_menu_button_point,
     toggle_panel,
+    inventory_slot_point,
+    inventory_tab_point,
+    inventory_upper_point,
+    INVENTORY_UPPER_NAV_MAP,
+    pet_inventory_slot_point,
+    pet_inventory_tab_point,
+    pet_inventory_upper_point,
+    PET_UPPER_NAV_MAP,
+    STASH_GRID_ROWS,
+    STASH_GRID_COLS,
+    stash_upper_slot_point,
+    MERCHANT_GRID_ROWS,
+    MERCHANT_GRID_COLS,
+    merchant_slot_point,
+    merchant_tab_point,
+    crafting_button_point,
+    crafting_slot_point,
 )
+from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
     InputInjector,
     WindowLocator,
@@ -43,6 +74,10 @@ class BridgeEngine(threading.Thread):
         super().__init__(name="TorchBridgeInput", daemon=True)
         self.config = config
         self.shared = shared
+        # Leitor de memória direto do processo do jogo
+        self.memory = TorchlightMemoryReader()
+        self._memory_state = GameMemoryState()
+        self._memory_last_read = 0.0
         initial = config.get()
         target = initial["target"]
         # Localizador da janela do Torchlight + injetor de entrada do Windows.
@@ -126,6 +161,63 @@ class BridgeEngine(threading.Thread):
         # vez aqui e passada ao click_zone em cada borda de clique. None = sem asset
         # (comportamento antigo: clique central com ambos abertos fecha tudo).
         self._hud_mask = load_hud_mask()
+        # Navegação no Menu Inicial (Title Screen) via D-pad
+        self._title_screen_initialized = False
+        self._title_focus = "continue"
+        # Navegação na Criação de Personagem (state_id == 1) via D-pad
+        self._char_create_initialized = False
+        self._char_create_focus = "destroyer"
+        # Navegação na Seleção de Dificuldade (state_id == 2) via D-pad
+        self._difficulty_initialized = False
+        self._difficulty_focus = "hardcore"
+        # Navegação em Diálogos e Telas de História via D-pad
+        self._dialog_initialized = False
+        self._dialog_focus: str | None = None
+        self._last_dialog_type = ""
+        # Navegação no Menu de Pause (COptionsMenu / Options) via D-pad
+        self._pause_menu_initialized = False
+        self._pause_focus = "return_to_game"
+        # Navegação na Tela de Carregar Personagem (state_id == 3) via D-pad
+        self._load_char_initialized = False
+        self._load_char_focus: str | None = None
+        self._load_char_delete_dialog_open = False
+        self._load_char_last_slot = "slot_1"
+        self._load_char_scroll_offset = 0
+        self._load_char_dialog_debounce: float = 0.0
+        self._last_state_id = -1
+        # Navegação na Tela de Configurações (Settings) via D-pad
+        self._settings_initialized = False
+        self._settings_focus: str | None = None
+        self._settings_dropdown: str | None = None
+        self._settings_dropdown_idx = 0
+        self._settings_slider_dragging = False
+        self._settings_slider_last_stick: float = 0.0
+        self._settings_sound_vol: float = 1.0
+        self._settings_music_vol: float = 1.0
+        # Navegação na Interface de Pesca e Modal de Confirmação (Peixe/Mensagens)
+        self._fishing_initialized: bool = False
+        self._modal_confirm_initialized: bool = False
+        # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
+        self._inventory_initialized: bool = False
+        self._inventory_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._inventory_focus: tuple[int, int] | str | None = None
+        # Navegação no Menu do Pet (Abas + Grid 3x7 + Equipamentos/Spells superiores)
+        self._pet_inventory_initialized: bool = False
+        self._pet_inventory_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._pet_inventory_focus: tuple[int, int] | str | None = None
+        # Navegação no Menu do Baú (Stash 6x7 superior + Pet 3x7 inferior + Abas)
+        self._stash_initialized: bool = False
+        self._stash_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._stash_focus: tuple[str, int, int] | None = None
+        # Navegação no Menu do Mercador (Lojas 6x7 superior com 3 abas rosa + Pet 3x7 inferior)
+        self._merchant_initialized: bool = False
+        self._merchant_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._merchant_focus: tuple[Any, ...] | None = None
+        self._merchant_npc_name: str = ""
+        # Navegação nos Menus de Crafting (Transmutador, Sockets, Encantador)
+        self._crafting_initialized: bool = False
+        self._crafting_menu: str | None = None
+        self._crafting_focus: str | None = None
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -140,7 +232,68 @@ class BridgeEngine(threading.Thread):
         self._reset_active_panels()
         self._radial_selection = None
         self._radial_dismissed = False
-        self.shared.update(radial_selection=None)
+        self._dialog_initialized = False
+        self._dialog_focus = None
+        self._last_dialog_type = ""
+        self._pause_menu_initialized = False
+        self._pause_focus = None
+        self._load_char_initialized = False
+        self._load_char_focus = None
+        self._load_char_delete_dialog_open = False
+        self._load_char_scroll_offset = 0
+        self._load_char_dialog_debounce = 0.0
+        self._settings_initialized = False
+        self._settings_focus = None
+        self._settings_dropdown = None
+        self._settings_dropdown_idx = 0
+        self._settings_slider_dragging = False
+        self._settings_slider_last_stick = 0.0
+        self._inventory_initialized = False
+        self._inventory_tab = None
+        self._inventory_focus = None
+        self._pet_inventory_initialized = False
+        self._pet_inventory_tab = None
+        self._pet_inventory_focus = None
+        self._stash_initialized = False
+        self._stash_tab = None
+        self._stash_focus = None
+        self._merchant_initialized = False
+        self._merchant_tab = None
+        self._merchant_focus = None
+        self._merchant_npc_name = ""
+        self._crafting_initialized = False
+        self._crafting_menu = None
+        self._crafting_focus = None
+        self.shared.update(
+            radial_selection=None,
+            pause_menu_focus=None,
+            load_char_focus=None,
+            load_char_delete_open=False,
+            settings_focus=None,
+            settings_dropdown=None,
+            settings_dropdown_idx=0,
+            settings_slider_dragging=False,
+            fishing_focus=None,
+            modal_confirm_focus=None,
+            inventory_open=False,
+            inventory_tab=None,
+            inventory_focus=None,
+            pet_inventory_open=False,
+            pet_inventory_tab=None,
+            pet_inventory_focus=None,
+            stash_open=False,
+            stash_tab=None,
+            stash_focus=None,
+            merchant_open=False,
+            merchant_tab=None,
+            merchant_focus=None,
+            merchant_npc_name="",
+            crafting_open=False,
+            crafting_menu=None,
+            crafting_focus=None,
+        )
+        self._fishing_initialized = False
+        self._modal_confirm_initialized = False
 
     # Pede a parada; a thread encerra no próximo ciclo.
     def stop(self) -> None:
@@ -208,6 +361,9 @@ class BridgeEngine(threading.Thread):
             self._pet_click_panel_done = False
         # Interrompe o "movimento direto ativo" para o retorno ao centro não disparar no tick de volta.
         self._direct_move_active = False
+        if self._settings_slider_dragging:
+            self.injector.mouse_button("left", False)
+            self._settings_slider_dragging = False
         # A roda fechou (interrupção): a sublinha de pet actions não pode sobreviver aberta.
         self._pet_submenu = False
         self._pet_submenu_selection = PET_SUBMENU_DEFAULT
@@ -228,7 +384,45 @@ class BridgeEngine(threading.Thread):
             pet_submenu_selection=None,
             aim_x=None,
             aim_y=None,
+            title_menu_focus=None,
+            char_create_focus=None,
+            difficulty_focus=None,
+            pause_menu_focus=None,
+            load_char_focus=None,
+            load_char_delete_open=False,
+            inventory_open=False,
+            inventory_tab=None,
+            inventory_focus=None,
+            pet_inventory_open=False,
+            pet_inventory_tab=None,
+            pet_inventory_focus=None,
+            stash_open=False,
+            stash_tab=None,
+            stash_focus=None,
+            merchant_open=False,
+            merchant_tab=None,
+            merchant_focus=None,
+            merchant_npc_name="",
+            crafting_open=False,
+            crafting_menu=None,
+            crafting_focus=None,
         )
+        self._inventory_initialized = False
+        self._inventory_tab = None
+        self._inventory_focus = None
+        self._pet_inventory_initialized = False
+        self._pet_inventory_tab = None
+        self._pet_inventory_focus = None
+        self._stash_initialized = False
+        self._stash_tab = None
+        self._stash_focus = None
+        self._merchant_initialized = False
+        self._merchant_tab = None
+        self._merchant_focus = None
+        self._merchant_npc_name = ""
+        self._crafting_initialized = False
+        self._crafting_menu = None
+        self._crafting_focus = None
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -328,11 +522,2175 @@ class BridgeEngine(threading.Thread):
     ) -> None:
         # Roda aberta: a roda é o mundo — nenhum toque de tecla dispara enquanto ela
         # estiver de pé (o d-pad controla a sublinha de pet actions lá dentro).
-        if state.pressed("lb") and not self._radial_dismissed:
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
         # R3: borda de subida, um toque por pressionamento, sem auto-repeat.
         if state.pressed("r3") and not self._previous.pressed("r3"):
             self._tap_binding(bindings.get("r3"))
+
+    # Navegação por D-pad na Tela Inicial (Title Screen, state_id == 0)
+    def _handle_title_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos botões da Tela Inicial (Title Screen) via D-pad."""
+        has_save = (self._memory_state.save_count >= 1)
+
+        # Inicialização ao entrar na Tela Inicial
+        if not self._title_screen_initialized or self._last_state_id != 0:
+            self._title_screen_initialized = True
+            self._last_state_id = 0
+            self._title_focus = "continue" if has_save else "new_character"
+            target_x, target_y = title_menu_button_point(rect, self._title_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(title_menu_focus=self._title_focus)
+            return
+
+        current = self._title_focus
+        new_focus = current
+
+        # Transições via D-pad (na borda de subida)
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_right:
+            if current == "new_character":
+                new_focus = "load_character"
+            elif current == "load_character":
+                new_focus = "settings"
+            elif current == "settings":
+                new_focus = "quit_game"
+            elif current == "continue":
+                new_focus = "quit_game"
+        elif dpad_left:
+            if current == "quit_game":
+                new_focus = "settings"
+            elif current == "settings":
+                new_focus = "load_character"
+            elif current == "load_character":
+                new_focus = "new_character"
+            elif current == "continue":
+                new_focus = "settings"
+        elif dpad_down:
+            if current == "continue":
+                new_focus = "quit_game"
+        elif dpad_up:
+            if has_save and current in ("quit_game", "settings"):
+                new_focus = "continue"
+
+        if new_focus != current:
+            self._title_focus = new_focus
+            target_x, target_y = title_menu_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(title_menu_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Criação de Personagem (state_id == 1)
+    def _handle_char_create_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação na Tela de Criação de Personagem (state_id == 1) via D-pad."""
+        if not self._char_create_initialized or self._last_state_id != 1:
+            self._char_create_initialized = True
+            self._last_state_id = 1
+            self._char_create_focus = "destroyer"
+            target_x, target_y = char_create_button_point(rect, self._char_create_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(char_create_focus=self._char_create_focus)
+            return
+
+        current = self._char_create_focus
+        has_name = (self._memory_state.char_name_len > 0)
+
+        # Se o foco estava no 'ok' mas o nome foi apagado, recua para 'character_name'
+        if current == "ok" and not has_name:
+            current = "character_name"
+            self._char_create_focus = "character_name"
+            target_x, target_y = char_create_button_point(rect, "character_name")
+            self.injector.move(target_x, target_y)
+            self.shared.update(char_create_focus="character_name")
+
+        new_focus = current
+
+        # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Cancelar / Voltar
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._char_create_focus = "back"
+            target_x, target_y = char_create_button_point(rect, "back")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(char_create_focus="back")
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_right:
+            if current == "destroyer":
+                new_focus = "dog"
+            elif current == "vanquisher":
+                new_focus = "cat"
+            elif current == "alchemist":
+                new_focus = "ferret"
+            elif current == "back":
+                new_focus = "character_name"
+            elif current == "character_name":
+                if has_name:
+                    new_focus = "ok"
+        elif dpad_left:
+            if current == "dog":
+                new_focus = "destroyer"
+            elif current == "cat":
+                new_focus = "vanquisher"
+            elif current == "ferret":
+                new_focus = "alchemist"
+            elif current == "pet_name":
+                new_focus = "alchemist"
+            elif current == "character_name":
+                new_focus = "back"
+            elif current == "ok":
+                new_focus = "character_name"
+        elif dpad_down:
+            if current == "destroyer":
+                new_focus = "vanquisher"
+            elif current == "vanquisher":
+                new_focus = "alchemist"
+            elif current == "alchemist":
+                new_focus = "back"
+            elif current == "dog":
+                new_focus = "cat"
+            elif current == "cat":
+                new_focus = "ferret"
+            elif current == "ferret":
+                new_focus = "pet_name"
+            elif current == "pet_name":
+                new_focus = "ok" if has_name else "character_name"
+        elif dpad_up:
+            if current == "back":
+                new_focus = "alchemist"
+            elif current in ("character_name", "ok"):
+                new_focus = "pet_name"
+            elif current == "alchemist":
+                new_focus = "vanquisher"
+            elif current == "vanquisher":
+                new_focus = "destroyer"
+            elif current == "pet_name":
+                new_focus = "ferret"
+            elif current == "ferret":
+                new_focus = "cat"
+            elif current == "cat":
+                new_focus = "dog"
+
+        if new_focus != current:
+            self._char_create_focus = new_focus
+            target_x, target_y = char_create_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(char_create_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Seleção de Dificuldade (state_id == 2)
+    def _handle_difficulty_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação na Tela de Seleção de Dificuldade (state_id == 2) via D-pad."""
+        if not self._difficulty_initialized or self._last_state_id not in (2, 4):
+            self._difficulty_initialized = True
+            self._last_state_id = self._memory_state.state_id
+            self._difficulty_focus = "hardcore"
+            target_x, target_y = difficulty_menu_button_point(rect, self._difficulty_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(difficulty_focus=self._difficulty_focus)
+            return
+
+        current = self._difficulty_focus
+        new_focus = current
+
+        # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Voltar
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._difficulty_focus = "back"
+            target_x, target_y = difficulty_menu_button_point(rect, "back")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(difficulty_focus="back")
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_down:
+            if current == "easy":
+                new_focus = "normal"
+            elif current == "normal":
+                new_focus = "hard"
+            elif current == "hard":
+                new_focus = "very_hard"
+            elif current == "very_hard":
+                new_focus = "hardcore"
+            elif current == "hardcore":
+                new_focus = "back"
+        elif dpad_up:
+            if current == "back":
+                new_focus = "hardcore"
+            elif current == "hardcore":
+                new_focus = "very_hard"
+            elif current == "very_hard":
+                new_focus = "hard"
+            elif current == "hard":
+                new_focus = "normal"
+            elif current == "normal":
+                new_focus = "easy"
+        elif dpad_right:
+            if current == "hardcore":
+                new_focus = "very_hard"
+        elif dpad_left:
+            if current in ("easy", "normal", "hard", "very_hard"):
+                new_focus = "hardcore"
+
+        if new_focus != current:
+            self._difficulty_focus = new_focus
+            target_x, target_y = difficulty_menu_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(difficulty_focus=new_focus)
+
+    # Navegação por D-pad em Diálogos de NPCs, Missões e Telas de História
+    def _handle_dialog_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação nos botões de diálogos (Ok, Accept, Decline, Continue) e slot de recompensa via D-pad."""
+        dtype = self._memory_state.dialog_type
+        buttons = self._memory_state.dialog_buttons
+        has_reward = self._memory_state.dialog_has_item_reward
+        if not dtype or not buttons:
+            return
+
+        # Inicialização ao entrar no diálogo ou mudar de tipo
+        if not self._dialog_initialized or self._last_dialog_type != dtype:
+            self._dialog_initialized = True
+            self._last_dialog_type = dtype
+            # Default focus: primeiro botão da lista (Accept em missao_aceitar, Ok em andamento/concluida)
+            self._dialog_focus = buttons[0]
+            target_x, target_y = dialog_button_point(rect, self._dialog_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(
+                dialog_focus=self._dialog_focus,
+                dialog_type=dtype,
+                dialog_buttons=list(buttons),
+                dialog_has_reward=has_reward,
+            )
+            return
+
+        current = self._dialog_focus or buttons[0]
+        new_focus = current
+
+        # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Recusar / Decline se disponível
+        if "decline" in buttons:
+            if state.pressed("b") and not self._previous.pressed("b"):
+                self._dialog_focus = "decline"
+                target_x, target_y = dialog_button_point(rect, "decline")
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(dialog_focus="decline")
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+                return
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+
+        if dpad_right:
+            if current == "reward_slot":
+                # Da recompensa para a direita: volta para o botão de ação (accept ou ok)
+                new_focus = "accept" if "accept" in buttons else "ok"
+            elif "decline" in buttons and current == "accept":
+                new_focus = "decline"
+        elif dpad_left:
+            if current == "decline" and "accept" in buttons:
+                new_focus = "accept"
+            elif current in ("accept", "ok") and has_reward:
+                new_focus = "reward_slot"
+
+        if new_focus != current:
+            self._dialog_focus = new_focus
+            target_x, target_y = dialog_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(dialog_focus=new_focus)
+
+    # Navegação por D-pad no Menu de Pause (COptionsMenu / Options) em jogo
+    def _handle_pause_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação no Menu de Pause (COptionsMenu / Options) em jogo via D-pad."""
+        if not self._pause_menu_initialized:
+            self._pause_menu_initialized = True
+            # Foco padrão: 'return_to_game' (marcador amarelo do usuário)
+            self._pause_focus = "return_to_game"
+            target_x, target_y = pause_menu_button_point(rect, self._pause_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(pause_menu_focus=self._pause_focus)
+            return
+
+        current = self._pause_focus or "return_to_game"
+        new_focus = current
+
+        # Botão B: atalho direto para Retornar ao Jogo
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._pause_focus = "return_to_game"
+            target_x, target_y = pause_menu_button_point(rect, "return_to_game")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(pause_menu_focus="return_to_game")
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_up:
+            if current == "return_to_game":
+                new_focus = "exit_to_title"
+            elif current == "exit_to_title":
+                new_focus = "settings"
+        elif dpad_down:
+            if current == "settings":
+                new_focus = "exit_to_title"
+            elif current == "exit_to_title":
+                new_focus = "return_to_game"
+
+        if new_focus != current:
+            self._pause_focus = new_focus
+            target_x, target_y = pause_menu_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(pause_menu_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Carregar Personagem (state_id == 3)
+    def _handle_load_char_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        now: float = 0.0,
+    ) -> None:
+        """Gerencia a navegação na Tela de Carregar Personagem (state_id == 3) via D-pad e atalhos."""
+        cur_time = now if now > 0 else time.monotonic()
+        if not self._load_char_initialized or self._last_state_id != 3:
+            self._load_char_initialized = True
+            self._last_state_id = 3
+            self._load_char_delete_dialog_open = False
+            self._load_char_focus = "slot_1"
+            self._load_char_last_slot = "slot_1"
+            self._load_char_dialog_debounce = 0.0
+            target_x, target_y = load_char_button_point(rect, self._load_char_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(load_char_focus=self._load_char_focus, load_char_delete_open=False)
+            return
+
+        current = self._load_char_focus or "slot_1"
+
+        # -------------------------------------------------------------
+        # CASO 1: Modal de Confirmação de Exclusão de Personagem aberto
+        # -------------------------------------------------------------
+        if self._load_char_delete_dialog_open:
+            if cur_time < self._load_char_dialog_debounce:
+                return
+
+            cancel_pressed = (state.pressed("b") and not self._previous.pressed("b"))
+            action_pressed = (
+                (state.pressed("a") and not self._previous.pressed("a"))
+                or (state.pressed("x") and not self._previous.pressed("x"))
+            )
+
+            dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+            dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+            new_focus = current
+            if dpad_up:
+                new_focus = "delete_confirm"
+            elif dpad_down:
+                new_focus = "delete_cancel"
+
+            if new_focus != current:
+                self._load_char_focus = new_focus
+                target_x, target_y = load_char_button_point(rect, new_focus)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(load_char_focus=new_focus, load_char_delete_open=True)
+                return
+
+            if cancel_pressed or (action_pressed and current == "delete_cancel"):
+                # Clica em Cancelar no modal
+                target_x, target_y = load_char_button_point(rect, "delete_cancel")
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.05)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+
+                # Debounce: aguarda o modal fechar no jogo antes de devolver o cursor
+                time.sleep(0.20)
+
+                # Cursor volta para o botão de delete pequeno na parte inferior da tela
+                self._load_char_delete_dialog_open = False
+                self._load_char_focus = "delete"
+                del_x, del_y = load_char_button_point(rect, "delete")
+                self.injector.move(del_x, del_y)
+                self._load_char_dialog_debounce = cur_time + 0.25
+                self.shared.update(load_char_focus="delete", load_char_delete_open=False)
+                return
+
+            if action_pressed and current == "delete_confirm":
+                # Clica em Deletar para confirmar exclusão
+                target_x, target_y = load_char_button_point(rect, "delete_confirm")
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.05)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.06, 0.15, 50)
+
+                # Debounce: aguarda a exclusão assentar antes de devolver o cursor
+                time.sleep(0.20)
+
+                # Cursor volta para o botão de delete pequeno na parte inferior da tela
+                self._load_char_delete_dialog_open = False
+                self._load_char_focus = "delete"
+                if self._load_char_scroll_offset > 0:
+                    self._load_char_scroll_offset -= 1
+                del_x, del_y = load_char_button_point(rect, "delete")
+                self.injector.move(del_x, del_y)
+                self._load_char_dialog_debounce = cur_time + 0.25
+                self.shared.update(load_char_focus="delete", load_char_delete_open=False)
+                return
+
+            return
+
+        # -------------------------------------------------------------
+        # CASO 2: Navegação Normal na Tela de Carregar Personagem
+        # -------------------------------------------------------------
+        # Botão B: atalho direto para Voltar ao Menu Principal
+        if state.pressed("b") and not self._previous.pressed("b"):
+            self._load_char_focus = "back"
+            target_x, target_y = load_char_button_point(rect, "back")
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+            self.shared.update(load_char_focus="back", load_char_delete_open=False)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.04)
+            self.injector.mouse_button("left", False)
+            return
+
+        # Ações de Seleção / Clique (Botão A ou X):
+        action_pressed = (
+            (state.pressed("a") and not self._previous.pressed("a"))
+            or (state.pressed("x") and not self._previous.pressed("x"))
+        )
+
+        if action_pressed:
+            # 1. Selecionou um personagem no lado direito da tela:
+            # Clica no slot para selecionar o personagem e move imediatamente o cursor para o botão Play
+            if current.startswith("slot_"):
+                slot_x, slot_y = load_char_button_point(rect, current)
+                self.injector.move(slot_x, slot_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+
+                # Move para o Play na barra inferior
+                self._load_char_last_slot = current
+                self._load_char_focus = "play"
+                play_x, play_y = load_char_button_point(rect, "play")
+                self.injector.move(play_x, play_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(load_char_focus="play", load_char_delete_open=False)
+                return
+
+            # 2. Clicou no botão pequeno de delete:
+            # Abre o modal de confirmação com foco padrão em Cancelar (amarelo)
+            elif current == "delete":
+                if cur_time < self._load_char_dialog_debounce:
+                    return
+
+                del_x, del_y = load_char_button_point(rect, "delete")
+                self.injector.move(del_x, del_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.05)
+                self.injector.mouse_button("left", False)
+
+                # Debounce crucial: aguarda 200ms com o cursor ainda no botão Delete inferior
+                # para o clique físico assentar e o popup abrir no jogo antes de mover para Cancelar.
+                time.sleep(0.20)
+
+                self._load_char_delete_dialog_open = True
+                self._load_char_focus = "delete_cancel"
+                target_x, target_y = load_char_button_point(rect, "delete_cancel")
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self._load_char_dialog_debounce = cur_time + 0.25
+                self.shared.update(load_char_focus="delete_cancel", load_char_delete_open=True)
+                return
+
+            # 3. Clicou em Play, Back ou Scroll
+            elif current in ("play", "back", "scroll_up", "scroll_down"):
+                target_x, target_y = load_char_button_point(rect, current)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                if current == "scroll_down":
+                    self._load_char_scroll_offset += 1
+                elif current == "scroll_up" and self._load_char_scroll_offset > 0:
+                    self._load_char_scroll_offset -= 1
+                return
+
+        # Navegação com D-pad
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        save_count = self._memory_state.save_count
+        max_visible_slots = min(5, max(1, save_count)) if save_count > 0 else 5
+
+        new_focus = current
+
+        # D-pad Cima / Baixo
+        if dpad_down:
+            if current == "scroll_up":
+                new_focus = "slot_1"
+            elif current == "slot_1":
+                new_focus = "slot_2" if max_visible_slots >= 2 else "slot_1"
+            elif current == "slot_2":
+                new_focus = "slot_3" if max_visible_slots >= 3 else "slot_2"
+            elif current == "slot_3":
+                new_focus = "slot_4" if max_visible_slots >= 4 else "slot_3"
+            elif current == "slot_4":
+                new_focus = "slot_5" if max_visible_slots >= 5 else "slot_4"
+            elif current == "slot_5":
+                # Rolagem contínua via D-pad: se houver mais personagens abaixo da página visível,
+                # clica na seta inferior para rolar 1 personagem e mantém o cursor no slot_5.
+                max_offset = max(0, save_count - 5) if save_count > 0 else 0
+                if save_count > 5 and self._load_char_scroll_offset < max_offset:
+                    scroll_x, scroll_y = load_char_button_point(rect, "scroll_down")
+                    self.injector.move(scroll_x, scroll_y)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.04)
+                    self.injector.mouse_button("left", False)
+                    self._load_char_scroll_offset += 1
+
+                    slot_x, slot_y = load_char_button_point(rect, "slot_5")
+                    self.injector.move(slot_x, slot_y)
+                    hub.rumble(0.04, 0.10, 35)
+                    self._load_char_focus = "slot_5"
+                    self._load_char_last_slot = "slot_5"
+                    self.shared.update(load_char_focus="slot_5", load_char_delete_open=False)
+                    return
+        elif dpad_up:
+            if current == "scroll_down":
+                new_focus = "slot_5"
+            elif current == "slot_5":
+                new_focus = "slot_4"
+            elif current == "slot_4":
+                new_focus = "slot_3"
+            elif current == "slot_3":
+                new_focus = "slot_2"
+            elif current == "slot_2":
+                new_focus = "slot_1"
+            elif current == "slot_1":
+                # Rolagem contínua via D-pad: se a lista foi rolada para baixo,
+                # clica na seta superior para rolar 1 personagem para cima e mantém o cursor no slot_1.
+                if self._load_char_scroll_offset > 0:
+                    scroll_x, scroll_y = load_char_button_point(rect, "scroll_up")
+                    self.injector.move(scroll_x, scroll_y)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.04)
+                    self.injector.mouse_button("left", False)
+                    self._load_char_scroll_offset -= 1
+
+                    slot_x, slot_y = load_char_button_point(rect, "slot_1")
+                    self.injector.move(slot_x, slot_y)
+                    hub.rumble(0.04, 0.10, 35)
+                    self._load_char_focus = "slot_1"
+                    self._load_char_last_slot = "slot_1"
+                    self.shared.update(load_char_focus="slot_1", load_char_delete_open=False)
+                    return
+            elif current in ("back", "delete", "play"):
+                new_focus = self._load_char_last_slot or "slot_1"
+
+        # D-pad Esquerda / Direita
+        elif dpad_left:
+            if current.startswith("slot_") or current in ("scroll_up", "scroll_down"):
+                self._load_char_last_slot = current if current.startswith("slot_") else "slot_1"
+                new_focus = "play"
+            elif current == "play":
+                new_focus = "delete"
+            elif current == "delete":
+                new_focus = "back"
+        elif dpad_right:
+            if current == "back":
+                new_focus = "delete"
+            elif current == "delete":
+                new_focus = "play"
+            elif current == "play":
+                new_focus = self._load_char_last_slot or "slot_1"
+
+        if new_focus != current:
+            self._load_char_focus = new_focus
+            if new_focus.startswith("slot_"):
+                self._load_char_last_slot = new_focus
+            target_x, target_y = load_char_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(load_char_focus=new_focus, load_char_delete_open=False)
+
+    # Navegação por D-pad na Tela de Configurações (Settings)
+    def _handle_settings_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        now: float = 0.0,
+    ) -> None:
+        """Gerencia a navegação na Tela de Configurações (Settings) via D-pad e atalhos."""
+        if not self._settings_initialized:
+            self._settings_initialized = True
+            self._settings_focus = "row1_col1"
+            self._settings_dropdown = None
+            self._settings_dropdown_idx = 0
+            self._settings_slider_dragging = False
+            self._settings_sound_vol = self._memory_state.sound_volume
+            self._settings_music_vol = self._memory_state.music_volume
+            target_x, target_y = settings_button_point(rect, self._settings_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(
+                settings_focus=self._settings_focus,
+                settings_dropdown=None,
+                settings_dropdown_idx=0,
+                settings_slider_dragging=False,
+                settings_sound_vol=self._settings_sound_vol,
+                settings_music_vol=self._settings_music_vol,
+            )
+            return
+
+        current = self._settings_focus or "row1_col1"
+
+        btn_a_pressed = (state.pressed("a") and not self._previous.pressed("a"))
+        btn_b_pressed = (state.pressed("b") and not self._previous.pressed("b"))
+        btn_x_pressed = (state.pressed("x") and not self._previous.pressed("x"))
+        action_pressed = (btn_a_pressed or btn_x_pressed)
+
+        dpad_up = (state.pressed("dpad_up") and not self._previous.pressed("dpad_up"))
+        dpad_down = (state.pressed("dpad_down") and not self._previous.pressed("dpad_down"))
+        dpad_left = (state.pressed("dpad_left") and not self._previous.pressed("dpad_left"))
+        dpad_right = (state.pressed("dpad_right") and not self._previous.pressed("dpad_right"))
+
+        # -------------------------------------------------------------
+        # CASO 1: Slider Dragging (ajuste horizontal com clique segurado)
+        # -------------------------------------------------------------
+        if self._settings_slider_dragging:
+            if btn_b_pressed or action_pressed:
+                # OBS 1: Apertar B (ou A/X) solta o clique esquerdo e libera navegação
+                self._settings_slider_dragging = False
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(settings_slider_dragging=False)
+                return
+
+            stick_left = (state.lx < -0.4 and (now - self._settings_slider_last_stick >= 0.08))
+            stick_right = (state.lx > 0.4 and (now - self._settings_slider_last_stick >= 0.08))
+
+            if dpad_left or stick_left:
+                if stick_left:
+                    self._settings_slider_last_stick = now
+                step = 0.05
+                if current == "music_slider":
+                    self._settings_music_vol = clamp(self._settings_music_vol - step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "music_slider", self._settings_music_vol)
+                else:
+                    self._settings_sound_vol = clamp(self._settings_sound_vol - step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "sound_slider", self._settings_sound_vol)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                hub.rumble(0.02, 0.05, 20)
+                self.shared.update(
+                    settings_sound_vol=self._settings_sound_vol,
+                    settings_music_vol=self._settings_music_vol,
+                )
+            elif dpad_right or stick_right:
+                if stick_right:
+                    self._settings_slider_last_stick = now
+                step = 0.05
+                if current == "music_slider":
+                    self._settings_music_vol = clamp(self._settings_music_vol + step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "music_slider", self._settings_music_vol)
+                else:
+                    self._settings_sound_vol = clamp(self._settings_sound_vol + step, 0.0, 1.0)
+                    target_x, target_y = settings_button_point(rect, "sound_slider", self._settings_sound_vol)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                hub.rumble(0.02, 0.05, 20)
+                self.shared.update(
+                    settings_sound_vol=self._settings_sound_vol,
+                    settings_music_vol=self._settings_music_vol,
+                )
+            return
+
+        # -------------------------------------------------------------
+        # CASO 2: Dropdown Aberto (Resolution, Shadows, Particle Detail)
+        # -------------------------------------------------------------
+        if self._settings_dropdown is not None:
+            dropdown_name = self._settings_dropdown
+            drop_info = SETTINGS_DROPDOWNS.get(dropdown_name, {})
+            options = drop_info.get("options", [])
+            total_options = len(options)
+
+            if btn_b_pressed:
+                # OBS 2: Apertar B volta ao ponto rosa e clica nele para fechar o dropdown
+                pink_btn = dropdown_name
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self._settings_focus = pink_btn
+                target_x, target_y = settings_button_point(rect, pink_btn)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_focus=pink_btn,
+                )
+                return
+
+            if action_pressed:
+                # OBS 2: Pressionar A/X em uma opção clica nela e volta para a opção rosa
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                pink_btn = dropdown_name
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self._settings_focus = pink_btn
+                target_x, target_y = settings_button_point(rect, pink_btn)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_focus=pink_btn,
+                )
+                return
+
+            if dpad_up and self._settings_dropdown_idx > 0:
+                self._settings_dropdown_idx -= 1
+                target_x, target_y = settings_dropdown_option_point(rect, dropdown_name, self._settings_dropdown_idx)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(settings_dropdown_idx=self._settings_dropdown_idx)
+            elif dpad_down and self._settings_dropdown_idx < total_options - 1:
+                self._settings_dropdown_idx += 1
+                target_x, target_y = settings_dropdown_option_point(rect, dropdown_name, self._settings_dropdown_idx)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(settings_dropdown_idx=self._settings_dropdown_idx)
+            return
+
+        # -------------------------------------------------------------
+        # CASO 3: Tela Principal de Configurações
+        # -------------------------------------------------------------
+        if btn_b_pressed:
+            # Botão B fecha as configurações clicando no botão Cancelar
+            target_x, target_y = settings_button_point(rect, "cancel")
+            self.injector.move(target_x, target_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            self._settings_focus = "cancel"
+            hub.rumble(0.05, 0.12, 40)
+            self.shared.update(settings_focus="cancel")
+            return
+
+        if action_pressed:
+            if current in ("sound_slider", "music_slider"):
+                # OBS 1: Apertar A/X sobre o roxo inicia o hold do clique esquerdo
+                vol = self._settings_music_vol if current == "music_slider" else self._settings_sound_vol
+                target_x, target_y = settings_button_point(rect, current, vol)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                self._settings_slider_dragging = True
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(settings_slider_dragging=True)
+                return
+            elif current in ("resolution", "shadows", "particle_detail"):
+                # OBS 2: Apertar A/X no botão rosa abre o dropdown e move cursor pro amarelo
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                self._settings_dropdown = current
+                self._settings_dropdown_idx = 0
+                target_x, target_y = settings_dropdown_option_point(rect, current, 0)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.04, 0.10, 35)
+                self.shared.update(
+                    settings_dropdown=current,
+                    settings_dropdown_idx=0,
+                )
+                return
+            else:
+                # Botões normais (checkboxes, mute, cancel, apply)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.10, 35)
+                return
+
+        # Navegação no grafo de posições
+        new_focus = current
+        nav_options = SETTINGS_NAV_MAP.get(current, {})
+        if dpad_up and "up" in nav_options:
+            new_focus = nav_options["up"]
+        elif dpad_down and "down" in nav_options:
+            new_focus = nav_options["down"]
+        elif dpad_left and "left" in nav_options:
+            new_focus = nav_options["left"]
+        elif dpad_right and "right" in nav_options:
+            new_focus = nav_options["right"]
+
+        if new_focus != current:
+            self._settings_focus = new_focus
+            if new_focus == "sound_slider":
+                target_x, target_y = settings_button_point(rect, new_focus, self._settings_sound_vol)
+            elif new_focus == "music_slider":
+                target_x, target_y = settings_button_point(rect, new_focus, self._settings_music_vol)
+            else:
+                target_x, target_y = settings_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(settings_focus=new_focus)
+
+    # Navegação e Interação na Interface de Pesca (minigame do anzol)
+    def _handle_fishing_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia o posicionamento e interação na interface de pesca."""
+        target_x, target_y = fishing_hook_point(rect)
+        if not self._fishing_initialized:
+            self._fishing_initialized = True
+            self.injector.move(target_x, target_y)
+            self.shared.update(fishing_focus="hook")
+
+        # Mantém o cursor fixo no anzol como única opção
+        cur_x, cur_y = self.injector.cursor_position()
+        if abs(cur_x - target_x) > 4 or abs(cur_y - target_y) > 4:
+            self.injector.move(target_x, target_y)
+
+        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
+        if btn_a_pressed or btn_x_pressed:
+            self.injector.move(target_x, target_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.04, 0.10, 35)
+
+    # Navegação e Interação no Modal de Confirmação (Resultado de Pesca / Popups com Ok)
+    def _handle_modal_confirm_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia o posicionamento e confirmação no popup modal (Ok do peixe/mensagem)."""
+        target_x, target_y = modal_ok_point(rect)
+        if not self._modal_confirm_initialized:
+            self._modal_confirm_initialized = True
+            self.injector.move(target_x, target_y)
+            self.shared.update(modal_confirm_focus="ok")
+
+        # Garante o cursor sobre o botão Ok
+        cur_x, cur_y = self.injector.cursor_position()
+        if abs(cur_x - target_x) > 4 or abs(cur_y - target_y) > 4:
+            self.injector.move(target_x, target_y)
+
+        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
+        btn_b_pressed = state.pressed("b") and not self._previous.pressed("b")
+
+        if btn_a_pressed or btn_x_pressed or btn_b_pressed:
+            self.injector.move(target_x, target_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.04, 0.10, 35)
+
+    def _move_cursor_with_leave_step(
+        self,
+        current_focus: Any,
+        cur_x: int,
+        cur_y: int,
+        target_x: int,
+        target_y: int,
+        rect: Rect,
+    ) -> None:
+        """Move o cursor para o alvo garantindo o encerramento limpo de tooltips de spells e travessias entre telas.
+
+        No Torchlight (CEGUI), slots de spell são botões que só fecham o tooltip quando
+        recebem um evento OnMouseLeave. Saltos instantâneos via SendInput para outro widget
+        ou outra tela ignoram a borda neutra, deixando o tooltip preso na tela.
+        """
+        scale = rect.height / 768.0 if (rect and rect.valid) else 1.0
+        is_leaving_spell = False
+        origin_x, origin_y = cur_x, cur_y
+
+        if current_focus is not None:
+            f_str = str(current_focus)
+            if f_str.startswith("spell_"):
+                is_leaving_spell = True
+                if rect and rect.valid:
+                    origin_x, origin_y = inventory_upper_point(rect, f_str)
+            elif f_str.startswith("pet_spell_"):
+                is_leaving_spell = True
+                if rect and rect.valid:
+                    origin_x, origin_y = pet_inventory_upper_point(rect, f_str)
+
+        is_cross_screen = abs(target_x - origin_x) > 250 * scale
+
+        if is_leaving_spell:
+            # 1. Passo neutro no pergaminho logo abaixo do spell para forçar OnMouseLeave
+            leave_x = origin_x
+            leave_y = origin_y + int(35 * scale)
+            self.injector.move(leave_x, leave_y)
+            time.sleep(0.025)
+
+            # 2. Se for travessia de painéis (Pet <-> Inventário), passa pelo centro neutro da tela
+            if is_cross_screen:
+                mid_x = (leave_x + target_x) // 2
+                mid_y = (leave_y + target_y) // 2
+                self.injector.move(mid_x, mid_y)
+                time.sleep(0.025)
+
+        elif is_cross_screen:
+            # Travessia entre painéis: passa pelo centro neutro da tela (mundo 3D)
+            mid_x = (cur_x + target_x) // 2
+            mid_y = (cur_y + target_y) // 2
+            self.injector.move(mid_x, mid_y)
+            time.sleep(0.025)
+
+        # Movimento final até o slot de destino
+        self.injector.move(target_x, target_y)
+
+    # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
+    def _handle_inventory_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots e abas do Inventário do jogador via D-pad e L2/R2."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o inventário: abre sempre na Tab 1 e no Slot 1 do grid (739.5, 520.5)
+        if not self._inventory_initialized:
+            self._inventory_initialized = True
+            self._inventory_tab = "tab-1"
+            self._inventory_focus = (1, 1)
+            target_x, target_y = inventory_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab,
+                inventory_focus="(1, 1)",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_right_half = (cur_x >= rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas via L2 ou R2 (somente se o cursor estiver na metade direita da tela)
+        # R2 avança: 1 -> 2 -> 3 -> 1
+        # L2 volta:  1 -> 3 -> 2 -> 1
+        if is_right_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._inventory_tab:
+                try:
+                    curr_tab_num = int(self._inventory_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = inventory_tab_point(rect, new_tab_num)
+            # Sequência calibrada para o jogo registrar o hover e o clique da aba:
+            # 1. Move o cursor para a aba correspondente
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
+
+            # 2. Clica na aba com hold suficiente
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)  # Hold do clique de 40ms
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)  # Espera pós-clique de 30ms
+
+            self._inventory_tab = f"tab-{new_tab_num}"
+            self._inventory_focus = (1, 1)
+
+            # 3. Retorna o cursor para o quadrado amarelo (Slot 1: linha 1, col 1)
+            slot_x, slot_y = inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab,
+                inventory_focus="(1, 1)",
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._inventory_focus or (1, 1)
+        new_focus: tuple[int, int] | str = current
+
+        is_pet_open = "Pet" in (self._memory_state.open_menus or [])
+        is_stash_open = "Baú" in (self._memory_state.open_menus or [])
+        is_merchant_open = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
+        is_crafting_open = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
+
+        if isinstance(current, tuple):
+            row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = (row, col + 1)
+                elif row == 1:
+                    new_focus = (2, 1)
+                elif row == 2:
+                    new_focus = (3, 1)
+                elif row == 3:
+                    new_focus = (1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = (row, col - 1)
+                elif is_crafting_open:
+                    # Ponte para Crafting (Transmutador / Sockets / Encantador)
+                    active_craft = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
+                    if active_craft == "Transmutador":
+                        if row == 1:
+                            craft_focus = "slot_1"
+                            target_x, target_y = crafting_slot_point(rect, active_craft, 1)
+                        elif row == 2:
+                            craft_focus = "slot_3"
+                            target_x, target_y = crafting_slot_point(rect, active_craft, 3)
+                        else:
+                            craft_focus = "decline"
+                            target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                    else:
+                        if row == 1:
+                            craft_focus = "slot_0"
+                            target_x, target_y = crafting_slot_point(rect, active_craft, 0)
+                        elif row == 2:
+                            craft_focus = "decline"
+                            target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                        else:
+                            craft_focus = "action"
+                            target_x, target_y = crafting_button_point(rect, active_craft, "action")
+                    self._crafting_focus = craft_focus
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        crafting_open=True,
+                        crafting_menu=active_craft,
+                        crafting_focus=self._crafting_focus,
+                    )
+                    return
+                elif is_merchant_open:
+                    # Ponte para o Mercador (Pet inferior): Coluna 1 do Inventário -> Coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, row, 7)
+                    self._merchant_focus = ("pet", row, 7)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        merchant_open=True,
+                        merchant_tab=self._merchant_tab or "tab-1",
+                        merchant_focus=f"('pet', {row}, 7)",
+                    )
+                    return
+                elif is_stash_open:
+                    # Ponte para o Baú (Pet inferior): Coluna 1 do Inventário -> Coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, row, 7)
+                    self._stash_focus = ("pet", row, 7)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        stash_open=True,
+                        stash_tab=self._stash_tab or "tab-1",
+                        stash_focus=f"('pet', {row}, 7)",
+                    )
+                    return
+                elif is_pet_open:
+                    # Ponte para o Pet: Coluna 1 do Inventário -> Coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, row, 7)
+                    self._pet_inventory_focus = (row, 7)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        pet_inventory_open=True,
+                        pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                        pet_inventory_focus=f"({row}, 7)",
+                    )
+                    return
+                elif row == 1:
+                    new_focus = (3, 7)
+                elif row == 2:
+                    new_focus = (1, 7)
+                elif row == 3:
+                    new_focus = (2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = (row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = (row - 1, col)
+                else:
+                    if col in (1, 2):
+                        new_focus = "spell_1"
+                    elif col in (3, 4):
+                        new_focus = "spell_2"
+                    elif col == 5:
+                        new_focus = "spell_3"
+                    else:
+                        new_focus = "spell_4"
+        else:
+            if is_crafting_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                active_craft = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
+                if active_craft == "Transmutador":
+                    if str(current) in ("helmet", "gloves"):
+                        craft_focus = "slot_1"
+                        target_x, target_y = crafting_slot_point(rect, active_craft, 1)
+                    elif str(current) == "belt":
+                        craft_focus = "slot_3"
+                        target_x, target_y = crafting_slot_point(rect, active_craft, 3)
+                    elif str(current) == "main_hand":
+                        craft_focus = "decline"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                    else:  # spell_1
+                        craft_focus = "action"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "action")
+                else:
+                    if str(current) in ("helmet", "gloves"):
+                        craft_focus = "slot_0"
+                        target_x, target_y = crafting_slot_point(rect, active_craft, 0)
+                    elif str(current) == "belt":
+                        craft_focus = "decline"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "decline")
+                    else:
+                        craft_focus = "action"
+                        target_x, target_y = crafting_button_point(rect, active_craft, "action")
+                self._crafting_focus = craft_focus
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    crafting_open=True,
+                    crafting_menu=active_craft,
+                    crafting_focus=self._crafting_focus,
+                )
+                return
+            elif is_merchant_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Mercador: Borda esquerda superior do Inventário -> Coluna 7 do Mercador Superior
+                INV_TO_MERCHANT_MAP = {
+                    "helmet": 1,
+                    "gloves": 2,
+                    "belt": 3,
+                    "main_hand": 5,
+                    "spell_1": 6,
+                }
+                merchant_row = INV_TO_MERCHANT_MAP.get(str(current), 6)
+                target_x, target_y = merchant_slot_point(rect, merchant_row, 7)
+                self._merchant_focus = ("merchant", merchant_row, 7)
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    merchant_open=True,
+                    merchant_tab=self._merchant_tab or "tab-1",
+                    merchant_focus=f"('merchant', {merchant_row}, 7)",
+                )
+                return
+            elif is_stash_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Baú: Borda esquerda superior do Inventário -> Coluna 7 do Baú Superior
+                INV_TO_STASH_MAP = {
+                    "helmet": 1,
+                    "gloves": 2,
+                    "belt": 3,
+                    "main_hand": 5,
+                    "spell_1": 6,
+                }
+                stash_row = INV_TO_STASH_MAP.get(str(current), 6)
+                target_x, target_y = stash_upper_slot_point(rect, stash_row, 7)
+                self._stash_focus = ("stash", stash_row, 7)
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    stash_open=True,
+                    stash_tab=self._stash_tab or "tab-1",
+                    stash_focus=f"('stash', {stash_row}, 7)",
+                )
+                return
+            elif is_pet_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Pet: Borda esquerda superior do Inventário -> pet_spell_2 do Pet
+                target_x, target_y = pet_inventory_upper_point(rect, "pet_spell_2")
+                self._pet_inventory_focus = "pet_spell_2"
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    pet_inventory_open=True,
+                    pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                    pet_inventory_focus="pet_spell_2",
+                )
+                return
+
+            direction = "up" if dpad_up else ("down" if dpad_down else ("left" if dpad_left else "right"))
+            nav = INVENTORY_UPPER_NAV_MAP.get(str(current), {})
+            if direction in nav:
+                new_focus = nav[direction]
+
+        if new_focus != current:
+            self._inventory_focus = new_focus
+            if isinstance(new_focus, tuple):
+                target_x, target_y = inventory_slot_point(rect, new_focus[0], new_focus[1])
+            else:
+                target_x, target_y = inventory_upper_point(rect, str(new_focus))
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab or "tab-1",
+                inventory_focus=str(new_focus),
+            )
+
+    # Navegação no Menu do Pet (Abas + Grid 3x7 + Equipamentos/Spells superiores)
+    def _handle_pet_inventory_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots e abas do menu de Pet via D-pad e L2/R2."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o menu de pet: abre sempre na Tab 1 e no Slot 1 do grid (56.5, 523.5)
+        if not self._pet_inventory_initialized:
+            self._pet_inventory_initialized = True
+            self._pet_inventory_tab = "tab-1"
+            self._pet_inventory_focus = (1, 1)
+            target_x, target_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                pet_inventory_open=True,
+                pet_inventory_tab=self._pet_inventory_tab,
+                pet_inventory_focus="(1, 1)",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_left_half = (cur_x < rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas via L2 ou R2 (somente se o cursor estiver na metade esquerda da tela)
+        # R2 avança: 1 -> 2 -> 3 -> 1
+        # L2 volta:  1 -> 3 -> 2 -> 1
+        if is_left_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._pet_inventory_tab:
+                try:
+                    curr_tab_num = int(self._pet_inventory_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
+            # Sequência calibrada para o jogo registrar o hover e o clique da aba:
+            # 1. Move o cursor para a aba correspondente
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
+
+            # 2. Clica na aba com hold suficiente
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)  # Hold do clique de 40ms
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)  # Espera pós-clique de 30ms
+
+            self._pet_inventory_tab = f"tab-{new_tab_num}"
+            self._pet_inventory_focus = (1, 1)
+
+            # 3. Retorna o cursor para o quadrado amarelo (Slot 1: linha 1, col 1)
+            slot_x, slot_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+
+            self.shared.update(
+                pet_inventory_open=True,
+                pet_inventory_tab=self._pet_inventory_tab,
+                pet_inventory_focus="(1, 1)",
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._pet_inventory_focus or (1, 1)
+        new_focus: tuple[int, int] | str = current
+
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+
+        if isinstance(current, tuple):
+            row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = (row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário: Coluna 7 do Pet -> Coluna 1 do Inventário
+                    target_x, target_y = inventory_slot_point(rect, row, 1)
+                    self._inventory_focus = (row, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
+                elif row == 1:
+                    new_focus = (2, 1)
+                elif row == 2:
+                    new_focus = (3, 1)
+                elif row == 3:
+                    new_focus = (1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = (row, col - 1)
+                elif row == 1:
+                    new_focus = (3, 7)
+                elif row == 2:
+                    new_focus = (1, 7)
+                elif row == 3:
+                    new_focus = (2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = (row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = (row - 1, col)
+                else:
+                    if col in (1, 2):
+                        new_focus = "pet_spell_1"
+                    elif col == 3:
+                        new_focus = "pet_ring_1"
+                    elif col == 4:
+                        new_focus = "pet_collar"
+                    elif col == 5:
+                        new_focus = "pet_ring_2"
+                    else:
+                        new_focus = "pet_spell_2"
+        else:
+            if is_inv_open and dpad_right and str(current) == "pet_spell_2":
+                # Ponte para o Inventário: pet_spell_2 do Pet -> spell_1 do Inventário
+                target_x, target_y = inventory_upper_point(rect, "spell_1")
+                self._inventory_focus = "spell_1"
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    inventory_open=True,
+                    inventory_tab=self._inventory_tab or "tab-1",
+                    inventory_focus="spell_1",
+                )
+                return
+
+            direction = "up" if dpad_up else ("down" if dpad_down else ("left" if dpad_left else "right"))
+            nav = PET_UPPER_NAV_MAP.get(str(current), {})
+            if direction in nav:
+                new_focus = nav[direction]
+
+        if new_focus != current:
+            self._pet_inventory_focus = new_focus
+            if isinstance(new_focus, tuple):
+                target_x, target_y = pet_inventory_slot_point(rect, new_focus[0], new_focus[1])
+            else:
+                target_x, target_y = pet_inventory_upper_point(rect, str(new_focus))
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                pet_inventory_open=True,
+                pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                pet_inventory_focus=str(new_focus),
+            )
+
+    # Navegação no Menu do Baú (Stash 6x7 superior + Pet 3x7 inferior + Abas)
+    def _handle_stash_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots do Baú (grid 6x7) e Pet inferior (grid 3x7 + abas) via D-pad e L2/R2."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o Baú: abre sempre na Tab 1 do Pet e no Slot 1 do grid inferior (56.5, 523.5)
+        if not self._stash_initialized:
+            self._stash_initialized = True
+            self._stash_tab = "tab-1"
+            self._stash_focus = ("pet", 1, 1)
+            target_x, target_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                stash_open=True,
+                stash_tab=self._stash_tab,
+                stash_focus="('pet', 1, 1)",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_left_half = (cur_x < rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas via L2 ou R2 (somente se o cursor estiver na metade esquerda da tela)
+        # R2 avança: 1 -> 2 -> 3 -> 1
+        # L2 volta:  1 -> 3 -> 2 -> 1
+        if is_left_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._stash_tab:
+                try:
+                    curr_tab_num = int(self._stash_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
+            # Sequência calibrada para o jogo registrar o hover e o clique da aba:
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._stash_tab = f"tab-{new_tab_num}"
+            self._stash_focus = ("pet", 1, 1)
+
+            slot_x, slot_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+
+            self.shared.update(
+                stash_open=True,
+                stash_tab=self._stash_tab,
+                stash_focus="('pet', 1, 1)",
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._stash_focus or ("pet", 1, 1)
+        sec, row, col = current
+        new_focus = current
+
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+
+        if sec == "pet":
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("pet", row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário: Coluna 7 do Pet -> Coluna 1 do Inventário
+                    target_x, target_y = inventory_slot_point(rect, row, 1)
+                    self._inventory_focus = (row, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("pet", 2, 1)
+                elif row == 2:
+                    new_focus = ("pet", 3, 1)
+                elif row == 3:
+                    new_focus = ("pet", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("pet", row, col - 1)
+                elif row == 1:
+                    new_focus = ("pet", 3, 7)
+                elif row == 2:
+                    new_focus = ("pet", 1, 7)
+                elif row == 3:
+                    new_focus = ("pet", 2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = ("pet", row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("pet", row - 1, col)
+                else:
+                    # Transição vertical para a Linha 6 do Baú superior
+                    new_focus = ("stash", 6, col)
+
+        elif sec == "stash":
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("stash", row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário: Coluna 7 do Baú -> Equipamentos/Spells do Inventário
+                    STASH_TO_INV_MAP = {
+                        1: "helmet",
+                        2: "gloves",
+                        3: "belt",
+                        4: "belt",
+                        5: "main_hand",
+                        6: "spell_1",
+                    }
+                    target_slot = STASH_TO_INV_MAP.get(row, "spell_1")
+                    target_x, target_y = inventory_upper_point(rect, target_slot)
+                    self._inventory_focus = target_slot
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=target_slot,
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("stash", 2, 1)
+                elif row == 2:
+                    new_focus = ("stash", 3, 1)
+                elif row == 3:
+                    new_focus = ("stash", 4, 1)
+                elif row == 4:
+                    new_focus = ("stash", 5, 1)
+                elif row == 5:
+                    new_focus = ("stash", 6, 1)
+                elif row == 6:
+                    new_focus = ("stash", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("stash", row, col - 1)
+                elif row == 1:
+                    new_focus = ("stash", 6, 7)
+                elif row == 2:
+                    new_focus = ("stash", 1, 7)
+                elif row == 3:
+                    new_focus = ("stash", 2, 7)
+                elif row == 4:
+                    new_focus = ("stash", 3, 7)
+                elif row == 5:
+                    new_focus = ("stash", 4, 7)
+                elif row == 6:
+                    new_focus = ("stash", 5, 7)
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("stash", row - 1, col)
+                else:
+                    new_focus = current
+            elif dpad_down:
+                if row < 6:
+                    new_focus = ("stash", row + 1, col)
+                else:
+                    # Transição vertical para a Linha 1 do Pet inferior
+                    new_focus = ("pet", 1, col)
+
+        if new_focus != current:
+            self._stash_focus = new_focus
+            if new_focus[0] == "pet":
+                target_x, target_y = pet_inventory_slot_point(rect, new_focus[1], new_focus[2])
+            else:
+                target_x, target_y = stash_upper_slot_point(rect, new_focus[1], new_focus[2])
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                stash_open=True,
+                stash_tab=self._stash_tab or "tab-1",
+                stash_focus=str(new_focus),
+            )
+
+    # Navegação no Menu do Mercador (Lojas 6x7 superior com 3 abas rosa + Pet 3x7 inferior + Abas Ciano)
+    def _handle_merchant_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots do Mercador (grid 6x7), 3 abas rosa e Pet inferior via D-pad, L2/R2 e X/A."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o Mercador
+        if not self._merchant_initialized:
+            self._merchant_initialized = True
+            npc_name = self._memory_state.merchant_npc_name or ""
+            self._merchant_npc_name = npc_name
+            # Determina a aba default pelo nome do NPC lido da memória:
+            # Kolos e Duros -> WEAPONS (tab-2)
+            # Tarn e Triya -> MISC (tab-1)
+            name_lower = npc_name.lower()
+            if any(k in name_lower for k in ("kolos", "duros", "blacksmith", "blade", "smith")):
+                self._merchant_tab = "tab-2"
+            else:
+                self._merchant_tab = "tab-1"
+
+            self._merchant_focus = ("merchant", 1, 1)
+            target_x, target_y = merchant_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab,
+                merchant_focus="('merchant', 1, 1)",
+                merchant_npc_name=self._merchant_npc_name,
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_left_half = (cur_x < rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas Ciano do Pet via L2 ou R2 (somente se o cursor estiver na metade esquerda da tela)
+        # L2 e R2 continuam trocando as abas em ciano
+        if is_left_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._stash_tab:
+                try:
+                    curr_tab_num = int(self._stash_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._stash_tab = f"tab-{new_tab_num}"
+            self._merchant_focus = ("pet", 1, 1)
+
+            slot_x, slot_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab or "tab-1",
+                merchant_focus="('pet', 1, 1)",
+            )
+            return
+
+        # 3. Interação com Botão X / A quando o cursor estiver em uma das abas rosa ("merchant_tab", tab_idx)
+        # Opção A: Ao pressionar X/A, clica na aba rosa e retorna imediatamente para o ponto amarelo (1, 1) do grid do mercador
+        current = self._merchant_focus or ("merchant", 1, 1)
+        sec = current[0]
+
+        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
+
+        if sec == "merchant_tab" and (btn_a_pressed or btn_x_pressed):
+            tab_idx = int(current[1])
+            tab_x, tab_y = merchant_tab_point(rect, tab_idx)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._merchant_tab = f"tab-{tab_idx}"
+            self._merchant_focus = ("merchant", 1, 1)
+            yellow_x, yellow_y = merchant_slot_point(rect, 1, 1)
+            self.injector.move(yellow_x, yellow_y)
+            hub.rumble(0.05, 0.12, 40)
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab,
+                merchant_focus="('merchant', 1, 1)",
+            )
+            return
+
+        # 4. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+        new_focus = current
+
+        if sec == "pet":
+            _, row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("pet", row, col + 1)
+                elif is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, row, 1)
+                    self._inventory_focus = (row, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("pet", 2, 1)
+                elif row == 2:
+                    new_focus = ("pet", 3, 1)
+                elif row == 3:
+                    new_focus = ("pet", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("pet", row, col - 1)
+                elif row == 1:
+                    new_focus = ("pet", 3, 7)
+                elif row == 2:
+                    new_focus = ("pet", 1, 7)
+                elif row == 3:
+                    new_focus = ("pet", 2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = ("pet", row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("pet", row - 1, col)
+                else:
+                    # Transição vertical para a Linha 6 do Mercador
+                    new_focus = ("merchant", 6, col)
+
+        elif sec == "merchant":
+            _, row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("merchant", row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário Direito
+                    MERCHANT_TO_INV_MAP = {
+                        1: "helmet",
+                        2: "gloves",
+                        3: "belt",
+                        4: "belt",
+                        5: "main_hand",
+                        6: "spell_1",
+                    }
+                    target_slot = MERCHANT_TO_INV_MAP.get(row, "spell_1")
+                    target_x, target_y = inventory_upper_point(rect, target_slot)
+                    self._inventory_focus = target_slot
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=target_slot,
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("merchant", 2, 1)
+                elif row == 2:
+                    new_focus = ("merchant", 3, 1)
+                elif row == 3:
+                    new_focus = ("merchant", 4, 1)
+                elif row == 4:
+                    new_focus = ("merchant", 5, 1)
+                elif row == 5:
+                    new_focus = ("merchant", 6, 1)
+                elif row == 6:
+                    new_focus = ("merchant", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("merchant", row, col - 1)
+                elif row == 1:
+                    new_focus = ("merchant", 6, 7)
+                elif row == 2:
+                    new_focus = ("merchant", 1, 7)
+                elif row == 3:
+                    new_focus = ("merchant", 2, 7)
+                elif row == 4:
+                    new_focus = ("merchant", 3, 7)
+                elif row == 5:
+                    new_focus = ("merchant", 4, 7)
+                elif row == 6:
+                    new_focus = ("merchant", 5, 7)
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("merchant", row - 1, col)
+                else:
+                    # Sobe para a aba ativa rosa do mercador!
+                    active_tab_num = 1
+                    if self._merchant_tab:
+                        try:
+                            active_tab_num = int(self._merchant_tab.replace("tab-", ""))
+                        except Exception:
+                            active_tab_num = 1
+                    new_focus = ("merchant_tab", active_tab_num)
+            elif dpad_down:
+                if row < 6:
+                    new_focus = ("merchant", row + 1, col)
+                else:
+                    # Transição vertical para o Pet Linha 1
+                    new_focus = ("pet", 1, col)
+
+        elif sec == "merchant_tab":
+            tab_idx = int(current[1])
+            if dpad_right:
+                # Wrap cíclico 1 -> 2 -> 3 -> 1
+                new_tab_idx = (tab_idx % 3) + 1
+                new_focus = ("merchant_tab", new_tab_idx)
+            elif dpad_left:
+                # Wrap cíclico 1 -> 3 -> 2 -> 1
+                new_tab_idx = 3 if tab_idx == 1 else tab_idx - 1
+                new_focus = ("merchant_tab", new_tab_idx)
+            elif dpad_down:
+                # Desce para a Linha 1 do grid do mercador na coluna correspondente à aba
+                TAB_TO_COL = {1: 1, 2: 4, 3: 7}
+                target_col = TAB_TO_COL.get(tab_idx, 1)
+                new_focus = ("merchant", 1, target_col)
+            elif dpad_up:
+                # Bloqueio no topo
+                new_focus = current
+
+        if new_focus != current:
+            self._merchant_focus = new_focus
+            if new_focus[0] == "pet":
+                target_x, target_y = pet_inventory_slot_point(rect, new_focus[1], new_focus[2])
+            elif new_focus[0] == "merchant":
+                target_x, target_y = merchant_slot_point(rect, new_focus[1], new_focus[2])
+            elif new_focus[0] == "merchant_tab":
+                target_x, target_y = merchant_tab_point(rect, new_focus[1])
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                merchant_open=True,
+                merchant_tab=self._merchant_tab or "tab-1",
+                merchant_focus=str(new_focus),
+            )
+
+    # Navegação nos Menus de Crafting (Transmutador, Sockets, Encantador) via D-pad e L2/R2
+    def _handle_crafting_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots de itens e botões de ação nas telas de Transmutador, Sockets e Encantador."""
+        if not rect.valid:
+            return
+
+        active_menu = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
+
+        # 1. Inicialização ao abrir o menu de Crafting
+        if not self._crafting_initialized:
+            self._crafting_initialized = True
+            self._crafting_menu = active_menu
+            self._crafting_focus = "slot_0"
+            target_x, target_y = crafting_slot_point(rect, active_menu, 0)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                crafting_open=True,
+                crafting_menu=self._crafting_menu,
+                crafting_focus="slot_0",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+
+        # 2. Troca de abas do Inventário do Jogador via L2 ou R2
+        # Como o menu de crafting não possui abas próprias, L2 e R2 ciclam as abas do Inventário à direita
+        if self._rt_edge_up or self._lt_edge_up:
+            curr_tab_num = 1
+            if self._inventory_tab:
+                try:
+                    curr_tab_num = int(self._inventory_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = inventory_tab_point(rect, new_tab_num)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._inventory_tab = f"tab-{new_tab_num}"
+
+            # Retorna o cursor para o elemento ativo do crafting
+            cur_focus = self._crafting_focus or "slot_0"
+            if cur_focus.startswith("slot_"):
+                idx = int(cur_focus.replace("slot_", ""))
+                slot_x, slot_y = crafting_slot_point(rect, active_menu, idx)
+            elif cur_focus == "decline":
+                slot_x, slot_y = crafting_button_point(rect, active_menu, "decline")
+            else:
+                slot_x, slot_y = crafting_button_point(rect, active_menu, "action")
+
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab,
+                crafting_open=True,
+                crafting_menu=self._crafting_menu,
+                crafting_focus=self._crafting_focus,
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._crafting_focus or "slot_0"
+        new_focus = current
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+
+        if active_menu == "Transmutador":
+            # Grid 2x2: slot_0 (1, 1), slot_1 (1, 2), slot_2 (2, 1), slot_3 (2, 2)
+            # Botões: decline (FECHAR), action (TRANSMUTAR)
+            if current == "slot_0":
+                if dpad_right:
+                    new_focus = "slot_1"
+                elif dpad_down:
+                    new_focus = "slot_2"
+            elif current == "slot_1":
+                if dpad_left:
+                    new_focus = "slot_0"
+                elif dpad_down:
+                    new_focus = "slot_3"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 1, 1)
+                    self._inventory_focus = (1, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(1, 1)",
+                    )
+                    return
+            elif current == "slot_2":
+                if dpad_up:
+                    new_focus = "slot_0"
+                elif dpad_right:
+                    new_focus = "slot_3"
+                elif dpad_down:
+                    new_focus = "decline"
+            elif current == "slot_3":
+                if dpad_up:
+                    new_focus = "slot_1"
+                elif dpad_left:
+                    new_focus = "slot_2"
+                elif dpad_down:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 2, 1)
+                    self._inventory_focus = (2, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(2, 1)",
+                    )
+                    return
+            elif current == "decline":
+                if dpad_up:
+                    new_focus = "slot_2"
+                elif dpad_down:
+                    new_focus = "action"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 2, 1)
+                    self._inventory_focus = (2, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(2, 1)",
+                    )
+                    return
+            elif current == "action":
+                if dpad_up:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 3, 1)
+                    self._inventory_focus = (3, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(3, 1)",
+                    )
+                    return
+        else:
+            # Sockets e Encantador (Goren / Gorn / Furl)
+            # 1 Slot Central: slot_0
+            # Botões: decline (FECHAR), action (ENCANTAR / RECUPERAR)
+            if current == "slot_0":
+                if dpad_down:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 1, 1)
+                    self._inventory_focus = (1, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(1, 1)",
+                    )
+                    return
+            elif current == "decline":
+                if dpad_up:
+                    new_focus = "slot_0"
+                elif dpad_down:
+                    new_focus = "action"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 2, 1)
+                    self._inventory_focus = (2, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(2, 1)",
+                    )
+                    return
+            elif current == "action":
+                if dpad_up:
+                    new_focus = "decline"
+                elif dpad_right and is_inv_open:
+                    target_x, target_y = inventory_slot_point(rect, 3, 1)
+                    self._inventory_focus = (3, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus="(3, 1)",
+                    )
+                    return
+
+        if new_focus != current:
+            self._crafting_focus = new_focus
+            if new_focus.startswith("slot_"):
+                idx = int(new_focus.replace("slot_", ""))
+                target_x, target_y = crafting_slot_point(rect, active_menu, idx)
+            elif new_focus == "decline":
+                target_x, target_y = crafting_button_point(rect, active_menu, "decline")
+            else:
+                target_x, target_y = crafting_button_point(rect, active_menu, "action")
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                crafting_open=True,
+                crafting_menu=self._crafting_menu,
+                crafting_focus=self._crafting_focus,
+            )
+
+
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
@@ -453,6 +2811,7 @@ class BridgeEngine(threading.Thread):
     def _handle_trigger_combos(
         self,
         state: ControllerState,
+        rect: Rect,
         bindings: dict[str, Any],
         now: float,
     ) -> None:
@@ -466,6 +2825,15 @@ class BridgeEngine(threading.Thread):
         # Clique modificado em curso: o left está com a sequência — nenhum outro
         # combo pode vazar (LT+A viraria um segundo Ctrl+clique no meio do clique).
         if self._modifier_seq is not None:
+            return
+        # Se o inventário ou menu de pet estiver aberto e o cursor na respectiva metade da tela,
+        # L2 e R2 pertencem à troca de abas e não acionam combos.
+        open_menus = self._memory_state.open_menus or []
+        cur_x, _ = self.injector.cursor_position()
+        mid_x = rect.left + rect.width * 0.5
+        if "Inventário" in open_menus and cur_x >= mid_x:
+            return
+        if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus or any(m in open_menus for m in ("Transmutador", "Sockets", "Encantador"))) and cur_x < mid_x:
             return
         lt_now = self._lt_current
         # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
@@ -523,7 +2891,7 @@ class BridgeEngine(threading.Thread):
         now: float,
     ) -> None:
         # Roda aberta: a roda é o mundo — B/Y suprimidos (regra clássica).
-        if state.pressed("lb") and not self._radial_dismissed:
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
         # Sequência do pet em curso: o cursor/click é exclusivo dela — o Shift+clique
         # do Y não pode mexer no cursor no meio do clique do pet, nem a ESC do B
@@ -660,6 +3028,24 @@ class BridgeEngine(threading.Thread):
         self._pet_click_seq = None
         self.injector.move(return_x, return_y)
 
+    def _is_radial_allowed(self) -> bool:
+        """Determina se a roda de habilidades pode ser aberta.
+        Regra: somente permitida quando em gameplay (is_in_game) e sem outros menus abertos (permite apenas quando
+        nenhum menu está aberto, ou quando somente o Inventário está aberto)."""
+        if not self._memory_state.is_connected:
+            return True
+        if not self._memory_state.is_in_game:
+            return False
+        menus = self._memory_state.open_menus or []
+        # Permitido sem menus abertos, ou quando somente o Inventário ou Pet está aberto
+        other_menus = [m for m in menus if m not in ("Inventário", "Pet")]
+        if other_menus:
+            return False
+        desc = (self._memory_state.state_desc or "").lower()
+        if "confirma" in desc or "setting" in desc or "configura" in desc:
+            return False
+        return True
+
     # Roda de habilidades: LB + analógico direito escolhe o setor; A confirma o atalho e
     # soltar LB só fecha a roda (a confirmação saiu do soltar em ago/2026).
     def _handle_radial(
@@ -670,7 +3056,7 @@ class BridgeEngine(threading.Thread):
         rect: Rect,
         now: float,
     ) -> None:
-        active = state.pressed("lb")
+        active = state.pressed("lb") and self._is_radial_allowed()
         slots = bindings.get("radial_slots", [])
         # Borda de subida do LB: rearma o latch — o próximo aperto reabre a roda do zero.
         if not self._previous.pressed("lb") and active:
@@ -837,10 +3223,25 @@ class BridgeEngine(threading.Thread):
         curve = float(input_cfg["response_curve"])
         lx, ly, lmag = radial_deadzone(state.lx, state.ly, deadzone, curve)
         rx, ry, rmag = radial_deadzone(state.rx, state.ry, deadzone, curve)
-        radial_active = state.pressed("lb")
+        radial_active = state.pressed("lb") and self._is_radial_allowed()
         auto_move = False
         cursor_active = False
         aim_local: tuple[int, int] | None = None
+
+        is_only_inventory = (self._memory_state.open_menus in (["Inventário"], ["Pet"]))
+        # O modo efetivo respeita o estado do jogo na memória RAM:
+        # Se qualquer menu estiver aberto (exceto quando apenas o inventário estiver aberto)
+        # ou estiver fora do jogo (telas iniciais), o modo vira automaticamente 'cursor'.
+        # Quando somente o inventário está aberto, o analógico esquerdo mantém o movimento
+        # direto do personagem.
+        effective_mode = (
+            "cursor"
+            if (
+                self._memory_state.is_connected
+                and ((self._memory_state.is_menu_open and not is_only_inventory) or not self._memory_state.is_in_game)
+            )
+            else self._mode
+        )
 
         # Movimento direto: exige analógico esquerdo inclinado, direito parado, roda fechada
         # e ao menos uma lateral livre — com os dois painéis abertos, o esquerdo vira cursor livre.
@@ -848,7 +3249,7 @@ class BridgeEngine(threading.Thread):
         # ficam bloqueados até o retorno ao centro (evita disputar o cursor no meio do
         # hover/clique do pet).
         if (
-            self._mode == "direct"
+            effective_mode == "direct"
             and lmag > 0
             and rmag == 0
             and not radial_active
@@ -887,7 +3288,7 @@ class BridgeEngine(threading.Thread):
             if not radial_active and rmag > 0:
                 cursor_x, cursor_y, cursor_mag = rx, ry, rmag
             # No modo cursor/menus, o analógico esquerdo assume o papel de cursor.
-            elif self._mode == "cursor" and lmag > 0:
+            elif effective_mode == "cursor" and lmag > 0:
                 cursor_x, cursor_y, cursor_mag = lx, ly, lmag
             # Ambos os painéis abertos: o esquerdo vira cursor livre (sem o click-to-move).
             elif lmag > 0 and both_panels_open(self._active_panels):
@@ -937,6 +3338,258 @@ class BridgeEngine(threading.Thread):
         bindings = cfg["bindings"]
         self._handle_center_buttons(state, rect, bindings, now)
         self._handle_discrete_bindings(state, bindings)
+        # Navegação nos Menus via D-pad conforme o estado da memória
+        if self._memory_state.is_connected:
+            state_id = self._memory_state.state_id
+            if state_id == 0:
+                self._handle_title_menu_navigation(state, rect, hub)
+            elif self._title_screen_initialized:
+                self._title_screen_initialized = False
+                self.shared.update(title_menu_focus=None)
+
+            if state_id == 1:
+                self._handle_char_create_navigation(state, rect, hub)
+            elif self._char_create_initialized:
+                self._char_create_initialized = False
+                self.shared.update(char_create_focus=None)
+
+            if state_id in (2, 4):
+                self._handle_difficulty_navigation(state, rect, hub)
+            elif self._difficulty_initialized:
+                self._difficulty_initialized = False
+                self.shared.update(difficulty_focus=None)
+
+            if state_id == 3:
+                self._handle_load_char_navigation(state, rect, hub, now)
+            elif self._load_char_initialized:
+                self._load_char_initialized = False
+                self._load_char_focus = None
+                self._load_char_delete_dialog_open = False
+                self._load_char_scroll_offset = 0
+                self.shared.update(load_char_focus=None, load_char_delete_open=False)
+
+            # Diálogos de NPCs, Missões e Telas de História
+            if self._memory_state.dialog_type:
+                self._handle_dialog_navigation(state, rect, hub)
+            elif self._dialog_initialized:
+                self._dialog_initialized = False
+                self._last_dialog_type = ""
+                self._dialog_focus = None
+                self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[], dialog_has_reward=False)
+
+            # Menu de Pause (COptionsMenu / Options) em jogo
+            is_paused = self._memory_state.is_in_game and (
+                "Pause" in self._memory_state.open_menus
+                or "paused" in [m.lower() for m in self._memory_state.open_menus]
+            )
+            if is_paused:
+                self._handle_pause_menu_navigation(state, rect, hub)
+            elif self._pause_menu_initialized:
+                self._pause_menu_initialized = False
+                self._pause_focus = None
+                self.shared.update(pause_menu_focus=None)
+
+            # Tela de Configurações (Settings) em qualquer estado (in-game ou menu principal)
+            is_settings = (
+                "Configurações" in (self._memory_state.open_menus or [])
+                or any("configura" in m.lower() or "setting" in m.lower() for m in (self._memory_state.open_menus or []))
+                or (bool(self._memory_state.state_desc) and ("configura" in self._memory_state.state_desc.lower() or "setting" in self._memory_state.state_desc.lower()))
+            )
+            if is_settings:
+                self._handle_settings_navigation(state, rect, hub, now)
+                self._previous_panels = (self._active_panels[0], self._active_panels[1])
+                return
+            elif self._settings_initialized:
+                if self._settings_slider_dragging:
+                    self.injector.mouse_button("left", False)
+                    self._settings_slider_dragging = False
+                self._settings_initialized = False
+                self._settings_focus = None
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self.shared.update(
+                    settings_focus=None,
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_slider_dragging=False,
+                )
+
+            # Modal de Confirmação (Resultado de Pesca, Avisos e Sair)
+            is_modal = (
+                "Confirmação Sair" in (self._memory_state.open_menus or [])
+                or "confirma" in (self._memory_state.state_desc or "").lower()
+            )
+            if is_modal:
+                self._handle_modal_confirm_navigation(state, rect, hub)
+                self._previous_panels = (self._active_panels[0], self._active_panels[1])
+                return
+            elif self._modal_confirm_initialized:
+                self._modal_confirm_initialized = False
+                self.shared.update(modal_confirm_focus=None)
+
+            # Interface de Pesca (minigame do anzol)
+            is_fishing = "Pesca" in (self._memory_state.open_menus or [])
+            if is_fishing:
+                self._handle_fishing_navigation(state, rect, hub)
+                self._previous_panels = (self._active_panels[0], self._active_panels[1])
+                return
+            elif self._fishing_initialized:
+                self._fishing_initialized = False
+                self.shared.update(fishing_focus=None)
+
+            # Inventário do Jogador, Menu do Pet, Baú (Stash), Mercador (Loja) e Crafting (Transmutador, Sockets, Encantador)
+            is_inventory = "Inventário" in (self._memory_state.open_menus or [])
+            is_pet = "Pet" in (self._memory_state.open_menus or [])
+            is_stash = "Baú" in (self._memory_state.open_menus or [])
+            is_merchant = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
+            is_crafting = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
+
+            if is_crafting and not self._crafting_initialized:
+                self._handle_crafting_navigation(state, rect, hub)
+            elif is_merchant and not self._merchant_initialized:
+                self._handle_merchant_navigation(state, rect, hub)
+            elif is_stash and not self._stash_initialized:
+                self._handle_stash_navigation(state, rect, hub)
+            elif is_pet and not self._pet_inventory_initialized:
+                self._handle_pet_inventory_navigation(state, rect, hub)
+            elif is_inventory and not self._inventory_initialized:
+                self._handle_inventory_navigation(state, rect, hub)
+            elif (is_pet or is_stash or is_merchant or is_crafting) and is_inventory:
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+                if cur_x < mid_x:
+                    if is_crafting:
+                        self._handle_crafting_navigation(state, rect, hub)
+                    elif is_merchant:
+                        self._handle_merchant_navigation(state, rect, hub)
+                    elif is_stash:
+                        self._handle_stash_navigation(state, rect, hub)
+                    else:
+                        self._handle_pet_inventory_navigation(state, rect, hub)
+                else:
+                    self._handle_inventory_navigation(state, rect, hub)
+            elif is_crafting:
+                self._handle_crafting_navigation(state, rect, hub)
+            elif is_merchant:
+                self._handle_merchant_navigation(state, rect, hub)
+            elif is_stash:
+                self._handle_stash_navigation(state, rect, hub)
+            elif is_pet:
+                self._handle_pet_inventory_navigation(state, rect, hub)
+            elif is_inventory:
+                self._handle_inventory_navigation(state, rect, hub)
+
+            if not is_inventory and self._inventory_initialized:
+                self._inventory_initialized = False
+                self._inventory_tab = None
+                self._inventory_focus = None
+                self.shared.update(inventory_open=False, inventory_tab=None, inventory_focus=None)
+
+            if not is_pet and self._pet_inventory_initialized:
+                self._pet_inventory_initialized = False
+                self._pet_inventory_tab = None
+                self._pet_inventory_focus = None
+                self.shared.update(pet_inventory_open=False, pet_inventory_tab=None, pet_inventory_focus=None)
+
+            if not is_stash and self._stash_initialized:
+                self._stash_initialized = False
+                self._stash_tab = None
+                self._stash_focus = None
+                self.shared.update(stash_open=False, stash_tab=None, stash_focus=None)
+
+            if not is_merchant and self._merchant_initialized:
+                self._merchant_initialized = False
+                self._merchant_tab = None
+                self._merchant_focus = None
+                self._merchant_npc_name = ""
+                self.shared.update(
+                    merchant_open=False,
+                    merchant_tab=None,
+                    merchant_focus=None,
+                    merchant_npc_name="",
+                )
+
+            if not is_crafting and self._crafting_initialized:
+                self._crafting_initialized = False
+                self._crafting_menu = None
+                self._crafting_focus = None
+                self.shared.update(
+                    crafting_open=False,
+                    crafting_menu=None,
+                    crafting_focus=None,
+                )
+        else:
+            if self._title_screen_initialized:
+                self._title_screen_initialized = False
+                self.shared.update(title_menu_focus=None)
+            if self._char_create_initialized:
+                self._char_create_initialized = False
+                self.shared.update(char_create_focus=None)
+            if self._difficulty_initialized:
+                self._difficulty_initialized = False
+                self.shared.update(difficulty_focus=None)
+            if self._load_char_initialized:
+                self._load_char_initialized = False
+                self._load_char_focus = None
+                self._load_char_delete_dialog_open = False
+                self._load_char_scroll_offset = 0
+                self.shared.update(load_char_focus=None, load_char_delete_open=False)
+            if self._dialog_initialized:
+                self._dialog_initialized = False
+                self._last_dialog_type = ""
+                self._dialog_focus = None
+                self.shared.update(dialog_focus=None, dialog_type="", dialog_buttons=[])
+            if self._pause_menu_initialized:
+                self._pause_menu_initialized = False
+                self._pause_focus = None
+                self.shared.update(pause_menu_focus=None)
+            if self._settings_initialized:
+                if self._settings_slider_dragging:
+                    self.injector.mouse_button("left", False)
+                    self._settings_slider_dragging = False
+                self._settings_initialized = False
+                self._settings_focus = None
+                self._settings_dropdown = None
+                self._settings_dropdown_idx = 0
+                self.shared.update(
+                    settings_focus=None,
+                    settings_dropdown=None,
+                    settings_dropdown_idx=0,
+                    settings_slider_dragging=False,
+                )
+            if self._modal_confirm_initialized:
+                self._modal_confirm_initialized = False
+                self.shared.update(modal_confirm_focus=None)
+            if self._fishing_initialized:
+                self._fishing_initialized = False
+                self.shared.update(fishing_focus=None)
+            if self._inventory_initialized:
+                self._inventory_initialized = False
+                self._inventory_tab = None
+                self._inventory_focus = None
+                self.shared.update(inventory_open=False, inventory_tab=None, inventory_focus=None)
+            if self._pet_inventory_initialized:
+                self._pet_inventory_initialized = False
+                self._pet_inventory_tab = None
+                self._pet_inventory_focus = None
+                self.shared.update(pet_inventory_open=False, pet_inventory_tab=None, pet_inventory_focus=None)
+            if self._stash_initialized:
+                self._stash_initialized = False
+                self._stash_tab = None
+                self._stash_focus = None
+                self.shared.update(stash_open=False, stash_tab=None, stash_focus=None)
+            if self._merchant_initialized:
+                self._merchant_initialized = False
+                self._merchant_tab = None
+                self._merchant_focus = None
+                self._merchant_npc_name = ""
+                self.shared.update(merchant_open=False, merchant_tab=None, merchant_focus=None, merchant_npc_name="")
+            if self._crafting_initialized:
+                self._crafting_initialized = False
+                self._crafting_menu = None
+                self._crafting_focus = None
+                self.shared.update(crafting_open=False, crafting_menu=None, crafting_focus=None)
+
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
@@ -946,9 +3599,12 @@ class BridgeEngine(threading.Thread):
         # roda: com LB de pé eles se auto-suprimem lá dentro. O cronômetro do clique
         # modificado roda DEPOIS: um Y/LT+A do próprio tick arma a sequência e o
         # _handle_modifier_release já executa as fases já vencidas (determinístico).
-        self._handle_trigger_combos(state, bindings, now)
-        self._handle_overworld_remap(state, rect, bindings, now)
-        self._handle_modifier_release(now)
+        # Pertencem exclusivamente ao gameplay in-game: fora do jogo (telas iniciais e menus)
+        # esses atalhos não devem vazar teclas de combate/habilidade (1, 2, 3..0).
+        if not self._memory_state.is_connected or self._memory_state.is_in_game:
+            self._handle_trigger_combos(state, rect, bindings, now)
+            self._handle_overworld_remap(state, rect, bindings, now)
+            self._handle_modifier_release(now)
 
         # Posiciona o cursor; retorna True quando o movimento direto deve segurar o clique esquerdo.
         # Com a sequência do pet em curso os sticks estão bloqueados: nenhum move, nenhum
@@ -982,19 +3638,34 @@ class BridgeEngine(threading.Thread):
         # Com LT ativo os dois ficam inertes TAMBÉM: A/X pertencem aos combos
         # LT+A (5 / Ctrl+clique) e LT+X (6) — segurar o LT com o A não pode
         # segurar o clique comum.
-        radial_held = state.pressed("lb")
+        radial_held = state.pressed("lb") and self._is_radial_allowed()
         lt_held = self._lt_current
-        left_pressed = auto_move or (state.pressed("a") and not radial_held and not lt_held)
+        # Na tela de Carregar Personagem (state_id == 3) e na tela de Configurações, as ações
+        # dos botões A e X são tratadas inteiramente pelos respectivos handlers (que realizam o
+        # clique e movem o cursor para o próximo destino). Suprimimos o mouse aqui para que o botão
+        # ainda segurado no controle não dispare um clique falso/residual no destino do cursor.
+        suppress_mouse = (
+            self._load_char_initialized
+            or self._settings_initialized
+            or self._fishing_initialized
+            or self._modal_confirm_initialized
+        )
+        left_pressed = auto_move or (
+            state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
+        )
+        right_pressed = (
+            state.pressed("x") and not radial_held and not lt_held and not suppress_mouse
+        )
         self._set_mouse("left", left_pressed)
-        self._set_mouse("right", state.pressed("x") and not radial_held and not lt_held)
+        self._set_mouse("right", right_pressed)
         # Borda de subida do clique esquerdo: sincroniza com o fechamento de menus do jogo
         # (mesma regra do ESC/Alt+F4). Botão do painel = fecha só aquele lado; zona central
         # com os dois abertos = fechou tudo.
         if left_pressed and not self._previous_left_pressed:
             cursor_x, cursor_y = self.injector.cursor_position()
             zone = click_zone(rect, cursor_x, cursor_y, self._hud_mask)
-            # Botão fechar do painel ESQUERDO: o jogo fechou só o lado esquerdo.
-            if zone == "close_left" and self._active_panels[0]:
+            # Botão fechar do painel ESQUERDO: o jogo fechou só o lado esquerdo (não se aplica a T/K/E que não têm aba).
+            if zone == "close_left" and self._active_panels[0] and self._active_panels[0] not in ("T", "K", "E"):
                 self._active_panels[0] = ""
                 self.shared.update(active_panels=list(self._active_panels))
             # Botão fechar do painel DIREITO: espelho do caso acima.
@@ -1064,8 +3735,65 @@ class BridgeEngine(threading.Thread):
                     self.shared.toast("Torchlight detectado", 2.5)
                     # Sessão nova: reseta painéis/seleção da roda (Alt+F4 não limpou o estado).
                     self._reset_radial_session()
+                elif not game_found and self._game_was_found:
+                    # Jogo acabou de fechar: libera handle da memória e limpa estados residuais
+                    self.memory.close()
+                    self._reset_radial_session()
+
                 # Guarda o estado de detecção para as bordas (subida/descida).
                 self._game_was_found = game_found
+
+                # Leitura periódica da memória RAM do Torchlight (a cada 20 ms / 50 Hz)
+                if now - self._memory_last_read >= 0.020:
+                    target_pid = self.locator.window_pid(hwnd) if hwnd else None
+                    self._memory_state = self.memory.update(target_pid=target_pid)
+                    self._memory_last_read = now
+
+                    # Sincroniza painéis ativos se estiver em jogo
+                    if self._memory_state.is_in_game:
+                        left = ""
+                        if "Pet" in self._memory_state.open_menus:
+                            left = "P"
+                        elif "Atributos" in self._memory_state.open_menus:
+                            left = "C"
+                        elif "Transmutador" in self._memory_state.open_menus:
+                            left = "T"
+                        elif "Sockets" in self._memory_state.open_menus:
+                            left = "K"
+                        elif "Encantador" in self._memory_state.open_menus:
+                            left = "E"
+                        elif "Vendedor (Loja)" in self._memory_state.open_menus:
+                            left = "V"
+                        elif "Baú" in self._memory_state.open_menus:
+                            left = "B"
+
+                        right = ""
+                        if "Inventário" in self._memory_state.open_menus:
+                            right = "I"
+                        elif "Habilidades" in self._memory_state.open_menus:
+                            right = "S"
+                        elif "Missões (Quests)" in self._memory_state.open_menus:
+                            right = "Q"
+                        elif "Diário (Journal)" in self._memory_state.open_menus:
+                            right = "J"
+                        elif "Portal (Waypoint)" in self._memory_state.open_menus:
+                            right = "W"
+
+                        self._active_panels = [left, right]
+
+                is_only_inventory = (self._memory_state.open_menus in (["Inventário"], ["Pet"]))
+                effective_mode = (
+                    "blocked"
+                    if self._memory_state.is_loading
+                    else (
+                        "cursor"
+                        if (
+                            self._memory_state.is_connected
+                            and ((self._memory_state.is_menu_open and not is_only_inventory) or not self._memory_state.is_in_game)
+                        )
+                        else self._mode
+                    )
+                )
 
                 # Publica o estado completo para o overlay Qt (thread-safe).
                 self.shared.update(
@@ -1076,12 +3804,35 @@ class BridgeEngine(threading.Thread):
                     controller_connected=state.connected,
                     controller_name=state.name,
                     controller_mapping=state.mapping,
-                    mode=self._mode,
+                    mode=effective_mode,
+                    active_panels=list(self._active_panels),
+                    memory_state_desc=self._memory_state.state_desc,
+                    memory_is_in_game=self._memory_state.is_in_game,
+                    memory_is_loading=self._memory_state.is_loading,
+                    memory_is_menu_open=self._memory_state.is_menu_open,
+                    memory_open_menus=list(self._memory_state.open_menus),
+                    char_name_len=self._memory_state.char_name_len,
+                    title_menu_focus=self._title_focus if (self._memory_state.is_connected and self._memory_state.state_id == 0) else None,
+                    dialog_focus=self._dialog_focus if (self._memory_state.is_connected and self._memory_state.dialog_type) else None,
+                    dialog_type=self._memory_state.dialog_type if self._memory_state.is_connected else "",
+                    dialog_buttons=list(self._memory_state.dialog_buttons) if self._memory_state.is_connected else [],
+                    inventory_open=self._inventory_initialized,
+                    inventory_tab=self._inventory_tab,
+                    inventory_focus=str(self._inventory_focus) if self._inventory_focus else None,
+                    pet_inventory_open=self._pet_inventory_initialized,
+                    pet_inventory_tab=self._pet_inventory_tab,
+                    pet_inventory_focus=str(self._pet_inventory_focus) if self._pet_inventory_focus else None,
+                    stash_open=self._stash_initialized,
+                    stash_tab=self._stash_tab,
+                    stash_focus=str(self._stash_focus) if self._stash_focus else None,
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
                 if enabled and game_active and state.connected:
-                    self._process_active(hub, state, rect, cfg, now, dt)
+                    if self._memory_state.is_loading:
+                        self._release_all()
+                    else:
+                        self._process_active(hub, state, rect, cfg, now, dt)
                 # Qualquer interrupção (pausa, jogo em segundo plano, sem controle): libera tudo.
                 # As bordas dos gatilhos continuam acompanhando o hardware NOS TICKS
                 # INATIVOS (dentro de _process_active no tick ativo): um gatilho
@@ -1106,4 +3857,5 @@ class BridgeEngine(threading.Thread):
             self._release_all()
             if hub is not None:
                 hub.close()
+            self.memory.close()
             end_high_resolution_timer()
