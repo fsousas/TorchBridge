@@ -34,31 +34,31 @@ from torchbridge.models import (
 class MerchantCoordinatesTests(unittest.TestCase):
     def test_merchant_tab_coordinates_base(self):
         rect = Rect(left=0, top=0, width=1024, height=768)
-        # Tab 1 (Misc): base (117.0, 110.0)
+        # Tab 1 (Misc): base (88.0, 78.0)
         t1_x, t1_y = merchant_tab_point(rect, 1)
-        self.assertEqual((t1_x, t1_y), (117, 110))
+        self.assertEqual((t1_x, t1_y), (88, 78))
 
-        # Tab 2 (Weapon): base (216.0, 110.0)
+        # Tab 2 (Weapon): base (183.0, 78.0)
         t2_x, t2_y = merchant_tab_point(rect, 2)
-        self.assertEqual((t2_x, t2_y), (216, 110))
+        self.assertEqual((t2_x, t2_y), (183, 78))
 
-        # Tab 3 (Armor): base (317.0, 110.0)
+        # Tab 3 (Armor): base (278.0, 78.0)
         t3_x, t3_y = merchant_tab_point(rect, 3)
-        self.assertEqual((t3_x, t3_y), (317, 110))
+        self.assertEqual((t3_x, t3_y), (278, 78))
 
     def test_merchant_grid_slot_coordinates_base(self):
         rect = Rect(left=0, top=0, width=1024, height=768)
-        # Slot (1, 1) - Ponto Amarelo: base (65.0, 138.0)
+        # Slot (1, 1) - Ponto Amarelo: base (63.5, 109.5)
         s11_x, s11_y = merchant_slot_point(rect, 1, 1)
-        self.assertEqual((s11_x, s11_y), (65, 138))
+        self.assertEqual((s11_x, s11_y), (64, 110))
 
-        # Slot (1, 7): base 65.0 + 6 * 40.0 = 305.0, y = 138.0
+        # Slot (1, 7): base 63.5 + 6 * 40.0 = 303.5, y = 109.5
         s17_x, s17_y = merchant_slot_point(rect, 1, 7)
-        self.assertEqual((s17_x, s17_y), (305, 138))
+        self.assertEqual((s17_x, s17_y), (304, 110))
 
-        # Slot (6, 7): x = 305.0, y = 416.0
+        # Slot (6, 7): x = 303.5, y = 387.5
         s67_x, s67_y = merchant_slot_point(rect, 6, 7)
-        self.assertEqual((s67_x, s67_y), (305, 416))
+        self.assertEqual((s67_x, s67_y), (304, 388))
 
 
 class MerchantNavigationTests(unittest.TestCase):
@@ -74,7 +74,7 @@ class MerchantNavigationTests(unittest.TestCase):
         self.shared = SharedOverlayState()
         self.engine = BridgeEngine(self.cfg_mock, self.shared)
         self.engine.injector = MagicMock()
-        self.engine.injector.cursor_position.return_value = (65, 138)
+        self.engine.injector.cursor_position.return_value = (64, 110)
         self.hub_mock = MagicMock()
         self.rect = Rect(left=0, top=0, width=1024, height=768)
 

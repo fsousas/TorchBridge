@@ -1293,22 +1293,22 @@ def stash_upper_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
 # Grid do Pet de 3 linhas x 7 colunas (21 slots) + 3 Abas Ciano
 
 MERCHANT_TABS_COORDS: dict[int, tuple[float, float]] = {
-    1: (117.0, 110.0),  # Misc
-    2: (216.0, 110.0),  # Weapon
-    3: (317.0, 110.0),  # Armor
+    1: (88.0, 78.0),   # Misc
+    2: (183.0, 78.0),  # Weapon
+    3: (278.0, 78.0),  # Armor
 }
 
 MERCHANT_GRID_ROWS = 6
 MERCHANT_GRID_COLS = 7
-MERCHANT_GRID_ORIGIN_X = 65.0
+MERCHANT_GRID_ORIGIN_X = 63.5
 MERCHANT_GRID_STEP_X = 40.0
 MERCHANT_GRID_ROW_Y: dict[int, float] = {
-    1: 138.0,
-    2: 193.0,
-    3: 248.0,
-    4: 306.0,
-    5: 361.0,
-    6: 416.0,
+    1: 109.5,
+    2: 164.5,
+    3: 219.5,
+    4: 277.5,
+    5: 332.5,
+    6: 387.5,
 }
 
 
@@ -1318,7 +1318,7 @@ def merchant_tab_point(rect: Rect, tab_index: int) -> tuple[int, int]:
         return (0, 0)
     scale = rect.height / 768.0
     idx = int(clamp(tab_index, 1, 3))
-    base_x, base_y = MERCHANT_TABS_COORDS.get(idx, (117.0, 110.0))
+    base_x, base_y = MERCHANT_TABS_COORDS.get(idx, (88.0, 78.0))
     x = rect.left + base_x * scale
     y = rect.top + base_y * scale
     clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
@@ -1334,7 +1334,7 @@ def merchant_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
     r = int(clamp(row, 1, MERCHANT_GRID_ROWS))
     c = int(clamp(col, 1, MERCHANT_GRID_COLS))
     base_x = MERCHANT_GRID_ORIGIN_X + (c - 1) * MERCHANT_GRID_STEP_X
-    base_y = MERCHANT_GRID_ROW_Y.get(r, 138.0 + (r - 1) * 55.0)
+    base_y = MERCHANT_GRID_ROW_Y.get(r, 109.5 + (r - 1) * 55.0)
     x = rect.left + base_x * scale
     y = rect.top + base_y * scale
     clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))

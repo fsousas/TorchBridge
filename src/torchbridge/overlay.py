@@ -1016,7 +1016,7 @@ class GameOverlay(QWidget):
 
                 # 3 Abas Rosa da Loja (1=Misc, 2=Weapon, 3=Armor) (#FD62CE)
                 tab_w = 88.0 * scale * (rect.height / 768.0)
-                tab_h = 18.0 * scale * (rect.height / 768.0)
+                tab_h = 22.0 * scale * (rect.height / 768.0)
                 for tab_idx in (1, 2, 3):
                     tx, ty = merchant_tab_point(rect, tab_idx)
                     lx = tx - rect.left - tab_w / 2.0

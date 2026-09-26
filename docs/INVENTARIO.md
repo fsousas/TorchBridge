@@ -281,19 +281,19 @@ O menu do Baú é composto por duas seções verticais integradas:
 ### Estrutura do Painel Esquerdo (Mercador)
 1. **Seção Superior (Loja do Mercador):**
    - **3 Abas Rosa (`#FD62CE`):**
-     - Aba 1 (`Misc`): `(117.0, 110.0)`
-     - Aba 2 (`Weapon`): `(216.0, 110.0)`
-     - Aba 3 (`Armor`): `(317.0, 110.0)`
+     - Aba 1 (`Misc`): `(88.0, 78.0)`
+     - Aba 2 (`Weapon`): `(183.0, 78.0)`
+     - Aba 3 (`Armor`): `(278.0, 78.0)`
    - **Grid de 6 linhas x 7 colunas (42 slots):**
-     - Posição inicial (Amarelo): Slot `(1, 1)` em `(65.0, 138.0)`.
-     - Colunas 1 a 7: `x = rect.left + (65.0 + (col - 1) * 40.0) * scale`.
-     - Alturas base das 6 linhas (centro calibrado em 1024x768):
-       - Linha 1: `138.0`
-       - Linha 2: `193.0` (+55.0)
-       - Linha 3: `248.0` (+55.0)
-       - Linha 4: `306.0` (+58.0 - divisor intermediário)
-       - Linha 5: `361.0` (+55.0)
-       - Linha 6: `416.0` (+55.0)
+     - Posição inicial (Amarelo): Slot `(1, 1)` em `(63.5, 109.5)`.
+     - Colunas 1 a 7: `x = rect.left + (63.5 + (col - 1) * 40.0) * scale`.
+     - Alturas base das 6 linhas (calibrado em 1024x768):
+       - Linha 1: `109.5`
+       - Linha 2: `164.5` (+55.0)
+       - Linha 3: `219.5` (+55.0)
+       - Linha 4: `277.5` (+58.0 - divisor intermediário)
+       - Linha 5: `332.5` (+55.0)
+       - Linha 6: `387.5` (+55.0)
 2. **Seção Inferior (Pet Inventory integrado):**
    - 3 abas em Ciano (`#0BE0EF`): `Equipment`, `Spells`, `Fish` (controladas por L2/R2 na metade esquerda).
    - Grid de **3 linhas x 7 colunas** (total de **21 slots** do inventário do pet).
