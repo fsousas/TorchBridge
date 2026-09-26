@@ -10,6 +10,8 @@ Amarelo - #E6C12A | Demarca o slot inicial do cursor ao:
  - Abrir o inventario
  - Trocar de aba
 
+Laranja - #FD6100 | Demarca os slots de transição/ponte entre menus opostos (Pet e Inventário)
+
 ### Imagens de referencia
 > Aba 1 - Slots de equipamentos(Sempre abre nessa aba quando o inventario abre, nao importa a ação que dispare a abertura do inventario)
 assets\images\inventário\inventario-4x3-tab-1.png
@@ -73,4 +75,38 @@ cursor na posicao x1 y1 se mover para a esquerda no dpad, faz ele mover o cursor
    - Com apenas o menu de Pet aberto, o analógico esquerdo mantém o movimento direto do personagem (deslocado para a área visível à direita).
    - O menu radial (LB) continua disponível quando apenas o menu de Pet ou Inventário estiverem abertos.
    - Quando ambos estiverem abertos, a metade da tela onde o cursor está determina qual menu o D-pad e os gatilhos L2/R2 controlam.
+
+---
+
+## Transição entre Menus Opostos (Pet e Inventário Simultâneos)
+#### Meta - Permitir que o jogador transite o cursor com o D-pad diretamente de um menu para o outro na costura central da tela, mantendo as bordas externas isoladas com seu wrap-around individual (Opção 3).
+
+### Imagem de referencia
+> assets\images\inventário\change-between-pet-inventory.png
+
+### Regras de Transição Central (Ponte Laranja - #FD6100)
+1. **Do Menu do Pet (Esquerda) para o Inventário (Direita) via D-pad DIREITA:**
+   - Estando no Pet em qualquer slot da coluna da borda direita e pressionando **Direita**:
+     - Linha 1 Coluna 7 `(1, 7)` $\to$ Inventário Linha 1 Coluna 1 `(1, 1)`
+     - Linha 2 Coluna 7 `(2, 7)` $\to$ Inventário Linha 2 Coluna 1 `(2, 1)`
+     - Linha 3 Coluna 7 `(3, 7)` $\to$ Inventário Linha 3 Coluna 1 `(3, 1)`
+     - Magia superior `pet_spell_2` $\to$ Magia superior `spell_1` do Inventário
+
+2. **Do Inventário (Direita) para o Menu do Pet (Esquerda) via D-pad ESQUERDA:**
+   - Estando no Inventário em qualquer slot da borda esquerda e pressionando **Esquerda**:
+     - Linha 1 Coluna 1 `(1, 1)` $\to$ Pet Linha 1 Coluna 7 `(1, 7)`
+     - Linha 2 Coluna 1 `(2, 1)` $\to$ Pet Linha 2 Coluna 7 `(2, 7)`
+     - Linha 3 Coluna 1 `(3, 1)` $\to$ Pet Linha 3 Coluna 7 `(3, 7)`
+     - Equipamentos e magias da coluna esquerda (`spell_1`, `main_hand`, `belt`, `gloves`, `helmet`) $\to$ Pet `pet_spell_2`
+
+### Regra da Opção 3 — Extremidades Externas Isoladas
+* **Borda Direita do Inventário (Coluna 7):** Pressionar **Direita** continua dando a quebra de linha interna dentro do próprio Inventário:
+  - Linha 1 Col 7 `(1, 7)` + Direita $\to$ Linha 2 Col 1 `(2, 1)` do Inventário.
+  - Linha 2 Col 7 `(2, 7)` + Direita $\to$ Linha 3 Col 1 `(3, 1)` do Inventário.
+  - Linha 3 Col 7 `(3, 7)` + Direita $\to$ Linha 1 Col 1 `(1, 1)` do Inventário.
+* **Borda Esquerda do Pet (Coluna 1):** Pressionar **Esquerda** continua dando a quebra de linha interna dentro do próprio Pet:
+  - Linha 1 Col 1 `(1, 1)` + Esquerda $\to$ Linha 3 Col 7 `(3, 7)` do Pet.
+  - Linha 2 Col 1 `(2, 1)` + Esquerda $\to$ Linha 1 Col 7 `(1, 7)` do Pet.
+  - Linha 3 Col 1 `(3, 1)` + Esquerda $\to$ Linha 2 Col 7 `(2, 7)` do Pet.
+
 

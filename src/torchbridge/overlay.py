@@ -819,6 +819,7 @@ class GameOverlay(QWidget):
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+                c_laranja = QColor(0xFD, 0x61, 0x00, 220)
 
                 # Abas do inventário (1, 2, 3) em ciano (#0BE0EF)
                 tab_w = 95.0 * scale * (rect.height / 768.0)
@@ -838,6 +839,7 @@ class GameOverlay(QWidget):
 
                 # Slots do Grid 3x7 (Linha 1..3, Coluna 1..7)
                 slot_box = 18.0 * scale * (rect.height / 768.0)
+                is_pet_also_open = snapshot.pet_inventory_open or ("Pet" in (snapshot.memory_open_menus or []))
                 for r in range(1, INVENTORY_GRID_ROWS + 1):
                     for c in range(1, INVENTORY_GRID_COLS + 1):
                         sx, sy = inventory_slot_point(rect, r, c)
@@ -845,7 +847,8 @@ class GameOverlay(QWidget):
                         ly = sy - rect.top - slot_box / 2.0
                         is_slot1 = (r == 1 and c == 1)
                         is_focus = (snapshot.inventory_focus in (f"({r}, {c})", f"({r},{c})"))
-                        color = c_amarelo if is_slot1 else c_verde
+                        is_bridge = is_pet_also_open and (c == 1)
+                        color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
                             painter.setBrush(color)
@@ -860,12 +863,14 @@ class GameOverlay(QWidget):
                     lx = ux - rect.left - slot_box / 2.0
                     ly = uy - rect.top - slot_box / 2.0
                     is_focus = (snapshot.inventory_focus == slot_name)
+                    is_bridge = is_pet_also_open and (slot_name in ("spell_1", "main_hand", "belt", "gloves", "helmet"))
+                    color = c_laranja if is_bridge else c_verde
                     if is_focus:
                         painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
-                        painter.setBrush(c_verde)
+                        painter.setBrush(color)
                     else:
-                        painter.setPen(QPen(c_verde, 1.5 * scale))
-                        painter.setBrush(QColor(c_verde.red(), c_verde.green(), c_verde.blue(), 140))
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
                     painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
 
             # 10. Alvos do Menu do Pet (Abas + Grid 3x7 + Equipamentos/Spells superiores)
@@ -874,6 +879,7 @@ class GameOverlay(QWidget):
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+                c_laranja = QColor(0xFD, 0x61, 0x00, 220)
 
                 # Abas do menu de pet (1, 2, 3) em ciano (#0BE0EF)
                 tab_w = 95.0 * scale * (rect.height / 768.0)
@@ -893,6 +899,7 @@ class GameOverlay(QWidget):
 
                 # Slots do Grid 3x7 (Linha 1..3, Coluna 1..7)
                 slot_box = 18.0 * scale * (rect.height / 768.0)
+                is_inv_also_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
                 for r in range(1, PET_GRID_ROWS + 1):
                     for c in range(1, PET_GRID_COLS + 1):
                         sx, sy = pet_inventory_slot_point(rect, r, c)
@@ -900,7 +907,8 @@ class GameOverlay(QWidget):
                         ly = sy - rect.top - slot_box / 2.0
                         is_slot1 = (r == 1 and c == 1)
                         is_focus = (snapshot.pet_inventory_focus in (f"({r}, {c})", f"({r},{c})"))
-                        color = c_amarelo if is_slot1 else c_verde
+                        is_bridge = is_inv_also_open and (c == 7)
+                        color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
                             painter.setBrush(color)
@@ -915,12 +923,14 @@ class GameOverlay(QWidget):
                     lx = ux - rect.left - slot_box / 2.0
                     ly = uy - rect.top - slot_box / 2.0
                     is_focus = (snapshot.pet_inventory_focus == slot_name)
+                    is_bridge = is_inv_also_open and (slot_name == "pet_spell_2")
+                    color = c_laranja if is_bridge else c_verde
                     if is_focus:
                         painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
-                        painter.setBrush(c_verde)
+                        painter.setBrush(color)
                     else:
-                        painter.setPen(QPen(c_verde, 1.5 * scale))
-                        painter.setBrush(QColor(c_verde.red(), c_verde.green(), c_verde.blue(), 140))
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
                     painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
 
         elif state_desc == "Tela Inicial":

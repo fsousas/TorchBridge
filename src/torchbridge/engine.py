@@ -1468,6 +1468,8 @@ class BridgeEngine(threading.Thread):
         current = self._inventory_focus or (1, 1)
         new_focus: tuple[int, int] | str = current
 
+        is_pet_open = "Pet" in (self._memory_state.open_menus or [])
+
         if isinstance(current, tuple):
             row, col = current
             if dpad_right:
@@ -1482,6 +1484,18 @@ class BridgeEngine(threading.Thread):
             elif dpad_left:
                 if col > 1:
                     new_focus = (row, col - 1)
+                elif is_pet_open:
+                    # Ponte para o Pet: Coluna 1 do Inventário -> Coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, row, 7)
+                    self._pet_inventory_focus = (row, 7)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        pet_inventory_open=True,
+                        pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                        pet_inventory_focus=f"({row}, 7)",
+                    )
+                    return
                 elif row == 1:
                     new_focus = (3, 7)
                 elif row == 2:
@@ -1506,6 +1520,19 @@ class BridgeEngine(threading.Thread):
                     else:
                         new_focus = "spell_4"
         else:
+            if is_pet_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Pet: Borda esquerda superior do Inventário -> pet_spell_2 do Pet
+                target_x, target_y = pet_inventory_upper_point(rect, "pet_spell_2")
+                self._pet_inventory_focus = "pet_spell_2"
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    pet_inventory_open=True,
+                    pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                    pet_inventory_focus="pet_spell_2",
+                )
+                return
+
             direction = "up" if dpad_up else ("down" if dpad_down else ("left" if dpad_left else "right"))
             nav = INVENTORY_UPPER_NAV_MAP.get(str(current), {})
             if direction in nav:
@@ -1610,11 +1637,25 @@ class BridgeEngine(threading.Thread):
         current = self._pet_inventory_focus or (1, 1)
         new_focus: tuple[int, int] | str = current
 
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+
         if isinstance(current, tuple):
             row, col = current
             if dpad_right:
                 if col < 7:
                     new_focus = (row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário: Coluna 7 do Pet -> Coluna 1 do Inventário
+                    target_x, target_y = inventory_slot_point(rect, row, 1)
+                    self._inventory_focus = (row, 1)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
                 elif row == 1:
                     new_focus = (2, 1)
                 elif row == 2:
@@ -1650,6 +1691,19 @@ class BridgeEngine(threading.Thread):
                     else:
                         new_focus = "pet_spell_2"
         else:
+            if is_inv_open and dpad_right and str(current) == "pet_spell_2":
+                # Ponte para o Inventário: pet_spell_2 do Pet -> spell_1 do Inventário
+                target_x, target_y = inventory_upper_point(rect, "spell_1")
+                self._inventory_focus = "spell_1"
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    inventory_open=True,
+                    inventory_tab=self._inventory_tab or "tab-1",
+                    inventory_focus="spell_1",
+                )
+                return
+
             direction = "up" if dpad_up else ("down" if dpad_down else ("left" if dpad_left else "right"))
             nav = PET_UPPER_NAV_MAP.get(str(current), {})
             if direction in nav:

@@ -614,6 +614,7 @@ class DualInventoryTests(unittest.TestCase):
         self.shared = SharedOverlayState()
         self.engine = BridgeEngine(self.config, self.shared)
         self.engine.injector = MagicMock()
+        self.engine.injector.cursor_position.return_value = (800, 500)
         self.hub_mock = MagicMock()
         self.rect = Rect(left=0, top=0, width=1024, height=768)
 
@@ -692,6 +693,103 @@ class DualInventoryTests(unittest.TestCase):
         self.engine._tap_binding = MagicMock()
         self.engine._handle_trigger_combos(state, self.rect, bindings, 1.0)
         self.engine._tap_binding.assert_called_with("4")
+
+    def test_seam_jump_from_pet_to_inventory_grid_and_spells(self):
+        # Ambos os menus abertos
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Pet", "Inventário"],
+        )
+        self.engine._pet_inventory_initialized = True
+        self.engine._inventory_initialized = True
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (200, 500)
+
+        # 1. Pet (1, 7) + Direita -> Pula para Inventário (1, 1)
+        self.engine._pet_inventory_focus = (1, 7)
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (1, 1))
+
+        # 2. Pet (2, 7) + Direita -> Pula para Inventário (2, 1)
+        self.engine._pet_inventory_focus = (2, 7)
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (2, 1))
+
+        # 3. Pet (3, 7) + Direita -> Pula para Inventário (3, 1)
+        self.engine._pet_inventory_focus = (3, 7)
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (3, 1))
+
+        # 4. Pet pet_spell_2 + Direita -> Pula para Inventário spell_1
+        self.engine._pet_inventory_focus = "pet_spell_2"
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, "spell_1")
+
+    def test_seam_jump_from_inventory_to_pet_grid_and_equipment(self):
+        # Ambos os menus abertos
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Pet", "Inventário"],
+        )
+        self.engine._pet_inventory_initialized = True
+        self.engine._inventory_initialized = True
+        state_l = ControllerState(connected=True, buttons={"dpad_left"})
+        self.engine._previous = ControllerState(connected=True)
+
+        # 1. Inventário (1, 1) + Esquerda -> Pula para Pet (1, 7)
+        self.engine._inventory_focus = (1, 1)
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._pet_inventory_focus, (1, 7))
+
+        # 2. Inventário (2, 1) + Esquerda -> Pula para Pet (2, 7)
+        self.engine._inventory_focus = (2, 1)
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._pet_inventory_focus, (2, 7))
+
+        # 3. Inventário (3, 1) + Esquerda -> Pula para Pet (3, 7)
+        self.engine._inventory_focus = (3, 1)
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._pet_inventory_focus, (3, 7))
+
+        # 4. Equipamentos/spells da borda esquerda do Inventário -> Pula para Pet pet_spell_2
+        for eq in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+            self.engine._inventory_focus = eq
+            self.engine._pet_inventory_focus = None
+            self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+            self.assertEqual(self.engine._pet_inventory_focus, "pet_spell_2", f"Falhou para {eq}")
+
+    def test_option_3_isolated_outer_edges(self):
+        # Ambos os menus abertos: as bordas externas NÃO pulam de menu, fazem wrap interno
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Pet", "Inventário"],
+        )
+        self.engine._pet_inventory_initialized = True
+        self.engine._inventory_initialized = True
+
+        # 1. Pet Coluna 1 (borda externa esquerda) + Esquerda -> continua dando wrap dentro do Pet
+        state_l = ControllerState(connected=True, buttons={"dpad_left"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (200, 500)
+        self.engine._pet_inventory_focus = (1, 1)
+        self.engine._handle_pet_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._pet_inventory_focus, (3, 7))
+
+        # 2. Inventário Coluna 7 (borda externa direita) + Direita -> continua dando wrap dentro do Inventário
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (800, 500)
+        self.engine._inventory_focus = (1, 7)
+        self.engine._handle_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (2, 1))
+
+        self.engine._inventory_focus = (3, 7)
+        self.engine._handle_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._inventory_focus, (1, 1))
 
 
 if __name__ == "__main__":
