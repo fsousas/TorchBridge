@@ -125,5 +125,107 @@ Ao mover o mouse fisicamente ou pelo analógico, o cursor cruza os pixels do per
 3. **Navegação comum dentro do Grid:**
    - Movimentação direta instantânea (0ms de atraso), mantendo a resposta rápida e sem impacto na fluidez.
 
+---
 
+## Mapeamento de Pontos Navegáveis no Menu do Baú (Stash) no ESTADO = In-game
+#### Meta - Navegação fluida e intuitiva pelo Baú de armazenamento compartilhado/pessoal e pelo Inventário do Pet integrado na metade esquerda da tela (rect.left), com pontes bidirecionais de alta precisão para o Inventário do Jogador na metade direita.
 
+### Imagem de Referência
+> `assets\images\inventário\bau-inventario-4x3.png`
+
+```
++-------------------------------------------------------------+-------------------------------------------------------------+
+|                      PAINEL ESQUERDO                        |                       PAINEL DIREITO                        |
+|                        (Baú + Pet)                          |                    (Inventário do Jogador)                  |
++-------------------------------------------------------------+-------------------------------------------------------------+
+|  [BAÚ SUPERIOR: 6 Linhas x 7 Colunas = 42 Slots]            |  [EQUIPAMENTOS E MAGIAS: 16 Slots]                          |
+|  L1: [1,1] [1,2] [1,3] [1,4] [1,5] [1,6] [1,7(Ponte)]  ---> |  helmet                                                     |
+|  L2: [2,1] [2,2] [2,3] [2,4] [2,5] [2,6] [2,7(Ponte)]  ---> |  gloves                                                     |
+|  L3: [3,1] [3,2] [3,3] [3,4] [3,5] [3,6] [3,7(Ponte)]  ---> |  belt                                                       |
+|  L4: [4,1] [4,2] [4,3] [4,4] [4,5] [4,6] [4,7(Ponte)]  ---> |  belt                                                       |
+|  L5: [5,1] [5,2] [5,3] [5,4] [5,5] [5,6] [5,7(Ponte)]  ---> |  main_hand                                                  |
+|  L6: [6,1] [6,2] [6,3] [6,4] [6,5] [6,6] [6,7(Ponte)]  ---> |  spell_1                                                    |
+|           ^                   |                             |                                                             |
+|   (D-pad Cima)         (D-pad Baixo)                        |                                                             |
+|           |                   v                             |                                                             |
+|  [PET INFERIOR: 3 Abas + 3 Linhas x 7 Colunas = 21 Slots]   |  [INVENTÁRIO INFERIOR: 3 Abas + 3 Linhas x 7 Colunas]       |
+|  Abas: [Equip] [Spells] [Fish]  (L2/R2)                     |  Abas: [Equip] [Spells] [Fish]  (L2/R2)                     |
+|  L1: [1,1(Amarelo)] [1,2] ... [1,6] [1,7(Ponte)]       ---> |  L1: [1,1] [1,2] ... [1,6] [1,7(Wrap)]                      |
+|  L2: [2,1]          [2,2] ... [2,6] [2,7(Ponte)]       ---> |  L2: [2,1] [2,2] ... [2,6] [2,7(Wrap)]                      |
+|  L3: [3,1]          [3,2] ... [3,6] [3,7(Ponte)]       ---> |  L3: [3,1] [3,2] ... [3,6] [3,7(Wrap)]                      |
++-------------------------------------------------------------+-------------------------------------------------------------+
+```
+
+---
+
+### Estrutura do Painel Esquerdo (Baú)
+O menu do Baú é composto por duas seções verticais integradas:
+1. **Seção Superior (Grid do Baú de Armazenamento):**
+   - Grid de **6 linhas x 7 colunas** (total de **42 slots** de baú).
+   - Ancorado à borda esquerda: `x = rect.left + (63.5 + (col - 1) * 40.0) * scale`.
+   - Alturas base das 6 linhas (calibradas em 1024x768):
+     - Linha 1: `109.5` (Y base)
+     - Linha 2: `164.5` (+55.0)
+     - Linha 3: `219.5` (+55.0)
+     - Linha 4: `277.5` (+58.0 - divisor intermediário)
+     - Linha 5: `332.5` (+55.0)
+     - Linha 6: `387.5` (+55.0)
+2. **Seção Inferior (Pet Inventory integrado):**
+   - 3 abas em Ciano (`#0BE0EF`): `Equipment`, `Spells`, `Fish` (controladas por L2/R2 na metade esquerda).
+   - Grid de **3 linhas x 7 colunas** (total de **21 slots** do inventário do pet).
+   - Posição inicial: Slot `(1, 1)` em Amarelo (`#E6C12A`).
+
+---
+
+### Tabela de Cores e Funções no Overlay
+| Cor | Hex | Função / Significado | Quantidade no Baú |
+| :--- | :--- | :--- | :--- |
+| **Amarelo** | `#E6C12A` | Ponto de foco inicial ao abrir o Baú ou trocar de aba | 1 slot (`('pet', 1, 1)`) |
+| **Ciano** | `#0BE0EF` | Abas de navegação clicáveis via L2 / R2 | 3 abas (`pet_tab_1..3`) |
+| **Verde** | `#09B200` | Slots de navegação interna regular via D-pad | 53 slots (36 baú + 17 pet) |
+| **Laranja** | `#FD6100` | Pontes de transição inter-menus (Coluna 7) | 9 slots (6 baú + 3 pet) |
+
+---
+
+### Regras de Navegação no Baú
+
+#### 1. Navegação Vertical Contínua (Pet $\leftrightarrow$ Baú Superior)
+* **Pet para Baú:** Estando na Linha 1 do Pet (`('pet', 1, col)`) e pressionando **D-pad Cima**, o cursor sobe diretamente para a Linha 6 do Baú (`('stash', 6, col)`), preservando a coluna.
+* **Baú para Pet:** Estando na Linha 6 do Baú (`('stash', 6, col)`) e pressionando **D-pad Baixo**, o cursor desce diretamente para a Linha 1 do Pet (`('pet', 1, col)`), preservando a coluna.
+* **Bloqueio no Topo:** Estando na Linha 1 do Baú Superior e pressionando **D-pad Cima**, o cursor permanece onde está (sem saída de tela).
+* **Bloqueio no Fundo:** Estando na Linha 3 do Pet Inferior e pressionando **D-pad Baixo**, o cursor permanece onde está.
+
+#### 2. Tabela Mestra de Pontes Centrais (Coluna 7 $\leftrightarrow$ Inventário)
+| Origem (Painel Esquerdo - Col 7) | Ação D-pad | Destino (Inventário Direito) | Retorno (D-pad Esquerda) |
+| :--- | :--- | :--- | :--- |
+| Baú Superior Linha 1 `('stash', 1, 7)` | **Direita** | `helmet` | Retorna para `('stash', 1, 7)` |
+| Baú Superior Linha 2 `('stash', 2, 7)` | **Direita** | `gloves` | Retorna para `('stash', 2, 7)` |
+| Baú Superior Linha 3 `('stash', 3, 7)` | **Direita** | `belt` | Retorna para `('stash', 3, 7)` |
+| Baú Superior Linha 4 `('stash', 4, 7)` | **Direita** | `belt` | Retorna para `('stash', 3, 7)` |
+| Baú Superior Linha 5 `('stash', 5, 7)` | **Direita** | `main_hand` | Retorna para `('stash', 5, 7)` |
+| Baú Superior Linha 6 `('stash', 6, 7)` | **Direita** | `spell_1` | Retorna para `('stash', 6, 7)` |
+| Pet Inferior Linha 1 `('pet', 1, 7)` | **Direita** | Inventário Grid Linha 1 `(1, 1)` | Retorna para `('pet', 1, 7)` |
+| Pet Inferior Linha 2 `('pet', 2, 7)` | **Direita** | Inventário Grid Linha 2 `(2, 1)` | Retorna para `('pet', 2, 7)` |
+| Pet Inferior Linha 3 `('pet', 3, 7)` | **Direita** | Inventário Grid Linha 3 `(3, 1)` | Retorna para `('pet', 3, 7)` |
+
+#### 3. Regra da Opção 3 — Extremidades Externas Isoladas
+* **Coluna 1 do Baú Superior (Esquerda):** Pressionar **D-pad Esquerda** realiza quebra de linha interna dentro do Baú:
+  - `(1, 1) + Esquerda` $\to$ `(6, 7)`
+  - `(row, 1) + Esquerda` $\to$ `(row - 1, 7)`
+* **Coluna 1 do Pet Inferior (Esquerda):** Pressionar **D-pad Esquerda** realiza quebra de linha interna dentro do Pet:
+  - `(1, 1) + Esquerda` $\to$ `(3, 7)`
+  - `(row, 1) + Esquerda` $\to$ `(row - 1, 7)`
+* **Coluna 7 do Inventário (Direita):** Pressionar **D-pad Direita** continua dando quebra de linha interna dentro do próprio Inventário (`(row, 7) + Direita` $\to$ `(row + 1, 1)`), mantendo a borda externa da direita 100% isolada e protegida contra pulos acidentais para a outra ponta da tela.
+
+---
+
+### Mapeamento de Comandos no Gamepad com o Baú Aberto
+* **D-pad (Cima / Baixo / Esquerda / Direita):** Navegação slot-a-slot pelos 63 slots do lado esquerdo e 37 posições do lado direito, com travessia suave de tooltips (`_move_cursor_with_leave_step`).
+* **L2 / R2 (Gatilhos):** 
+  - Com o cursor na **metade esquerda** da tela: Troca entre as abas `Equipment` / `Spells` / `Fish` do Pet.
+  - Com o cursor na **metade direita** da tela: Troca entre as abas do Inventário do Jogador.
+* **X (A / Cross):** Clica no slot sob o cursor para selecionar / mover o item.
+* **Quadrado (X / Square):** Equipa ou transfere o item diretamente entre os inventários.
+* **Triângulo (Y / Triangle):** Envia o item para o Pet / Baú dependendo do contexto.
+* **Círculo (B / Circle):** Fecha o menu ativo.
+* **Analógico Esquerdo / Direito:** Modo mouse livre com sensibilidade acelerada sempre disponível caso o jogador deseje apontar manualmente para qualquer elemento fora do grid.

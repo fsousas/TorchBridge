@@ -32,6 +32,9 @@ from torchbridge.models import (
     pet_inventory_slot_point,
     pet_inventory_tab_point,
     pet_inventory_upper_point,
+    STASH_GRID_ROWS,
+    STASH_GRID_COLS,
+    stash_upper_slot_point,
 )
 
 
@@ -839,7 +842,187 @@ class MoveCursorWithLeaveStepTests(unittest.TestCase):
         self.assertEqual(self.engine.injector.move.call_args_list[1][0], (target_x, target_y))
 
 
+class StashCoordinatesTests(unittest.TestCase):
+    def test_stash_upper_grid_coordinates_base(self):
+        rect = Rect(left=0, top=0, width=1024, height=768)
+        # Row 1 Col 1: base (63.5, 109.5) -> (64, 110)
+        s11_x, s11_y = stash_upper_slot_point(rect, 1, 1)
+        self.assertEqual((s11_x, s11_y), (64, 110))
+
+        # Row 1 Col 7: base (63.5 + 6*40 = 303.5, 109.5) -> (304, 110)
+        s17_x, s17_y = stash_upper_slot_point(rect, 1, 7)
+        self.assertEqual((s17_x, s17_y), (304, 110))
+
+        # Row 6 Col 7: base (303.5, 387.5) -> (304, 388)
+        s67_x, s67_y = stash_upper_slot_point(rect, 6, 7)
+        self.assertEqual((s67_x, s67_y), (304, 388))
+
+    def test_stash_left_edge_anchoring_on_16x9(self):
+        # Em 1920x1080 (16:9), scale = 1080 / 768 = 1.40625
+        # Ancorado à borda esquerda (rect.left = 0):
+        # x = 0 + 63.5 * 1.40625 = ~89
+        rect_169 = Rect(left=0, top=0, width=1920, height=1080)
+        s11_x, _ = stash_upper_slot_point(rect_169, 1, 1)
+        self.assertTrue(87 <= s11_x <= 92)
+
+
+class StashNavigationEngineTests(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.config = ConfigManager(Path(self._temp_dir.name) / "perfil.json")
+        self.shared = SharedOverlayState()
+        self.engine = BridgeEngine(self.config, self.shared)
+        self.engine.injector = MagicMock()
+        self.engine.injector.cursor_position.return_value = (200, 500)
+        self.hub_mock = MagicMock()
+        self.rect = Rect(left=0, top=0, width=1024, height=768)
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
+
+    def test_initial_state_on_opening_stash(self):
+        state = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+
+        self.assertTrue(self.engine._stash_initialized)
+        self.assertEqual(self.engine._stash_tab, "tab-1")
+        self.assertEqual(self.engine._stash_focus, ("pet", 1, 1))
+
+        # Move o cursor para o slot amarelo inicial do Pet (1, 1)
+        expected_x, expected_y = pet_inventory_slot_point(self.rect, 1, 1)
+        self.engine.injector.move.assert_called_with(expected_x, expected_y)
+
+    def test_stash_tab_switching_r2_l2(self):
+        state = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+
+        # R2 avança: 1 -> 2
+        self.engine.injector.cursor_position.return_value = (200, 500)  # metade esquerda
+        self.engine._rt_edge_up = True
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_tab, "tab-2")
+        self.assertEqual(self.engine._stash_focus, ("pet", 1, 1))
+
+        # R2 avança: 2 -> 3
+        self.engine._rt_edge_up = True
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_tab, "tab-3")
+
+        # L2 volta: 3 -> 2
+        self.engine._rt_edge_up = False
+        self.engine._lt_edge_up = True
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_tab, "tab-2")
+
+    def test_stash_vertical_navigation_seamless_transition(self):
+        state = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+
+        # 1. Estando em Pet (1, 3) e apertando Cima -> sobe para Baú (6, 3)
+        self.engine._stash_focus = ("pet", 1, 3)
+        state_u = ControllerState(connected=True, buttons={"dpad_up"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state_u, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("stash", 6, 3))
+
+        # 2. Estando em Baú (6, 3) e apertando Baixo -> desce para Pet (1, 3)
+        state_d = ControllerState(connected=True, buttons={"dpad_down"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state_d, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("pet", 1, 3))
+
+        # 3. Bloqueio no topo: Baú (1, 3) + Cima -> continua em (1, 3)
+        self.engine._stash_focus = ("stash", 1, 3)
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state_u, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("stash", 1, 3))
+
+        # 4. Bloqueio no fundo: Pet (3, 3) + Baixo -> continua em (3, 3)
+        self.engine._stash_focus = ("pet", 3, 3)
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state_d, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("pet", 3, 3))
+
+    def test_stash_horizontal_isolated_outer_edges(self):
+        state = ControllerState(connected=True)
+        self.engine._handle_stash_navigation(state, self.rect, self.hub_mock)
+
+        # 1. Baú Col 1 + Esquerda -> wrap interno no Baú
+        state_l = ControllerState(connected=True, buttons={"dpad_left"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._stash_focus = ("stash", 1, 1)
+        self.engine._handle_stash_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("stash", 6, 7))
+
+        self.engine._stash_focus = ("stash", 2, 1)
+        self.engine._handle_stash_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("stash", 1, 7))
+
+        # 2. Pet Col 1 + Esquerda -> wrap interno no Pet
+        self.engine._stash_focus = ("pet", 1, 1)
+        self.engine._handle_stash_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._stash_focus, ("pet", 3, 7))
+
+    def test_stash_and_inventory_bidirectional_bridges(self):
+        # Ambos os menus abertos (Baú e Inventário)
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Inventário", "Baú"],
+        )
+        self.engine._stash_initialized = True
+        self.engine._inventory_initialized = True
+
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        state_l = ControllerState(connected=True, buttons={"dpad_left"})
+        self.engine._previous = ControllerState(connected=True)
+
+        # 1. Baú Pet Col 7 + Direita -> Inventário Col 1
+        for row in (1, 2, 3):
+            self.engine._stash_focus = ("pet", row, 7)
+            self.engine._inventory_focus = None
+            self.engine._handle_stash_navigation(state_r, self.rect, self.hub_mock)
+            self.assertEqual(self.engine._inventory_focus, (row, 1))
+
+        # 2. Baú Stash Col 7 + Direita -> Inventário Equipamentos
+        expected_slots = {
+            1: "helmet",
+            2: "gloves",
+            3: "belt",
+            4: "belt",
+            5: "main_hand",
+            6: "spell_1",
+        }
+        for stash_row, inv_slot in expected_slots.items():
+            self.engine._stash_focus = ("stash", stash_row, 7)
+            self.engine._inventory_focus = None
+            self.engine._handle_stash_navigation(state_r, self.rect, self.hub_mock)
+            self.assertEqual(self.engine._inventory_focus, inv_slot, f"Falhou para linha {stash_row}")
+
+        # 3. Inventário Col 1 + Esquerda -> Baú Pet Col 7
+        for row in (1, 2, 3):
+            self.engine._inventory_focus = (row, 1)
+            self.engine._stash_focus = None
+            self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+            self.assertEqual(self.engine._stash_focus, ("pet", row, 7))
+
+        # 4. Inventário Equipamentos + Esquerda -> Baú Stash Col 7
+        inv_to_stash = {
+            "helmet": 1,
+            "gloves": 2,
+            "belt": 3,
+            "main_hand": 5,
+            "spell_1": 6,
+        }
+        for eq_slot, stash_row in inv_to_stash.items():
+            self.engine._inventory_focus = eq_slot
+            self.engine._stash_focus = None
+            self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+            self.assertEqual(self.engine._stash_focus, ("stash", stash_row, 7), f"Falhou para {eq_slot}")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

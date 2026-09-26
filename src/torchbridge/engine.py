@@ -44,6 +44,9 @@ from .models import (
     pet_inventory_tab_point,
     pet_inventory_upper_point,
     PET_UPPER_NAV_MAP,
+    STASH_GRID_ROWS,
+    STASH_GRID_COLS,
+    stash_upper_slot_point,
 )
 from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
@@ -196,6 +199,10 @@ class BridgeEngine(threading.Thread):
         self._pet_inventory_initialized: bool = False
         self._pet_inventory_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
         self._pet_inventory_focus: tuple[int, int] | str | None = None
+        # Navegação no Menu do Baú (Stash 6x7 superior + Pet 3x7 inferior + Abas)
+        self._stash_initialized: bool = False
+        self._stash_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._stash_focus: tuple[str, int, int] | None = None
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -232,6 +239,9 @@ class BridgeEngine(threading.Thread):
         self._pet_inventory_initialized = False
         self._pet_inventory_tab = None
         self._pet_inventory_focus = None
+        self._stash_initialized = False
+        self._stash_tab = None
+        self._stash_focus = None
         self.shared.update(
             radial_selection=None,
             pause_menu_focus=None,
@@ -249,6 +259,9 @@ class BridgeEngine(threading.Thread):
             pet_inventory_open=False,
             pet_inventory_tab=None,
             pet_inventory_focus=None,
+            stash_open=False,
+            stash_tab=None,
+            stash_focus=None,
         )
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
@@ -354,10 +367,16 @@ class BridgeEngine(threading.Thread):
             pet_inventory_open=False,
             pet_inventory_tab=None,
             pet_inventory_focus=None,
+            stash_open=False,
+            stash_tab=None,
+            stash_focus=None,
         )
         self._pet_inventory_initialized = False
         self._pet_inventory_tab = None
         self._pet_inventory_focus = None
+        self._stash_initialized = False
+        self._stash_tab = None
+        self._stash_focus = None
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -1525,6 +1544,7 @@ class BridgeEngine(threading.Thread):
         new_focus: tuple[int, int] | str = current
 
         is_pet_open = "Pet" in (self._memory_state.open_menus or [])
+        is_stash_open = "Baú" in (self._memory_state.open_menus or [])
 
         if isinstance(current, tuple):
             row, col = current
@@ -1540,6 +1560,18 @@ class BridgeEngine(threading.Thread):
             elif dpad_left:
                 if col > 1:
                     new_focus = (row, col - 1)
+                elif is_stash_open:
+                    # Ponte para o Baú (Pet inferior): Coluna 1 do Inventário -> Coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, row, 7)
+                    self._stash_focus = ("pet", row, 7)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        stash_open=True,
+                        stash_tab=self._stash_tab or "tab-1",
+                        stash_focus=f"('pet', {row}, 7)",
+                    )
+                    return
                 elif is_pet_open:
                     # Ponte para o Pet: Coluna 1 do Inventário -> Coluna 7 do Pet
                     target_x, target_y = pet_inventory_slot_point(rect, row, 7)
@@ -1576,7 +1608,27 @@ class BridgeEngine(threading.Thread):
                     else:
                         new_focus = "spell_4"
         else:
-            if is_pet_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+            if is_stash_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Baú: Borda esquerda superior do Inventário -> Coluna 7 do Baú Superior
+                INV_TO_STASH_MAP = {
+                    "helmet": 1,
+                    "gloves": 2,
+                    "belt": 3,
+                    "main_hand": 5,
+                    "spell_1": 6,
+                }
+                stash_row = INV_TO_STASH_MAP.get(str(current), 6)
+                target_x, target_y = stash_upper_slot_point(rect, stash_row, 7)
+                self._stash_focus = ("stash", stash_row, 7)
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    stash_open=True,
+                    stash_tab=self._stash_tab or "tab-1",
+                    stash_focus=f"('stash', {stash_row}, 7)",
+                )
+                return
+            elif is_pet_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
                 # Ponte para o Pet: Borda esquerda superior do Inventário -> pet_spell_2 do Pet
                 target_x, target_y = pet_inventory_upper_point(rect, "pet_spell_2")
                 self._pet_inventory_focus = "pet_spell_2"
@@ -1780,6 +1832,212 @@ class BridgeEngine(threading.Thread):
                 pet_inventory_focus=str(new_focus),
             )
 
+    # Navegação no Menu do Baú (Stash 6x7 superior + Pet 3x7 inferior + Abas)
+    def _handle_stash_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots do Baú (grid 6x7) e Pet inferior (grid 3x7 + abas) via D-pad e L2/R2."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o Baú: abre sempre na Tab 1 do Pet e no Slot 1 do grid inferior (56.5, 523.5)
+        if not self._stash_initialized:
+            self._stash_initialized = True
+            self._stash_tab = "tab-1"
+            self._stash_focus = ("pet", 1, 1)
+            target_x, target_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                stash_open=True,
+                stash_tab=self._stash_tab,
+                stash_focus="('pet', 1, 1)",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_left_half = (cur_x < rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas via L2 ou R2 (somente se o cursor estiver na metade esquerda da tela)
+        # R2 avança: 1 -> 2 -> 3 -> 1
+        # L2 volta:  1 -> 3 -> 2 -> 1
+        if is_left_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._stash_tab:
+                try:
+                    curr_tab_num = int(self._stash_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
+            # Sequência calibrada para o jogo registrar o hover e o clique da aba:
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._stash_tab = f"tab-{new_tab_num}"
+            self._stash_focus = ("pet", 1, 1)
+
+            slot_x, slot_y = pet_inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
+
+            self.shared.update(
+                stash_open=True,
+                stash_tab=self._stash_tab,
+                stash_focus="('pet', 1, 1)",
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._stash_focus or ("pet", 1, 1)
+        sec, row, col = current
+        new_focus = current
+
+        is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+
+        if sec == "pet":
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("pet", row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário: Coluna 7 do Pet -> Coluna 1 do Inventário
+                    target_x, target_y = inventory_slot_point(rect, row, 1)
+                    self._inventory_focus = (row, 1)
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("pet", 2, 1)
+                elif row == 2:
+                    new_focus = ("pet", 3, 1)
+                elif row == 3:
+                    new_focus = ("pet", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("pet", row, col - 1)
+                elif row == 1:
+                    new_focus = ("pet", 3, 7)
+                elif row == 2:
+                    new_focus = ("pet", 1, 7)
+                elif row == 3:
+                    new_focus = ("pet", 2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = ("pet", row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("pet", row - 1, col)
+                else:
+                    # Transição vertical para a Linha 6 do Baú superior
+                    new_focus = ("stash", 6, col)
+
+        elif sec == "stash":
+            if dpad_right:
+                if col < 7:
+                    new_focus = ("stash", row, col + 1)
+                elif is_inv_open:
+                    # Ponte para o Inventário: Coluna 7 do Baú -> Equipamentos/Spells do Inventário
+                    STASH_TO_INV_MAP = {
+                        1: "helmet",
+                        2: "gloves",
+                        3: "belt",
+                        4: "belt",
+                        5: "main_hand",
+                        6: "spell_1",
+                    }
+                    target_slot = STASH_TO_INV_MAP.get(row, "spell_1")
+                    target_x, target_y = inventory_upper_point(rect, target_slot)
+                    self._inventory_focus = target_slot
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=target_slot,
+                    )
+                    return
+                elif row == 1:
+                    new_focus = ("stash", 2, 1)
+                elif row == 2:
+                    new_focus = ("stash", 3, 1)
+                elif row == 3:
+                    new_focus = ("stash", 4, 1)
+                elif row == 4:
+                    new_focus = ("stash", 5, 1)
+                elif row == 5:
+                    new_focus = ("stash", 6, 1)
+                elif row == 6:
+                    new_focus = ("stash", 1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = ("stash", row, col - 1)
+                elif row == 1:
+                    new_focus = ("stash", 6, 7)
+                elif row == 2:
+                    new_focus = ("stash", 1, 7)
+                elif row == 3:
+                    new_focus = ("stash", 2, 7)
+                elif row == 4:
+                    new_focus = ("stash", 3, 7)
+                elif row == 5:
+                    new_focus = ("stash", 4, 7)
+                elif row == 6:
+                    new_focus = ("stash", 5, 7)
+            elif dpad_up:
+                if row > 1:
+                    new_focus = ("stash", row - 1, col)
+                else:
+                    new_focus = current
+            elif dpad_down:
+                if row < 6:
+                    new_focus = ("stash", row + 1, col)
+                else:
+                    # Transição vertical para a Linha 1 do Pet inferior
+                    new_focus = ("pet", 1, col)
+
+        if new_focus != current:
+            self._stash_focus = new_focus
+            if new_focus[0] == "pet":
+                target_x, target_y = pet_inventory_slot_point(rect, new_focus[1], new_focus[2])
+            else:
+                target_x, target_y = stash_upper_slot_point(rect, new_focus[1], new_focus[2])
+
+            self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                stash_open=True,
+                stash_tab=self._stash_tab or "tab-1",
+                stash_focus=str(new_focus),
+            )
+
 
 
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
@@ -1923,7 +2181,7 @@ class BridgeEngine(threading.Thread):
         mid_x = rect.left + rect.width * 0.5
         if "Inventário" in open_menus and cur_x >= mid_x:
             return
-        if "Pet" in open_menus and cur_x < mid_x:
+        if ("Pet" in open_menus or "Baú" in open_menus) and cur_x < mid_x:
             return
         lt_now = self._lt_current
         # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
@@ -2527,21 +2785,29 @@ class BridgeEngine(threading.Thread):
                 self._fishing_initialized = False
                 self.shared.update(fishing_focus=None)
 
-            # Inventário do Jogador e Menu do Pet (Abas + Grid 3x7 + Equipamentos superiores)
+            # Inventário do Jogador, Menu do Pet e Baú (Stash)
             is_inventory = "Inventário" in (self._memory_state.open_menus or [])
             is_pet = "Pet" in (self._memory_state.open_menus or [])
+            is_stash = "Baú" in (self._memory_state.open_menus or [])
 
-            if is_pet and not self._pet_inventory_initialized:
+            if is_stash and not self._stash_initialized:
+                self._handle_stash_navigation(state, rect, hub)
+            elif is_pet and not self._pet_inventory_initialized:
                 self._handle_pet_inventory_navigation(state, rect, hub)
             elif is_inventory and not self._inventory_initialized:
                 self._handle_inventory_navigation(state, rect, hub)
-            elif is_pet and is_inventory:
+            elif (is_pet or is_stash) and is_inventory:
                 cur_x, _ = self.injector.cursor_position()
                 mid_x = rect.left + rect.width * 0.5
                 if cur_x < mid_x:
-                    self._handle_pet_inventory_navigation(state, rect, hub)
+                    if is_stash:
+                        self._handle_stash_navigation(state, rect, hub)
+                    else:
+                        self._handle_pet_inventory_navigation(state, rect, hub)
                 else:
                     self._handle_inventory_navigation(state, rect, hub)
+            elif is_stash:
+                self._handle_stash_navigation(state, rect, hub)
             elif is_pet:
                 self._handle_pet_inventory_navigation(state, rect, hub)
             elif is_inventory:
@@ -2558,6 +2824,12 @@ class BridgeEngine(threading.Thread):
                 self._pet_inventory_tab = None
                 self._pet_inventory_focus = None
                 self.shared.update(pet_inventory_open=False, pet_inventory_tab=None, pet_inventory_focus=None)
+
+            if not is_stash and self._stash_initialized:
+                self._stash_initialized = False
+                self._stash_tab = None
+                self._stash_focus = None
+                self.shared.update(stash_open=False, stash_tab=None, stash_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -2613,6 +2885,11 @@ class BridgeEngine(threading.Thread):
                 self._pet_inventory_tab = None
                 self._pet_inventory_focus = None
                 self.shared.update(pet_inventory_open=False, pet_inventory_tab=None, pet_inventory_focus=None)
+            if self._stash_initialized:
+                self._stash_initialized = False
+                self._stash_tab = None
+                self._stash_focus = None
+                self.shared.update(stash_open=False, stash_tab=None, stash_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -2840,6 +3117,9 @@ class BridgeEngine(threading.Thread):
                     pet_inventory_open=self._pet_inventory_initialized,
                     pet_inventory_tab=self._pet_inventory_tab,
                     pet_inventory_focus=str(self._pet_inventory_focus) if self._pet_inventory_focus else None,
+                    stash_open=self._stash_initialized,
+                    stash_tab=self._stash_tab,
+                    stash_focus=str(self._stash_focus) if self._stash_focus else None,
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.

@@ -1245,6 +1245,44 @@ def pet_inventory_upper_point(rect: Rect, slot_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# ==============================================================================
+# Menu / Painel do Baú (Stash) (Base de referência 1024x768 - painel esquerdo)
+# ==============================================================================
+# Calibrado a partir de assets/images/inventário/bau-inventario-4x3.png
+# O painel esquerdo do Baú é ancorado à borda esquerda da tela (rect.left):
+# Parte Superior: Grid do Baú de 6 linhas x 7 colunas (42 slots)
+# Parte Inferior: Grid do Pet de 3 linhas x 7 colunas (21 slots) + 3 Abas
+
+STASH_GRID_ROWS = 6
+STASH_GRID_COLS = 7
+STASH_GRID_ORIGIN_X = 63.5
+STASH_GRID_STEP_X = 40.0
+STASH_GRID_ROW_Y: dict[int, float] = {
+    1: 109.5,
+    2: 164.5,
+    3: 219.5,
+    4: 277.5,
+    5: 332.5,
+    6: 387.5,
+}
+
+
+def stash_upper_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um slot do grid superior do Baú (row 1..6, col 1..7)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    r = int(clamp(row, 1, STASH_GRID_ROWS))
+    c = int(clamp(col, 1, STASH_GRID_COLS))
+    base_x = STASH_GRID_ORIGIN_X + (c - 1) * STASH_GRID_STEP_X
+    base_y = STASH_GRID_ROW_Y.get(r, 109.5 + (r - 1) * 55.0)
+    x = rect.left + base_x * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -1299,6 +1337,9 @@ class OverlaySnapshot:
     pet_inventory_open: bool = False
     pet_inventory_tab: str | None = None
     pet_inventory_focus: str | None = None
+    stash_open: bool = False
+    stash_tab: str | None = None
+    stash_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).
