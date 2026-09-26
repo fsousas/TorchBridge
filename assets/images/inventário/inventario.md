@@ -229,3 +229,16 @@ O menu do Baú é composto por duas seções verticais integradas:
 * **Triângulo (Y / Triangle):** Envia o item para o Pet / Baú dependendo do contexto.
 * **Círculo (B / Circle):** Fecha o menu ativo.
 * **Analógico Esquerdo / Direito:** Modo mouse livre com sensibilidade acelerada sempre disponível caso o jogador deseje apontar manualmente para qualquer elemento fora do grid.
+
+
+# NPCS que ainda faltam mapear oinventario para alternar entre os lados da tela
+### npcs com interfaces diferentes
+- GOREN - Enchanter
+- DURAN - The Transmuter
+- GORN e FURL - Sockets
+
+### npcs com interfaces iguais com abas 
+- DUROS THE BLADE - Gambler - aba default WEAPONS
+- TRIYA - Gem Seller - aba default MISC
+- TARN THE MERCHANT - aba default MISC
+- KOLOS BLACKSMITH - aba default WEAPONS
