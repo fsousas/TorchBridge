@@ -1051,6 +1051,120 @@ def settings_slider_bounds(rect: Rect, is_music: bool = True) -> tuple[tuple[int
     return (p1, p2)
 
 
+# ==============================================================================
+# Inventário do Jogador (Base de referência 1024x768 - painel direito)
+# ==============================================================================
+# Calibrado a partir de assets/images/inventário/
+# O painel direito do inventário é ancorado à borda direita da tela (rect.right):
+# dist_from_right = (1024.0 - base_x) * scale
+# x = rect.right - dist_from_right
+# y = rect.top + base_y * scale
+
+INVENTORY_TAB_COORDS: dict[int, tuple[float, float]] = {
+    1: (752.5, 492.5),
+    2: (852.5, 492.5),
+    3: (952.5, 492.5),
+}
+
+INVENTORY_GRID_ORIGIN = (739.5, 520.5)
+INVENTORY_GRID_STEP_X = 40.0
+INVENTORY_GRID_STEP_Y = 55.0
+INVENTORY_GRID_ROWS = 3
+INVENTORY_GRID_COLS = 7
+
+INVENTORY_UPPER_COORDS: dict[str, tuple[float, float]] = {
+    # Fileira de Feitiços / Spells (y=409.5)
+    "spell_1": (779.5, 409.5),
+    "spell_2": (831.5, 409.5),
+    "spell_3": (883.5, 409.5),
+    "spell_4": (935.5, 409.5),
+    # Armas e Bugiganga (y ~ 350)
+    "main_hand": (729.5, 354.5),
+    "trinket": (859.5, 347.5),
+    "off_hand": (965.5, 354.5),
+    # Cinto e Botas (y=257.5)
+    "belt": (729.5, 257.5),
+    "boots": (962.5, 257.5),
+    # Luvas e Peito (y=182.5)
+    "gloves": (729.5, 182.5),
+    "chest": (962.5, 182.5),
+    # Elmo e Ombros (y=107.5)
+    "helmet": (729.5, 107.5),
+    "shoulders": (962.5, 107.5),
+    # Anéis e Colar (y=100.5)
+    "ring_1": (801.5, 100.5),
+    "necklace": (845.5, 100.5),
+    "ring_2": (889.5, 100.5),
+}
+
+INVENTORY_UPPER_NAV_MAP: dict[str, dict[str, Any]] = {
+    # Spells (y=409.5)
+    "spell_1": {"left": "main_hand", "right": "spell_2", "up": "main_hand", "down": (1, 1)},
+    "spell_2": {"left": "spell_1", "right": "spell_3", "up": "trinket", "down": (1, 3)},
+    "spell_3": {"left": "spell_2", "right": "spell_4", "up": "trinket", "down": (1, 5)},
+    "spell_4": {"left": "spell_3", "right": "off_hand", "up": "off_hand", "down": (1, 7)},
+    # Armas / Trinket (y ~ 350)
+    "main_hand": {"up": "belt", "down": "spell_1", "right": "trinket", "left": "main_hand"},
+    "trinket": {"left": "main_hand", "right": "off_hand", "down": "spell_2", "up": "necklace"},
+    "off_hand": {"up": "boots", "down": "spell_4", "left": "trinket", "right": "off_hand"},
+    # Cinto e Botas (y=257.5)
+    "belt": {"up": "gloves", "down": "main_hand", "right": "boots", "left": "belt"},
+    "boots": {"up": "chest", "down": "off_hand", "left": "belt", "right": "boots"},
+    # Luvas e Peito (y=182.5)
+    "gloves": {"up": "helmet", "down": "belt", "right": "chest", "left": "gloves"},
+    "chest": {"up": "shoulders", "down": "boots", "left": "gloves", "right": "chest"},
+    # Elmo, Anéis, Colar, Ombros (y ~ 100-107)
+    "helmet": {"down": "gloves", "right": "ring_1", "left": "helmet", "up": "helmet"},
+    "ring_1": {"left": "helmet", "right": "necklace", "down": "main_hand", "up": "ring_1"},
+    "necklace": {"left": "ring_1", "right": "ring_2", "down": "trinket", "up": "necklace"},
+    "ring_2": {"left": "necklace", "right": "shoulders", "down": "off_hand", "up": "ring_2"},
+    "shoulders": {"left": "ring_2", "down": "chest", "right": "shoulders", "up": "shoulders"},
+}
+
+
+def inventory_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um slot do grid do inventário (row 1..3, col 1..7)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    r = int(clamp(row, 1, INVENTORY_GRID_ROWS))
+    c = int(clamp(col, 1, INVENTORY_GRID_COLS))
+    base_x = INVENTORY_GRID_ORIGIN[0] + (c - 1) * INVENTORY_GRID_STEP_X
+    base_y = INVENTORY_GRID_ORIGIN[1] + (r - 1) * INVENTORY_GRID_STEP_Y
+    x = rect.right - (1024.0 - base_x) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def inventory_tab_point(rect: Rect, tab_index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do botão da aba (1, 2 ou 3) do inventário."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    idx = int(clamp(tab_index, 1, 3))
+    base_x, base_y = INVENTORY_TAB_COORDS.get(idx, (752.5, 492.5))
+    x = rect.right - (1024.0 - base_x) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def inventory_upper_point(rect: Rect, slot_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um slot da parte superior de equipamentos do inventário."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    base_x, base_y = INVENTORY_UPPER_COORDS.get(slot_name.lower(), (779.5, 409.5))
+    x = rect.right - (1024.0 - base_x) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -1099,6 +1213,9 @@ class OverlaySnapshot:
     settings_music_vol: float = 1.0
     fishing_focus: str | None = None
     modal_confirm_focus: str | None = None
+    inventory_open: bool = False
+    inventory_tab: str | None = None
+    inventory_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).

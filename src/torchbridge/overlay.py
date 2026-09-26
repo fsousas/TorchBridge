@@ -47,6 +47,13 @@ from .models import (
     settings_button_point,
     settings_dropdown_option_point,
     settings_slider_bounds,
+    INVENTORY_TAB_COORDS,
+    INVENTORY_GRID_ROWS,
+    INVENTORY_GRID_COLS,
+    INVENTORY_UPPER_COORDS,
+    inventory_slot_point,
+    inventory_tab_point,
+    inventory_upper_point,
 )
 from .win32 import make_overlay_clickthrough
 
@@ -798,6 +805,61 @@ class GameOverlay(QWidget):
                         painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
                         painter.setBrush(QColor(46, 204, 113, 90))
                     painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3.0 * scale, 3.0 * scale)
+
+            # 9. Alvos do Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
+            is_inv_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
+            if is_inv_open:
+                c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
+                c_verde = QColor(0x09, 0xB2, 0x00, 220)
+                c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+
+                # Abas do inventário (1, 2, 3) em ciano (#0BE0EF)
+                tab_w = 95.0 * scale * (rect.height / 768.0)
+                tab_h = 18.0 * scale * (rect.height / 768.0)
+                for tab_idx in (1, 2, 3):
+                    tx, ty = inventory_tab_point(rect, tab_idx)
+                    lx = tx - rect.left - tab_w / 2.0
+                    ly = ty - rect.top - tab_h / 2.0
+                    is_active_tab = (snapshot.inventory_tab == f"tab-{tab_idx}")
+                    if is_active_tab:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.0 * scale))
+                        painter.setBrush(c_ciano)
+                    else:
+                        painter.setPen(QPen(c_ciano, 1.5 * scale))
+                        painter.setBrush(QColor(0x0B, 0xE0, 0xEF, 100))
+                    painter.drawRoundedRect(QRectF(lx, ly, tab_w, tab_h), 3.0 * scale, 3.0 * scale)
+
+                # Slots do Grid 3x7 (Linha 1..3, Coluna 1..7)
+                slot_box = 18.0 * scale * (rect.height / 768.0)
+                for r in range(1, INVENTORY_GRID_ROWS + 1):
+                    for c in range(1, INVENTORY_GRID_COLS + 1):
+                        sx, sy = inventory_slot_point(rect, r, c)
+                        lx = sx - rect.left - slot_box / 2.0
+                        ly = sy - rect.top - slot_box / 2.0
+                        is_slot1 = (r == 1 and c == 1)
+                        is_focus = (snapshot.inventory_focus in (f"({r}, {c})", f"({r},{c})"))
+                        color = c_amarelo if is_slot1 else c_verde
+                        if is_focus:
+                            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                            painter.setBrush(color)
+                        else:
+                            painter.setPen(QPen(color, 1.5 * scale))
+                            painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
+                        painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+                # 16 Slots Superiores de Equipamento e Spells
+                for slot_name in INVENTORY_UPPER_COORDS:
+                    ux, uy = inventory_upper_point(rect, slot_name)
+                    lx = ux - rect.left - slot_box / 2.0
+                    ly = uy - rect.top - slot_box / 2.0
+                    is_focus = (snapshot.inventory_focus == slot_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(c_verde)
+                    else:
+                        painter.setPen(QPen(c_verde, 1.5 * scale))
+                        painter.setBrush(QColor(c_verde.red(), c_verde.green(), c_verde.blue(), 140))
+                    painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração

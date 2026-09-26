@@ -36,6 +36,10 @@ from .models import (
     pet_submenu_open,
     title_menu_button_point,
     toggle_panel,
+    inventory_slot_point,
+    inventory_tab_point,
+    inventory_upper_point,
+    INVENTORY_UPPER_NAV_MAP,
 )
 from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
@@ -180,6 +184,10 @@ class BridgeEngine(threading.Thread):
         # Navegação na Interface de Pesca e Modal de Confirmação (Peixe/Mensagens)
         self._fishing_initialized: bool = False
         self._modal_confirm_initialized: bool = False
+        # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
+        self._inventory_initialized: bool = False
+        self._inventory_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
+        self._inventory_focus: tuple[int, int] | str | None = None
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -210,6 +218,9 @@ class BridgeEngine(threading.Thread):
         self._settings_dropdown_idx = 0
         self._settings_slider_dragging = False
         self._settings_slider_last_stick = 0.0
+        self._inventory_initialized = False
+        self._inventory_tab = None
+        self._inventory_focus = None
         self.shared.update(
             radial_selection=None,
             pause_menu_focus=None,
@@ -221,6 +232,9 @@ class BridgeEngine(threading.Thread):
             settings_slider_dragging=False,
             fishing_focus=None,
             modal_confirm_focus=None,
+            inventory_open=False,
+            inventory_tab=None,
+            inventory_focus=None,
         )
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
@@ -320,6 +334,9 @@ class BridgeEngine(threading.Thread):
             pause_menu_focus=None,
             load_char_focus=None,
             load_char_delete_open=False,
+            inventory_open=False,
+            inventory_tab=None,
+            inventory_focus=None,
         )
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
@@ -1347,6 +1364,143 @@ class BridgeEngine(threading.Thread):
             self.injector.mouse_button("left", False)
             hub.rumble(0.04, 0.10, 35)
 
+    # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
+    def _handle_inventory_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação pelos slots e abas do Inventário do jogador via D-pad e L2/R2."""
+        if not rect.valid:
+            return
+
+        # 1. Inicialização ao abrir o inventário: abre sempre na Tab 1 e no Slot 1 do grid (739.5, 520.5)
+        if not self._inventory_initialized:
+            self._inventory_initialized = True
+            self._inventory_tab = "tab-1"
+            self._inventory_focus = (1, 1)
+            target_x, target_y = inventory_slot_point(rect, 1, 1)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab,
+                inventory_focus="(1, 1)",
+            )
+            return
+
+        cur_x, cur_y = self.injector.cursor_position()
+        is_right_half = (cur_x >= rect.left + rect.width * 0.5)
+
+        # 2. Troca de abas via L2 ou R2 (somente se o cursor estiver na metade direita da tela)
+        # R2 avança: 1 -> 2 -> 3 -> 1
+        # L2 volta:  1 -> 3 -> 2 -> 1
+        if is_right_half and (self._rt_edge_up or self._lt_edge_up):
+            curr_tab_num = 1
+            if self._inventory_tab:
+                try:
+                    curr_tab_num = int(self._inventory_tab.replace("tab-", ""))
+                except Exception:
+                    curr_tab_num = 1
+
+            if self._rt_edge_up:
+                new_tab_num = (curr_tab_num % 3) + 1
+            else:
+                new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
+
+            tab_x, tab_y = inventory_tab_point(rect, new_tab_num)
+            # Clica na aba desejada
+            self.injector.move(tab_x, tab_y)
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.05, 0.12, 40)
+
+            self._inventory_tab = f"tab-{new_tab_num}"
+            self._inventory_focus = (1, 1)
+
+            # Posiciona o cursor no Slot 1 (Linha 1, Coluna 1) da aba aberta
+            slot_x, slot_y = inventory_slot_point(rect, 1, 1)
+            self.injector.move(slot_x, slot_y)
+
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab,
+                inventory_focus="(1, 1)",
+            )
+            return
+
+        # 3. Navegação via D-pad
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        current = self._inventory_focus or (1, 1)
+        new_focus: tuple[int, int] | str = current
+
+        if isinstance(current, tuple):
+            row, col = current
+            if dpad_right:
+                if col < 7:
+                    new_focus = (row, col + 1)
+                elif row == 1:
+                    new_focus = (2, 1)
+                elif row == 2:
+                    new_focus = (3, 1)
+                elif row == 3:
+                    new_focus = (1, 1)
+            elif dpad_left:
+                if col > 1:
+                    new_focus = (row, col - 1)
+                elif row == 1:
+                    new_focus = (3, 7)
+                elif row == 2:
+                    new_focus = (1, 7)
+                elif row == 3:
+                    new_focus = (2, 7)
+            elif dpad_down:
+                if row < 3:
+                    new_focus = (row + 1, col)
+                else:
+                    new_focus = current
+            elif dpad_up:
+                if row > 1:
+                    new_focus = (row - 1, col)
+                else:
+                    if col in (1, 2):
+                        new_focus = "spell_1"
+                    elif col in (3, 4):
+                        new_focus = "spell_2"
+                    elif col == 5:
+                        new_focus = "spell_3"
+                    else:
+                        new_focus = "spell_4"
+        else:
+            direction = "up" if dpad_up else ("down" if dpad_down else ("left" if dpad_left else "right"))
+            nav = INVENTORY_UPPER_NAV_MAP.get(str(current), {})
+            if direction in nav:
+                new_focus = nav[direction]
+
+        if new_focus != current:
+            self._inventory_focus = new_focus
+            if isinstance(new_focus, tuple):
+                target_x, target_y = inventory_slot_point(rect, new_focus[0], new_focus[1])
+            else:
+                target_x, target_y = inventory_upper_point(rect, str(new_focus))
+
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                inventory_open=True,
+                inventory_tab=self._inventory_tab or "tab-1",
+                inventory_focus=str(new_focus),
+            )
+
+
     # Limiar (0..1) que o gatilho precisa passar para contar como "segurado" (RT=4,
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
     # para 0..1; o mesmo limiar vale no caminho raw (trigger_value devolve 0..1).
@@ -1466,6 +1620,7 @@ class BridgeEngine(threading.Thread):
     def _handle_trigger_combos(
         self,
         state: ControllerState,
+        rect: Rect,
         bindings: dict[str, Any],
         now: float,
     ) -> None:
@@ -1480,6 +1635,12 @@ class BridgeEngine(threading.Thread):
         # combo pode vazar (LT+A viraria um segundo Ctrl+clique no meio do clique).
         if self._modifier_seq is not None:
             return
+        # Se o inventário estiver aberto e o cursor na metade direita da tela,
+        # L2 e R2 pertencem à troca de abas do inventário e não acionam combos.
+        if "Inventário" in (self._memory_state.open_menus or []):
+            cur_x, _ = self.injector.cursor_position()
+            if cur_x >= rect.left + rect.width * 0.5:
+                return
         lt_now = self._lt_current
         # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
         # o antigo hold SHIFT morreu no remap).
@@ -1675,14 +1836,16 @@ class BridgeEngine(threading.Thread):
 
     def _is_radial_allowed(self) -> bool:
         """Determina se a roda de habilidades pode ser aberta.
-        Regra: somente permitida quando em gameplay (is_in_game) e sem menus especiais (Pause, Pesca, Confirmação, Settings).
-        Se a leitura de memória não estiver conectada, permite como fallback."""
+        Regra: somente permitida quando em gameplay (is_in_game) e sem outros menus abertos (permite apenas quando
+        nenhum menu está aberto, ou quando somente o Inventário está aberto)."""
         if not self._memory_state.is_connected:
             return True
         if not self._memory_state.is_in_game:
             return False
-        blocked_menus = {"Pause", "Pesca", "Confirmação Sair", "Configurações"}
-        if any(m in blocked_menus for m in (self._memory_state.open_menus or [])):
+        menus = self._memory_state.open_menus or []
+        # Permitido sem menus abertos, ou quando somente o Inventário está aberto
+        other_menus = [m for m in menus if m != "Inventário"]
+        if other_menus:
             return False
         desc = (self._memory_state.state_desc or "").lower()
         if "confirma" in desc or "setting" in desc or "configura" in desc:
@@ -1871,12 +2034,18 @@ class BridgeEngine(threading.Thread):
         cursor_active = False
         aim_local: tuple[int, int] | None = None
 
+        is_only_inventory = (self._memory_state.open_menus == ["Inventário"])
         # O modo efetivo respeita o estado do jogo na memória RAM:
-        # Se qualquer menu estiver aberto ou estiver fora do jogo (telas iniciais),
-        # o modo vira automaticamente 'cursor' para facilitar a navegação.
+        # Se qualquer menu estiver aberto (exceto quando apenas o inventário estiver aberto)
+        # ou estiver fora do jogo (telas iniciais), o modo vira automaticamente 'cursor'.
+        # Quando somente o inventário está aberto, o analógico esquerdo mantém o movimento
+        # direto do personagem.
         effective_mode = (
             "cursor"
-            if (self._memory_state.is_connected and (self._memory_state.is_menu_open or not self._memory_state.is_in_game))
+            if (
+                self._memory_state.is_connected
+                and ((self._memory_state.is_menu_open and not is_only_inventory) or not self._memory_state.is_in_game)
+            )
             else self._mode
         )
 
@@ -2073,6 +2242,16 @@ class BridgeEngine(threading.Thread):
             elif self._fishing_initialized:
                 self._fishing_initialized = False
                 self.shared.update(fishing_focus=None)
+
+            # Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
+            is_inventory = "Inventário" in (self._memory_state.open_menus or [])
+            if is_inventory:
+                self._handle_inventory_navigation(state, rect, hub)
+            elif self._inventory_initialized:
+                self._inventory_initialized = False
+                self._inventory_tab = None
+                self._inventory_focus = None
+                self.shared.update(inventory_open=False, inventory_tab=None, inventory_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -2118,6 +2297,11 @@ class BridgeEngine(threading.Thread):
             if self._fishing_initialized:
                 self._fishing_initialized = False
                 self.shared.update(fishing_focus=None)
+            if self._inventory_initialized:
+                self._inventory_initialized = False
+                self._inventory_tab = None
+                self._inventory_focus = None
+                self.shared.update(inventory_open=False, inventory_tab=None, inventory_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -2131,7 +2315,7 @@ class BridgeEngine(threading.Thread):
         # Pertencem exclusivamente ao gameplay in-game: fora do jogo (telas iniciais e menus)
         # esses atalhos não devem vazar teclas de combate/habilidade (1, 2, 3..0).
         if not self._memory_state.is_connected or self._memory_state.is_in_game:
-            self._handle_trigger_combos(state, bindings, now)
+            self._handle_trigger_combos(state, rect, bindings, now)
             self._handle_overworld_remap(state, rect, bindings, now)
             self._handle_modifier_release(now)
 
@@ -2304,10 +2488,18 @@ class BridgeEngine(threading.Thread):
 
                         self._active_panels = [left, right]
 
+                is_only_inventory = (self._memory_state.open_menus == ["Inventário"])
                 effective_mode = (
                     "blocked"
                     if self._memory_state.is_loading
-                    else ("cursor" if (self._memory_state.is_connected and (self._memory_state.is_menu_open or not self._memory_state.is_in_game)) else self._mode)
+                    else (
+                        "cursor"
+                        if (
+                            self._memory_state.is_connected
+                            and ((self._memory_state.is_menu_open and not is_only_inventory) or not self._memory_state.is_in_game)
+                        )
+                        else self._mode
+                    )
                 )
 
                 # Publica o estado completo para o overlay Qt (thread-safe).
@@ -2331,6 +2523,9 @@ class BridgeEngine(threading.Thread):
                     dialog_focus=self._dialog_focus if (self._memory_state.is_connected and self._memory_state.dialog_type) else None,
                     dialog_type=self._memory_state.dialog_type if self._memory_state.is_connected else "",
                     dialog_buttons=list(self._memory_state.dialog_buttons) if self._memory_state.is_connected else [],
+                    inventory_open=self._inventory_initialized,
+                    inventory_tab=self._inventory_tab,
+                    inventory_focus=str(self._inventory_focus) if self._inventory_focus else None,
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
