@@ -14,6 +14,8 @@ import sys
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Controle para Torchlight PC")
     parser.add_argument("--perfil", type=Path, help="Caminho de um perfil JSON alternativo")
+    parser.add_argument("--fullscreen-setup", choices=("install", "remove"),
+                        help="Instalar/remover o módulo de fullscreen no Torchlight")
     return parser.parse_args()
 
 
@@ -36,8 +38,9 @@ def main() -> int:
         return 2
 
     args = _arguments()
-    # Escala Qt fixa: o overlay usa pixels da janela do jogo (não escala de interface).
-    os.environ.setdefault("QT_SCALE_FACTOR", "1")
+    if args.fullscreen_setup:
+        from .fullscreen import configure_dialog
+        return configure_dialog(uninstall=args.fullscreen_setup == "remove")
     # SDL lê o controle mesmo com o Torchlight em primeiro plano.
     os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
@@ -119,6 +122,12 @@ def main() -> int:
 
     menu.aboutToShow.connect(sync_menu_state)
 
+    from .fullscreen import configure_dialog
+    fullscreen_install = menu.addAction("Instalar suporte a fullscreen...")
+    fullscreen_install.triggered.connect(lambda: configure_dialog())
+    fullscreen_remove = menu.addAction("Remover suporte a fullscreen...")
+    fullscreen_remove.triggered.connect(lambda: configure_dialog(uninstall=True))
+
     open_profile_action = menu.addAction("Abrir perfil de controles")
 
     # Abre o perfil.json no editor padrão do Windows.
@@ -157,7 +166,7 @@ def main() -> int:
         # Caso completo: controle + jogo (mostra se está ativo ou em segundo plano).
         if state.controller_connected and state.game_found:
             suffix = "ativo" if state.game_active else "jogo em segundo plano"
-            tray.setToolTip(f"TorchBridge — {state.controller_name} — {suffix}")
+            tray.setToolTip(f"TorchBridge — {state.controller_name} — {suffix}\n{overlay.backend_status}")
         elif state.controller_connected:
             tray.setToolTip(f"TorchBridge — {state.controller_name} — aguardando Torchlight")
         else:
@@ -175,6 +184,7 @@ def main() -> int:
         if cleaned:
             return
         cleaned = True
+        overlay.shutdown()
         engine.stop()
         # Espera o loop encerrar (limitado a 3 s para não travar a saída).
         engine.join(timeout=3.0)
