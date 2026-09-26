@@ -43,3 +43,34 @@ assets\images\inventário\inventario-4x3-tab-3.png
 cursor na posicao x1 y1 se mover para a esquerda no dpad, faz ele mover o cursor para a posicao x3 y7, se estiver na x2 y7 e mover para a direita, move o cursor para x3 y1
 
 > Caso o Cursor esteja na ultima linha do grid e o jogador mover para baixo do dpad, nada acontece
+
+---
+
+## Mapeamento de Pontos navegáveis no Menu do Pet no ESTADO = In-game
+#### Meta - Navegação completa idêntica ao inventário do jogador, com a diferença de estar ancorado à esquerda da tela (rect.left).
+
+### Imagem de referencia
+> assets\images\inventário\pet-4x3.png
+
+### Comportamento e Regras
+1. **Rastreamento de Abas:**
+   - Variável de controle `pet_inventory_tab` inicializada em `tab-1` ao abrir e zerada ao fechar.
+   - Posicionamento inicial do cursor sempre no Slot 1 (amarelo) `(1, 1)`.
+
+2. **Troca de Abas (L2 / R2):**
+   - Ativa quando o cursor estiver na **metade esquerda da tela** (`cur_x < rect.left + rect.width * 0.5`).
+   - R2 avança: Aba 1 > Aba 2 > Aba 3 > Aba 1.
+   - L2 recua: Aba 1 > Aba 3 > Aba 2 > Aba 1.
+   - Sequência calibrada de cliques: hover 60ms -> hold de clique 40ms -> pós-clique 30ms -> retorno para Slot 1.
+
+3. **Grid 3x7 (21 slots):**
+   - Navegação via D-pad idêntica ao inventário do jogador com wrap-around horizontal nas extremidades e bloqueio inferior na linha 3.
+
+4. **Equipamentos e Spells Superiores do Pet (5 slots):**
+   - Transição fluida entre Linha 1 do grid e os 5 slots superiores (`pet_spell_1`, `pet_ring_1`, `pet_collar`, `pet_ring_2`, `pet_spell_2`).
+
+5. **Movimento Direto e Menu Radial:**
+   - Com apenas o menu de Pet aberto, o analógico esquerdo mantém o movimento direto do personagem (deslocado para a área visível à direita).
+   - O menu radial (LB) continua disponível quando apenas o menu de Pet ou Inventário estiverem abertos.
+   - Quando ambos estiverem abertos, a metade da tela onde o cursor está determina qual menu o D-pad e os gatilhos L2/R2 controlam.
+

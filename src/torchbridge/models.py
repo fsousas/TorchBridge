@@ -1165,6 +1165,86 @@ def inventory_upper_point(rect: Rect, slot_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# ==============================================================================
+# Menu / Inventário do Pet (Base de referência 1024x768 - painel esquerdo)
+# ==============================================================================
+# Calibrado a partir de assets/images/inventário/pet-4x3.png
+# O painel esquerdo do Pet é ancorado à borda esquerda da tela (rect.left):
+# x = rect.left + base_x * scale
+# y = rect.top + base_y * scale
+
+PET_TAB_COORDS: dict[int, tuple[float, float]] = {
+    1: (69.5, 495.5),
+    2: (169.5, 495.5),
+    3: (269.5, 495.5),
+}
+
+PET_GRID_ORIGIN = (56.5, 523.5)
+PET_GRID_STEP_X = 40.0
+PET_GRID_STEP_Y = 55.0
+PET_GRID_ROWS = 3
+PET_GRID_COLS = 7
+
+PET_UPPER_COORDS: dict[str, tuple[float, float]] = {
+    "pet_spell_1": (96.5, 327.5),
+    "pet_ring_1": (134.5, 338.5),
+    "pet_collar": (178.5, 338.5),
+    "pet_ring_2": (222.5, 338.5),
+    "pet_spell_2": (282.5, 327.5),
+}
+
+PET_UPPER_NAV_MAP: dict[str, dict[str, Any]] = {
+    "pet_spell_1": {"left": "pet_spell_1", "right": "pet_ring_1", "up": "pet_spell_1", "down": (1, 1)},
+    "pet_ring_1": {"left": "pet_spell_1", "right": "pet_collar", "up": "pet_ring_1", "down": (1, 3)},
+    "pet_collar": {"left": "pet_ring_1", "right": "pet_ring_2", "up": "pet_collar", "down": (1, 4)},
+    "pet_ring_2": {"left": "pet_collar", "right": "pet_spell_2", "up": "pet_ring_2", "down": (1, 5)},
+    "pet_spell_2": {"left": "pet_ring_2", "right": "pet_spell_2", "up": "pet_spell_2", "down": (1, 7)},
+}
+
+
+def pet_inventory_slot_point(rect: Rect, row: int, col: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um slot do grid do menu de Pet (row 1..3, col 1..7)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    r = int(clamp(row, 1, PET_GRID_ROWS))
+    c = int(clamp(col, 1, PET_GRID_COLS))
+    base_x = PET_GRID_ORIGIN[0] + (c - 1) * PET_GRID_STEP_X
+    base_y = PET_GRID_ORIGIN[1] + (r - 1) * PET_GRID_STEP_Y
+    x = rect.left + base_x * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def pet_inventory_tab_point(rect: Rect, tab_index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do botão da aba (1, 2 ou 3) do menu de Pet."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    idx = int(clamp(tab_index, 1, 3))
+    base_x, base_y = PET_TAB_COORDS.get(idx, (69.5, 495.5))
+    x = rect.left + base_x * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def pet_inventory_upper_point(rect: Rect, slot_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um slot superior de equipamento/spell do Pet."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    base_x, base_y = PET_UPPER_COORDS.get(slot_name.lower(), (96.5, 327.5))
+    x = rect.left + base_x * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -1216,6 +1296,9 @@ class OverlaySnapshot:
     inventory_open: bool = False
     inventory_tab: str | None = None
     inventory_focus: str | None = None
+    pet_inventory_open: bool = False
+    pet_inventory_tab: str | None = None
+    pet_inventory_focus: str | None = None
 
 
 # Ponte thread-safe entre o motor (thread 'TorchBridgeInput') e a thread da UI (Qt).
