@@ -1410,18 +1410,24 @@ class BridgeEngine(threading.Thread):
                 new_tab_num = 3 if curr_tab_num == 1 else curr_tab_num - 1
 
             tab_x, tab_y = inventory_tab_point(rect, new_tab_num)
-            # Clica na aba desejada
+            # Sequência calibrada para o jogo registrar o hover e o clique da aba:
+            # 1. Move o cursor para a aba correspondente
             self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
+
+            # 2. Clica na aba com hold suficiente
             self.injector.mouse_button("left", True)
+            time.sleep(0.040)  # Hold do clique de 40ms
             self.injector.mouse_button("left", False)
-            hub.rumble(0.05, 0.12, 40)
+            time.sleep(0.030)  # Espera pós-clique de 30ms
 
             self._inventory_tab = f"tab-{new_tab_num}"
             self._inventory_focus = (1, 1)
 
-            # Posiciona o cursor no Slot 1 (Linha 1, Coluna 1) da aba aberta
+            # 3. Retorna o cursor para o quadrado amarelo (Slot 1: linha 1, col 1)
             slot_x, slot_y = inventory_slot_point(rect, 1, 1)
             self.injector.move(slot_x, slot_y)
+            hub.rumble(0.05, 0.12, 40)
 
             self.shared.update(
                 inventory_open=True,
