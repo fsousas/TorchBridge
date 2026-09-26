@@ -8,10 +8,13 @@ Este documento registra o avanço técnico da engenharia reversa do executável 
 - O executável do Torchlight 1 é **32-bit (x86)** em ambas as edições (GOG e Steam), mas com diferenças de empacotamento:
   - **Versão GOG (Standalone)**: **NÃO possui ASLR** (Dynamic Base desativado, tamanho ~9,13 MB). Carrega no endereço base fixo `0x00400000`, e o ponteiro mestre `CGame` reside no RVA `0x0081AD64` (endereço estático `0x00C1AD64`).
   - **Versão Steam**: Possui **ASLR ativado** (`IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = True`, tamanho ~10,71 MB por conta das camadas Steamworks). O endereço base é dinâmico a cada inicialização, e o ponteiro mestre `CGame` reside no RVA `0x007F0E0C`.
-- **Compatibilidade Universal**: Implementamos resolução dinâmica de base de módulo (`TH32CS_SNAPMODULE`) e auto-detecção de versão (GOG / Steam) com validação de ponteiros ativos.
+- **Compatibilidade Universal**: Implementamos resolução dinâmica de base de módulo (`EnumProcessModulesEx` e `TH32CS_SNAPMODULE`) e auto-detecção de versão (GOG / Steam) com validação de ponteiros ativos.
 - Toda a estrutura interna das classes C++ (`CGameClient`, `CPlayer`, `CLevel`, `CGameUI`, `CMenuManager`), offsets de membros e todos os 14 menus CEGUI são **100% IDÊNTICOS** entre as versões GOG e Steam!
 - O leitor lê diretamente da RAM via ponteiros em microssegundos com privilégio mínimo (`PROCESS_VM_READ`), com **risco zero de reinício ou crash**.
-- Implementado modo de monitoramento contínuo em tempo real com **reconexão automática de processo** (caso o jogo seja fechado e reaberto).
+- **Ciclo de Vida e Reconexão Automática Robusta**:
+  - O motor acopla o PID diretamente da janela ativa visível (`WindowLocator.window_pid`), ignorando processos zumbis em segundo plano.
+  - Ao fechar o jogo, o leitor libera imediatamente o handle Win32 (`kernel32.CloseHandle`), evitando que o executável fique preso como zumbi.
+  - Ao reabrir o jogo (Steam ou GOG), o módulo resolve a nova base dinâmica em tempo real via `EnumProcessModulesEx` com retry contínuo durante a fase de inicialização do executável, dispensando qualquer reinício manual do overlay.
 
 ---
 

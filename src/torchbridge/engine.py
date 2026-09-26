@@ -371,6 +371,9 @@ class BridgeEngine(threading.Thread):
             stash_tab=None,
             stash_focus=None,
         )
+        self._inventory_initialized = False
+        self._inventory_tab = None
+        self._inventory_focus = None
         self._pet_inventory_initialized = False
         self._pet_inventory_tab = None
         self._pet_inventory_focus = None
@@ -3036,12 +3039,18 @@ class BridgeEngine(threading.Thread):
                     self.shared.toast("Torchlight detectado", 2.5)
                     # Sessão nova: reseta painéis/seleção da roda (Alt+F4 não limpou o estado).
                     self._reset_radial_session()
+                elif not game_found and self._game_was_found:
+                    # Jogo acabou de fechar: libera handle da memória e limpa estados residuais
+                    self.memory.close()
+                    self._reset_radial_session()
+
                 # Guarda o estado de detecção para as bordas (subida/descida).
                 self._game_was_found = game_found
 
                 # Leitura periódica da memória RAM do Torchlight (a cada 20 ms / 50 Hz)
                 if now - self._memory_last_read >= 0.020:
-                    self._memory_state = self.memory.update()
+                    target_pid = self.locator.window_pid(hwnd) if hwnd else None
+                    self._memory_state = self.memory.update(target_pid=target_pid)
                     self._memory_last_read = now
 
                     # Sincroniza painéis ativos se estiver em jogo

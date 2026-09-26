@@ -17,9 +17,15 @@ import time
 log = logging.getLogger(__name__)
 
 PROCESS_VM_READ = 0x0010
+PROCESS_QUERY_INFORMATION = 0x0400
 TH32CS_SNAPPROCESS = 0x00000002
+TH32CS_SNAPMODULE   = 0x00000008
+TH32CS_SNAPMODULE32 = 0x00000010
+LIST_MODULES_32BIT  = 0x01
 
 kernel32 = ctypes.windll.kernel32
+psapi = ctypes.windll.psapi
+user32 = ctypes.windll.user32
 
 # Endereços estáticos e offsets mapeados por engenharia reversa (.data)
 ADDR_CGAME_GLOBAL = 0x00C1AD64  # Base fixa GOG (0x00400000 + RVA 0x0081AD64)
@@ -121,10 +127,6 @@ def get_audio_settings() -> dict[str, float | bool]:
     return out
 
 
-TH32CS_SNAPMODULE   = 0x00000008
-TH32CS_SNAPMODULE32 = 0x00000010
-
-
 class PROCESSENTRY32(ctypes.Structure):
     _fields_ = [
         ("dwSize", wintypes.DWORD),
@@ -185,7 +187,7 @@ class TorchlightMemoryReader:
     def __init__(self) -> None:
         self.pid: int | None = None
         self._handle: int | None = None
-        self._module_base: int = 0x00400000
+        self._module_base: int = 0
         self._module_size: int = 0
         self._exe_path: str = ""
         self._cgame_address: int | None = None
@@ -207,28 +209,64 @@ class TorchlightMemoryReader:
                 pass
             self._handle = None
             self.pid = None
+            self._module_base = 0x00400000
+            self._module_size = 0
+            self._exe_path = ""
             self._cgame_address = None
             self.game_version = ""
 
     def _get_module_info(self, pid: int) -> tuple[int, int, str]:
         """Obtém (base_address, base_size, exe_path) do módulo principal Torchlight.exe."""
+        # 1. Tenta EnumProcessModulesEx com LIST_MODULES_32BIT diretamente no processo
+        if self._handle:
+            try:
+                hMods = (wintypes.HMODULE * 32)()
+                cb = wintypes.DWORD()
+                if psapi.EnumProcessModulesEx(self._handle, hMods, ctypes.sizeof(hMods), ctypes.byref(cb), LIST_MODULES_32BIT):
+                    base = hMods[0]
+                    if base:
+                        mod_name = ctypes.create_unicode_buffer(260)
+                        psapi.GetModuleFileNameExW(self._handle, base, mod_name, 260)
+                        path_str = mod_name.value
+                        if path_str:
+                            return (int(base), 1, path_str)
+            except Exception:
+                pass
+
+        # 2. Fallback: Toolhelp Snapshot (para compatibilidade)
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
-        if snap == -1 or snap == 0:
-            return (0x00400000, 0, "")
-        try:
-            me = MODULEENTRY32()
-            me.dwSize = ctypes.sizeof(MODULEENTRY32)
-            if kernel32.Module32First(snap, ctypes.byref(me)):
-                base_addr = me.modBaseAddr or 0x00400000
-                return (int(base_addr), int(me.modBaseSize), me.szExePath.decode("latin1", errors="ignore"))
-        finally:
-            kernel32.CloseHandle(snap)
+        if snap != -1 and snap != 0:
+            try:
+                me = MODULEENTRY32()
+                me.dwSize = ctypes.sizeof(MODULEENTRY32)
+                if kernel32.Module32First(snap, ctypes.byref(me)):
+                    base_addr = me.modBaseAddr
+                    if base_addr:
+                        return (int(base_addr), int(me.modBaseSize or 1), me.szExePath.decode("latin1", errors="ignore"))
+            finally:
+                kernel32.CloseHandle(snap)
         return (0x00400000, 0, "")
+
+    def _pid_has_visible_window(self, pid: int) -> bool:
+        has_win = False
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        @callback_type
+        def cb(hwnd, lparam):
+            nonlocal has_win
+            proc_id = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            if proc_id.value == pid and user32.IsWindowVisible(hwnd):
+                has_win = True
+                return False
+            return True
+        user32.EnumWindows(cb, 0)
+        return has_win
 
     def _find_pid(self) -> int | None:
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
         if snap == -1:
             return None
+        pids: list[int] = []
         try:
             pe = PROCESSENTRY32()
             pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
@@ -236,74 +274,105 @@ class TorchlightMemoryReader:
                 while True:
                     name = pe.szExeFile.decode("latin1", errors="ignore").lower()
                     if name == "torchlight.exe":
-                        return pe.th32ProcessID
+                        pids.append(pe.th32ProcessID)
                     if not kernel32.Process32Next(snap, ctypes.byref(pe)):
                         break
         finally:
             kernel32.CloseHandle(snap)
-        return None
 
-    def _ensure_handle(self) -> bool:
-        current_pid = self._find_pid()
-        if not current_pid:
-            self.close()
-            return False
+        if not pids:
+            return None
+        if len(pids) == 1:
+            return pids[0]
+
+        # Prioriza o processo que possui uma janela visível real (ignora processos zumbis em segundo plano)
+        for p in pids:
+            if self._pid_has_visible_window(p):
+                return p
+        return pids[-1]
+
+    def _ensure_handle(self, target_pid: int | None = None) -> bool:
+        # Se já temos um handle, checa se o processo ainda está vivo
+        if self._handle:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(self._handle, ctypes.byref(exit_code)) or exit_code.value != 259:
+                self.close()
+
+        if target_pid is not None:
+            if target_pid <= 0:
+                self.close()
+                return False
+            current_pid = target_pid
+        else:
+            current_pid = self._find_pid()
+            if not current_pid:
+                self.close()
+                return False
 
         if current_pid != self.pid or not self._handle:
             self.close()
-            h = kernel32.OpenProcess(PROCESS_VM_READ, False, current_pid)
+            h = kernel32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, current_pid)
             if h:
                 self.pid = current_pid
                 self._handle = h
-                self._module_base, self._module_size, self._exe_path = self._get_module_info(current_pid)
-                log.info(
-                    f"[MemoryReader] Conectado ao Torchlight (PID {current_pid}) | Base 0x{self._module_base:08X} | Path: {self._exe_path}"
-                )
+                base, size, path = self._get_module_info(current_pid)
+                if path:
+                    self._module_base = base
+                    self._module_size = size
+                    self._exe_path = path
+                    log.info(
+                        f"[MemoryReader] Conectado ao Torchlight (PID {current_pid}) | Base 0x{self._module_base:08X} | Path: {self._exe_path}"
+                    )
                 return True
             return False
         return True
 
     def _resolve_cgame_address(self) -> int | None:
         """Descobre dinamicamente o endereço do ponteiro CGame para Steam ou GOG."""
+        base = self._module_base or 0x00400000
+
         if self._cgame_address:
             p_game = self.read_u32(self._cgame_address)
-            if p_game and p_game > 0x10000:
+            if p_game and p_game > 0:
                 p_client = self.read_u32(p_game + OFFSET_GAMECLIENT)
-                if p_client and p_client > 0x10000:
+                if p_client and p_client > 0:
                     return self._cgame_address
+            # Invalida o cache se o ponteiro não for mais válido
+            self._cgame_address = None
 
-        # Teste 1: Steam RVA (com module base dinâmico)
-        addr_steam = self._module_base + RVA_CGAME_STEAM
-        p_steam = self.read_u32(addr_steam)
-        if p_steam and p_steam > 0x10000:
-            p_client = self.read_u32(p_steam + OFFSET_GAMECLIENT)
-            if p_client and p_client > 0x10000:
-                if self.game_version != "Steam":
-                    self.game_version = "Steam"
-                    log.info(
-                        f"[MemoryReader] Versão detectada: Steam (Base 0x{self._module_base:08X}, CGame 0x{addr_steam:08X})"
-                    )
-                self._cgame_address = addr_steam
-                return addr_steam
+        # Teste 1: Steam RVA (se tiver base dinâmica ou executável Steam)
+        if base != 0x00400000 or "steam" in self._exe_path.lower():
+            addr_steam = base + RVA_CGAME_STEAM
+            p_steam = self.read_u32(addr_steam)
+            if p_steam and p_steam > 0:
+                p_client = self.read_u32(p_steam + OFFSET_GAMECLIENT)
+                if p_client and p_client > 0:
+                    if self.game_version != "Steam":
+                        self.game_version = "Steam"
+                        log.info(
+                            f"[MemoryReader] Versão detectada: Steam (Base 0x{base:08X}, CGame 0x{addr_steam:08X})"
+                        )
+                    self._cgame_address = addr_steam
+                    return addr_steam
 
         # Teste 2: GOG RVA (ou endereço fixo padrão ADDR_CGAME_GLOBAL)
-        for addr_gog in (self._module_base + RVA_CGAME_GOG, ADDR_CGAME_GLOBAL):
+        for addr_gog in (ADDR_CGAME_GLOBAL, base + RVA_CGAME_GOG):
             p_gog = self.read_u32(addr_gog)
-            if p_gog and p_gog > 0x10000:
+            if p_gog and p_gog > 0:
                 p_client = self.read_u32(p_gog + OFFSET_GAMECLIENT)
-                if p_client and p_client > 0x10000:
+                if p_client and p_client > 0:
                     if self.game_version != "GOG":
                         self.game_version = "GOG"
                         log.info(
-                            f"[MemoryReader] Versão detectada: GOG (Base 0x{self._module_base:08X}, CGame 0x{addr_gog:08X})"
+                            f"[MemoryReader] Versão detectada: GOG (Base 0x{base:08X}, CGame 0x{addr_gog:08X})"
                         )
                     self._cgame_address = addr_gog
                     return addr_gog
 
-        # Fallback se o jogo ainda estiver carregando a engine no boot
+        # Retorna o endereço candidato sem fixar no cache enquanto CGame não estiver alocado
         if "steam" in self._exe_path.lower():
             self.game_version = "Steam"
-            return self._module_base + RVA_CGAME_STEAM
+            return base + RVA_CGAME_STEAM
         self.game_version = "GOG"
         return ADDR_CGAME_GLOBAL
 
@@ -341,7 +410,7 @@ class TorchlightMemoryReader:
                 pass
         return ""
 
-    def update(self) -> GameMemoryState:
+    def update(self, target_pid: int | None = None) -> GameMemoryState:
         """Executa um ciclo de leitura rápida (microssegundos) e retorna o estado atual."""
         # Atualiza contagem de saves e áudio em disco periodicamente (a cada 1.0s)
         now = time.monotonic()
@@ -353,13 +422,24 @@ class TorchlightMemoryReader:
         sound_vol = float(self._cached_audio.get("sound_volume", 1.0))
         music_vol = float(self._cached_audio.get("music_volume", 1.0))
 
-        if not self._ensure_handle():
+        if not self._ensure_handle(target_pid):
             return GameMemoryState(
                 game_version=self.game_version,
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
                 music_volume=music_vol,
             )
+
+        # Se o caminho do executável ainda não havia sido resolvido, tenta resolver
+        if not self._exe_path or not self._module_base:
+            base, size, path = self._get_module_info(self.pid)
+            if base and path:
+                self._module_base = base
+                self._module_size = size
+                self._exe_path = path
+                log.info(
+                    f"[MemoryReader] Módulo mapeado (PID {self.pid}) | Base 0x{self._module_base:08X} | Path: {self._exe_path}"
+                )
 
         cgame_addr = self._resolve_cgame_address()
         p_game = self.read_u32(cgame_addr) if cgame_addr else None

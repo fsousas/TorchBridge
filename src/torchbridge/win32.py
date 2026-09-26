@@ -268,6 +268,15 @@ class WindowLocator:
         return self._cached
 
     @staticmethod
+    def window_pid(hwnd: int) -> int | None:
+        """Retorna o PID do processo dono da janela especificada."""
+        if not hwnd or not user32.IsWindow(hwnd):
+            return None
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return int(pid.value) if pid.value else None
+
+    @staticmethod
     # Retângulo da área útil (cliente) da janela, convertido para coordenadas de tela.
     def client_rect(hwnd: int) -> Rect:
         # Minimizada: sem área útil; devolve retângulo vazio.

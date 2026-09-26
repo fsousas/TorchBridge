@@ -139,7 +139,15 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertEqual(resolved, 0x00C1AD64)
         self.assertEqual(reader.game_version, "GOG")
 
+    def test_update_with_target_pid(self):
+        reader = TorchlightMemoryReader()
+        # When target_pid is explicitly None / <= 0, ensure_handle returns False and reader is closed
+        state = reader.update(target_pid=None)
+        self.assertFalse(state.is_connected)
+        self.assertIsNone(reader.pid)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
