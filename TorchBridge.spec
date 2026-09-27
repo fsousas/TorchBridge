@@ -1,4 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+native_overlay = Path(SPECPATH) / "assets" / "native" / "x86" / "d3d9.dll"
+native_datas = [(str(native_overlay), "assets/native/x86")] if native_overlay.is_file() else []
 
 analysis = Analysis(
     ["launcher.py"],
@@ -7,7 +11,7 @@ analysis = Analysis(
     datas=[
         ("assets/images/radial-menu-icons", "assets/images/radial-menu-icons"),
         ("assets/hud", "assets/hud"),
-    ],
+    ] + native_datas,
     hiddenimports=["pygame._sdl2.controller"],
     hookspath=[],
     hooksconfig={},

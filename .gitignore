@@ -5,6 +5,7 @@ dist/
 __pycache__/
 .pytest_cache/
 *.pyc
+assets/native/
 # Screenshots de debug gerados na raiz (calibração de UI)
 /*.png
 

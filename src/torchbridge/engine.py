@@ -3717,6 +3717,7 @@ class BridgeEngine(threading.Thread):
                 game_found = bool(hwnd and rect.valid)
                 # E está em primeiro plano — condição que autoriza enviar entrada.
                 game_active = bool(game_found and self.locator.is_foreground(hwnd))
+                target_pid = self.locator.window_pid(hwnd) if hwnd else None
                 enabled = self.is_enabled()
 
                 # Controle conectado (novo ou religado): avisa e vibra para confirmar.
@@ -3745,7 +3746,6 @@ class BridgeEngine(threading.Thread):
 
                 # Leitura periódica da memória RAM do Torchlight (a cada 20 ms / 50 Hz)
                 if now - self._memory_last_read >= 0.020:
-                    target_pid = self.locator.window_pid(hwnd) if hwnd else None
                     self._memory_state = self.memory.update(target_pid=target_pid)
                     self._memory_last_read = now
 
@@ -3801,6 +3801,8 @@ class BridgeEngine(threading.Thread):
                     game_found=game_found,
                     game_active=game_active,
                     game_rect=rect,
+                    game_hwnd=hwnd,
+                    game_pid=target_pid,
                     controller_connected=state.connected,
                     controller_name=state.name,
                     controller_mapping=state.mapping,
@@ -3854,6 +3856,7 @@ class BridgeEngine(threading.Thread):
             self.shared.toast("Erro no motor; consulte torchbridge.log", 8.0)
         # Garantias finais: solta entradas, desconecta o controle e restaura o relógio do Windows.
         finally:
+            self.shared.update(game_active=False, game_found=False, game_hwnd=None, game_pid=None)
             self._release_all()
             if hub is not None:
                 hub.close()

@@ -56,7 +56,8 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "perfil.json"
             manager = ConfigManager(path)
-            self.assertTrue(manager.get()["overlay"]["show_calibration"])
+            self.assertFalse(manager.get()["overlay"]["show_calibration"])
+            manager.set_show_calibration(True)
             manager.set_show_calibration(False)
             self.assertFalse(manager.get()["overlay"]["show_calibration"])
             # Salvo no disco

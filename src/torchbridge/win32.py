@@ -100,6 +100,11 @@ if IS_WINDOWS:
     user32.GetCursorPos.restype = wintypes.BOOL
     user32.GetSystemMetrics.argtypes = (ctypes.c_int,)
     user32.GetSystemMetrics.restype = ctypes.c_int
+    user32.SetWindowPos.argtypes = (
+        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    )
+    user32.SetWindowPos.restype = wintypes.BOOL
     kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.QueryFullProcessImageNameW.argtypes = (
@@ -419,3 +424,18 @@ def make_overlay_clickthrough(hwnd: int) -> None:
         GWL_EXSTYLE,
         style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
     )
+
+
+def position_overlay(hwnd: int, rect: Rect) -> bool:
+    """Posiciona em pixels físicos e repõe o topo sem ativar a janela.
+
+    A geometria de QWidget usa pixels lógicos; SetWindowPos usa o mesmo
+    espaço físico que WindowLocator/SendInput com DPI per-monitor habilitado.
+    Isto atende janelas e fullscreen composto pelo DWM, não fullscreen exclusivo.
+    """
+    if not IS_WINDOWS or not rect.valid:
+        return False
+    return bool(user32.SetWindowPos(
+        hwnd, -1, rect.left, rect.top, rect.width, rect.height,
+        0x0010 | 0x0200,  # SWP_NOACTIVATE | SWP_NOOWNERZORDER
+    ))

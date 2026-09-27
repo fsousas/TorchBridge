@@ -558,5 +558,14 @@ class DifficultyMenuButtonTests(unittest.TestCase):
         self.assertEqual(difficulty_menu_button_point(invalid_rect, "hardcore"), (0, 0))
 
 
+class TypeHintsTests(unittest.TestCase):
+    def test_models_type_hints_resolvable(self):
+        import typing
+        import torchbridge.models
+        hints = typing.get_type_hints(torchbridge.models)
+        self.assertIn("SETTINGS_DROPDOWNS", hints)
+
+
 if __name__ == "__main__":
     unittest.main()
+

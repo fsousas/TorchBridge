@@ -3,9 +3,10 @@
 Controle de PS5, Xbox e controles genéricos no **Torchlight 1 para PC**, com
 movimento direto, cursor analógico, roda de habilidades e overlay transparente.
 
-O TorchBridge não modifica arquivos do jogo, não injeta DLL e não lê a memória
-do processo. Ele reconhece o controle pelo SDL, acompanha a janela do Torchlight
-e envia somente entradas normais de teclado e mouse pelo `SendInput` do Windows.
+O TorchBridge reconhece o controle pelo SDL, acompanha a janela do Torchlight,
+lê o estado dos menus na memória e envia teclado/mouse pelo `SendInput` do Windows.
+O overlay em janela é externo. Para fullscreen exclusivo, há um módulo Direct3D 9
+opcional, instalado ao lado do jogo sem alterar o executável ou os saves.
 
 ## O que já está implementado
 
@@ -54,9 +55,27 @@ cliques ou teclas duplicados.
 
 ### Overlay
 
-O controle funciona em tela cheia, mas overlays externos não aparecem de forma
-confiável no modo exclusivo. Para ver a roda de habilidades e os avisos, use o
-Torchlight em modo janela ou janela sem bordas.
+Em janela e janela sem bordas, o overlay Qt acompanha o jogo e desaparece ao
+perder foco. Em **fullscreen exclusivo**, o módulo Direct3D 9 desenha os mesmos
+elementos dentro do frame do Torchlight, sem mudar o modo de tela do jogo.
+
+Para habilitar fullscreen:
+
+1. Feche o Torchlight. A distribuição precisa incluir `assets/native/x86/d3d9.dll`;
+   ao desenvolver a partir dos fontes, gere-a com `GERAR_OVERLAY_FULLSCREEN.bat`
+   (CMake + Visual Studio Build Tools com C++ para x86).
+2. No menu do ícone **TB**, escolha **Instalar suporte a fullscreen...** e
+   selecione o `Torchlight.exe` da instalação Steam ou GOG.
+3. Abra o Torchlight com o TorchBridge ativo e habilite tela cheia no jogo.
+   A dica do ícone TB indicará `Overlay: Direct3D 9 (fullscreen)` quando conectado.
+
+Para desfazer, feche o jogo e use **Remover suporte a fullscreen...**. A instalação
+recusa substituir uma `d3d9.dll` existente, inclusive de ReShade ou DXVK.
+
+O backend nativo foi compilado para Windows x86 e tem testes de protocolo e de
+integração preparados. **A validação visual em fullscreen com o Torchlight no
+Windows ainda precisa ser realizada**; compilar e testar no Linux não a substitui.
+Detalhes, limites e roteiro: [docs/FULLSCREEN.md](docs/FULLSCREEN.md).
 
 ## Mapeamento padrão
 
@@ -189,6 +208,9 @@ dist\TorchBridge\TorchBridge.exe
 
 O formato de pasta inicia mais rápido que um executável único e mantém juntos
 os componentes do SDL e do Qt. Distribua a pasta `dist\TorchBridge` inteira.
+Gere o módulo com `GERAR_OVERLAY_FULLSCREEN.bat` antes de empacotar para incluir
+o suporte a fullscreen exclusivo. O empacotamento sem a DLL continua disponível
+para o overlay externo.
 
 ## Verificação para uma primeira versão pública
 
@@ -205,9 +227,11 @@ Os testes automatizados validam deadzone, curva, setores da roda, normalização
 gatilhos e persistência do perfil. No diretório do projeto:
 
 ```text
-set PYTHONPATH=src
-python -m unittest discover -s tests -v
+python scripts/run_tests.py -v
 ```
+
+Esse comando também funciona no Linux, simulando as APIs Windows nos testes do
+motor e usando Qt offscreen. Ele não envia entrada ao desktop nem executa o jogo.
 
 ## Limite técnico honesto
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Lock
+from typing import Any
 import os
 import sys
 import time
@@ -1352,6 +1353,8 @@ class OverlaySnapshot:
     game_found: bool = False
     game_active: bool = False
     game_rect: Rect = field(default_factory=Rect)
+    game_hwnd: int | None = None
+    game_pid: int | None = None
     controller_connected: bool = False
     controller_name: str = ""
     controller_mapping: str = ""
