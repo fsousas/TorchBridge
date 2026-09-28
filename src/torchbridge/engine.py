@@ -307,6 +307,7 @@ class BridgeEngine(threading.Thread):
         self._crafting_initialized = False
         self._crafting_menu = None
         self._crafting_focus = None
+        self._char_class = ""
         self._char_menu_initialized = False
         self._char_menu_focus = "strength"
         self._skill_menu_initialized = False
@@ -318,6 +319,7 @@ class BridgeEngine(threading.Thread):
         self._skill_in_spells = False
         self._skill_spell_idx = 0
         self.shared.update(
+            char_class="",
             radial_selection=None,
             pause_menu_focus=None,
             load_char_focus=None,
@@ -1777,6 +1779,7 @@ class BridgeEngine(threading.Thread):
                 skill_menu_open=True,
                 skill_tab=self._skill_tab,
                 skill_focus=f"({self._skill_focus_row}, {self._skill_focus_col})",
+                char_class=char_class,
             )
             return
 
@@ -1876,6 +1879,7 @@ class BridgeEngine(threading.Thread):
                     skill_menu_open=True,
                     skill_tab=self._skill_tab,
                     skill_focus=f"tab_{new_col + 1}",
+                    char_class=char_class,
                 )
                 return
             self._skill_focus_row = new_row
@@ -1886,6 +1890,7 @@ class BridgeEngine(threading.Thread):
                 skill_menu_open=True,
                 skill_tab=self._skill_tab,
                 skill_focus=f"({new_row}, {new_col})",
+                char_class=char_class,
             )
             return
 
@@ -2111,6 +2116,7 @@ class BridgeEngine(threading.Thread):
                 skill_menu_open=True,
                 skill_tab=self._skill_tab,
                 skill_focus=f"tab_{self._skill_tab}",
+                char_class=char_class,
             )
             return
 
@@ -2123,6 +2129,7 @@ class BridgeEngine(threading.Thread):
                 skill_menu_open=True,
                 skill_tab=self._skill_tab,
                 skill_focus=f"({row}, {col}, pink)",
+                char_class=char_class,
             )
             return
 
@@ -2140,6 +2147,7 @@ class BridgeEngine(threading.Thread):
             skill_menu_open=True,
             skill_tab=self._skill_tab,
             skill_focus=f"({new_row}, {new_col})",
+            char_class=char_class,
         )
 
     # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
@@ -3979,6 +3987,27 @@ class BridgeEngine(threading.Thread):
         self._handle_discrete_bindings(state, bindings)
         # Navegação nos Menus via D-pad conforme o estado da memória
         if self._memory_state.is_connected:
+            # Sincronização contínua de classe do personagem e reset da skill tree ao trocar de personagem
+            if self._memory_state.is_in_game:
+                raw_class = getattr(self._memory_state, "char_class", "").strip().lower()
+                if raw_class in ("destroyer", "vanquisher", "alchemist"):
+                    if self._char_class != raw_class:
+                        self._char_class = raw_class
+                        self._skill_tab = 1
+                        self._skill_menu_initialized = False
+                        self._skill_focus_row = 0
+                        self._skill_focus_col = 1
+                        self._skill_in_tabbar = False
+                        self._skill_in_pink = False
+                        self._skill_in_spells = False
+                        self.shared.update(char_class=raw_class, skill_tab=1)
+            else:
+                if self._char_class:
+                    self._char_class = ""
+                    self._skill_tab = 1
+                    self._skill_menu_initialized = False
+                    self.shared.update(char_class="", skill_tab=1)
+
             state_id = self._memory_state.state_id
             if state_id == 0:
                 self._handle_title_menu_navigation(state, rect, hub)
@@ -4164,11 +4193,19 @@ class BridgeEngine(threading.Thread):
 
             if is_char or is_skills:
                 # Lê classe do personagem da memória (ex: "destroyer", "vanquisher", "alchemist").
-                # _char_class é mantido entre ticks; atualiza quando muda.
-                raw_class = getattr(self._memory_state, "char_class", "").lower()
+                # _char_class é mantido entre ticks; atualiza e reseta a aba para 1 quando muda.
+                raw_class = getattr(self._memory_state, "char_class", "").strip().lower()
                 if raw_class in ("destroyer", "vanquisher", "alchemist"):
-                    if self._char_class and self._char_class != raw_class:
+                    if self._char_class != raw_class:
+                        self._char_class = raw_class
                         self._skill_tab = 1
+                        self._skill_menu_initialized = False
+                        self._skill_focus_row = 0
+                        self._skill_focus_col = 1
+                        self._skill_in_tabbar = False
+                        self._skill_in_pink = False
+                        self._skill_in_spells = False
+                        self.shared.update(char_class=raw_class, skill_tab=1)
                     self._char_class = raw_class
 
                 # Contexto para os handlers
@@ -4465,6 +4502,22 @@ class BridgeEngine(threading.Thread):
                 if now - self._memory_last_read >= 0.020:
                     self._memory_state = self.memory.update(target_pid=target_pid)
                     self._memory_last_read = now
+
+                    # Sincroniza classe e reseta aba de skills ao trocar de personagem
+                    if self._memory_state.is_in_game:
+                        mem_cls = (getattr(self._memory_state, "char_class", "") or "").strip().lower()
+                        if mem_cls in ("destroyer", "vanquisher", "alchemist"):
+                            if self._char_class != mem_cls:
+                                self._char_class = mem_cls
+                                self._skill_tab = 1
+                                self._skill_menu_initialized = False
+                                self.shared.update(char_class=mem_cls, skill_tab=1)
+                    else:
+                        if self._char_class:
+                            self._char_class = ""
+                            self._skill_tab = 1
+                            self._skill_menu_initialized = False
+                            self.shared.update(char_class="", skill_tab=1)
 
                     # Sincroniza painéis ativos se estiver em jogo
                     if self._memory_state.is_in_game:

@@ -1580,11 +1580,11 @@ SKILL_TREE_LAYOUTS: dict[str, dict[str, list[list[int | None]]]] = {
             [0, None, 2],    # L3: col-1, col-3
             [None, 1, None], # L4: col-2
             [None, 1, 2],    # L5: col-2, col-3
-            [0, None, 2],    # L6: col-1, col-3
+            [0, 1, None],    # L6: col-1, col-2
         ],
         "titan": [
             [None, 1, None], # L1: col-2
-            [0, None, 2],    # L2: col-1, col-3
+            [None, 1, 2],    # L2: col-2, col-3
             [0, 1, 2],       # L3: col-1, col-2, col-3
             [None, 1, None], # L4: col-2
             [0, None, 2],    # L5: col-1, col-3
@@ -1592,7 +1592,7 @@ SKILL_TREE_LAYOUTS: dict[str, dict[str, list[list[int | None]]]] = {
         ],
         "spectral": [
             [None, 1, None], # L1: col-2
-            [0, None, 2],    # L2: col-1, col-3
+            [None, 1, 2],    # L2: col-2, col-3
             [0, 1, 2],       # L3: col-1, col-2, col-3
             [0, None, None], # L4: col-1
             [None, 1, None], # L5: col-2
@@ -1606,22 +1606,22 @@ SKILL_TREE_LAYOUTS: dict[str, dict[str, list[list[int | None]]]] = {
             [0, 1, 2],       # L3: col-1, col-2, col-3
             [None, 1, None], # L4: col-2
             [None, None, 2], # L5: col-3 (único → será laranja)
-            [0, None, None], # L6: col-1
+            [None, 1, None], # L6: col-2
         ],
         "rogue": [
             [None, 1, None], # L1: col-2
-            [0, None, 2],    # L2: col-1, col-3
+            [None, 1, 2],    # L2: col-2, col-3
             [None, 1, 2],    # L3: col-2, col-3
             [None, None, 2], # L4: col-3 (único → será laranja)
-            [0, None, 2],    # L5: col-1, col-3
-            [0, None, 2],    # L6: col-1, col-3
+            [0, 1, None],    # L5: col-1, col-2
+            [0, 1, None],    # L6: col-1, col-2
         ],
         "arbiter": [
             [None, 1, None], # L1: col-2
-            [0, None, 2],    # L2: col-1, col-3
+            [0, 1, None],    # L2: col-1, col-2
             [None, None, 2], # L3: col-3 (único → será laranja)
             [None, 1, 2],    # L4: col-2, col-3
-            [0, None, 2],    # L5: col-1, col-3
+            [0, 1, None],    # L5: col-1, col-2
             [None, 1, 2],    # L6: col-2, col-3
         ],
     },

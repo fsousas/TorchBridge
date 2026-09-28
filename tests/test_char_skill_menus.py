@@ -65,6 +65,76 @@ class CharSkillMenuModelsTests(unittest.TestCase):
                 for row in layout:
                     self.assertEqual(len(row), 3)
 
+    def test_destroyer_skill_layouts(self):
+        self.assertEqual(
+            SKILL_TREE_LAYOUTS["destroyer"]["berserker"],
+            [
+                [None, 1, 2],
+                [None, 1, None],
+                [0, None, 2],
+                [None, 1, None],
+                [None, 1, 2],
+                [0, 1, None],
+            ],
+        )
+        self.assertEqual(
+            SKILL_TREE_LAYOUTS["destroyer"]["titan"],
+            [
+                [None, 1, None],
+                [None, 1, 2],
+                [0, 1, 2],
+                [None, 1, None],
+                [0, None, 2],
+                [None, 1, None],
+            ],
+        )
+        self.assertEqual(
+            SKILL_TREE_LAYOUTS["destroyer"]["spectral"],
+            [
+                [None, 1, None],
+                [None, 1, 2],
+                [0, 1, 2],
+                [0, None, None],
+                [None, 1, None],
+                [None, 1, 2],
+            ],
+        )
+
+    def test_vanquisher_skill_layouts(self):
+        self.assertEqual(
+            SKILL_TREE_LAYOUTS["vanquisher"]["marksman"],
+            [
+                [0, 1, None],
+                [None, 1, 2],
+                [0, 1, 2],
+                [None, 1, None],
+                [None, None, 2],
+                [None, 1, None],
+            ],
+        )
+        self.assertEqual(
+            SKILL_TREE_LAYOUTS["vanquisher"]["rogue"],
+            [
+                [None, 1, None],
+                [None, 1, 2],
+                [None, 1, 2],
+                [None, None, 2],
+                [0, 1, None],
+                [0, 1, None],
+            ],
+        )
+        self.assertEqual(
+            SKILL_TREE_LAYOUTS["vanquisher"]["arbiter"],
+            [
+                [None, 1, None],
+                [0, 1, None],
+                [None, None, 2],
+                [None, 1, 2],
+                [0, 1, None],
+                [None, 1, 2],
+            ],
+        )
+
     def test_alchemist_skill_layouts(self):
         # Aba 2 (lore)
         self.assertEqual(
@@ -492,6 +562,92 @@ class CharSkillMenuEngineTests(unittest.TestCase):
         self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.20, dt=0.016)
         self.assertFalse(self.engine._skill_in_spells)
         self.assertEqual(self.engine._skill_focus_row, 5)
+
+    def test_character_change_resets_skill_tab_and_layout(self):
+        # 1. Vanquisher começa no jogo com menu de habilidades aberto
+        mem_vanq = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Habilidades"],
+            char_class="vanquisher",
+            player_level=10,
+        )
+        self.engine._memory_state = mem_vanq
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.0, dt=0.016)
+        self.assertEqual(self.engine._char_class, "vanquisher")
+        self.assertEqual(self.engine._skill_tab, 1)
+
+        # 2. Muda para aba 2 (rogue) via RT
+        s = self._make_state(rt=1.0)
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.05, dt=0.016)
+        self.assertEqual(self.engine._skill_tab, 2)
+        self.assertEqual(self.shared.get().skill_tab, 2)
+
+        # 3. Jogador sai para a tela de título/carregar (fora do gameplay)
+        mem_menu = GameMemoryState(
+            is_connected=True,
+            is_in_game=False,
+            open_menus=["Menu Principal"],
+            char_class="",
+        )
+        self.engine._memory_state = mem_menu
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.35, dt=0.016)
+        self.assertEqual(self.engine._char_class, "")
+        self.assertEqual(self.engine._skill_tab, 1)
+
+        # 4. Entra no jogo com Destroyer e abre o menu de habilidades
+        mem_destr = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Habilidades"],
+            char_class="destroyer",
+            player_level=5,
+        )
+        self.engine._memory_state = mem_destr
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.40, dt=0.016)
+
+        # 5. A aba DEVE estar resetada para a primeira aba (1: berserker) e classe deve ser destroyer
+        self.assertEqual(self.engine._char_class, "destroyer")
+        self.assertEqual(self.engine._skill_tab, 1)
+        self.assertEqual(self.shared.get().char_class, "destroyer")
+        self.assertEqual(self.shared.get().skill_tab, 1)
+
+    def test_direct_class_switch_in_memory_resets_skill_tab(self):
+        # Caso em que a classe muda diretamente na memória RAM (ex: troca rápida de personagem)
+        mem_vanq = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Habilidades"],
+            char_class="vanquisher",
+            player_level=10,
+        )
+        self.engine._memory_state = mem_vanq
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.0, dt=0.016)
+
+        # Avança para aba 3
+        self.engine._skill_tab = 3
+        self.shared.update(skill_tab=3)
+
+        # Memória agora reporta Alchemist
+        mem_alch = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Habilidades"],
+            char_class="alchemist",
+            player_level=15,
+        )
+        self.engine._memory_state = mem_alch
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.1, dt=0.016)
+
+        self.assertEqual(self.engine._char_class, "alchemist")
+        self.assertEqual(self.engine._skill_tab, 1)
+        self.assertEqual(self.shared.get().char_class, "alchemist")
+        self.assertEqual(self.shared.get().skill_tab, 1)
 
 
 if __name__ == "__main__":
