@@ -689,6 +689,44 @@ class PetSubmenuTests(unittest.TestCase):
             self.assertTrue(shared.get().radial_active)
             self.assertEqual(shared.get().radial_selection, 1)
 
+    def test_radial_allowed_with_char_and_skill_menus(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared = self._engine(directory)
+            from torchbridge.memory import GameMemoryState
+
+            # 1. Com menu de Atributos (C) aberto
+            engine._memory_state = GameMemoryState(
+                is_connected=True, state_id=6, is_in_game=True, open_menus=["Atributos"]
+            )
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertTrue(shared.get().radial_active)
+            self.assertEqual(shared.get().radial_selection, 1)
+
+            # Fecha roda
+            self._tick(engine, directory, self._state())
+            self.assertFalse(shared.get().radial_active)
+
+            # 2. Com menu de Habilidades (S) aberto
+            engine._memory_state = GameMemoryState(
+                is_connected=True, state_id=6, is_in_game=True, open_menus=["Habilidades"]
+            )
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertTrue(shared.get().radial_active)
+            self.assertEqual(shared.get().radial_selection, 1)
+
+            # Fecha roda
+            self._tick(engine, directory, self._state())
+            self.assertFalse(shared.get().radial_active)
+
+            # 3. Com ambos os menus C e S abertos simultaneamente
+            engine._memory_state = GameMemoryState(
+                is_connected=True, state_id=6, is_in_game=True, open_menus=["Atributos", "Habilidades"]
+            )
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertTrue(shared.get().radial_active)
+            self.assertEqual(shared.get().radial_selection, 1)
+
+
     # Regressão: com a alavanca de volta ao CENTRO (radial_slot → None), o setor persistido
     # segue valendo — d-pad BAIXO abre a sublinha sem manter o stick inclinado no P.
     def test_stick_at_center_still_opens_submenu(self):

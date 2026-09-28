@@ -233,5 +233,54 @@ class OverlayCalibrationTests(unittest.TestCase):
                 painter.end()
 
 
+    def test_draw_calibration_character_menu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_state_desc="Em Jogo",
+                char_menu_open=True,
+                char_menu_focus="strength_pink",
+                attr_points_remaining=5,
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            painter.drawRoundedRect = MagicMock()
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                # 4 atributos * (1 nó verde + 1 nó laranja + 1 nó rosa com pontos) = 12 chamadas
+                self.assertGreaterEqual(painter.drawRoundedRect.call_count, 12)
+            finally:
+                painter.end()
+
+    def test_draw_calibration_skills_menu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_state_desc="Em Jogo",
+                skill_menu_open=True,
+                skill_tab=1,
+                char_class="alchemist",
+                skill_points_remaining=1,
+                skill_upgradeable={(0, 1): True},
+                skill_focus="(0, 1, pink)",
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            painter.drawRoundedRect = MagicMock()
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                # 3 abas + slots preenchidos da grid + 1 nó rosa
+                self.assertGreaterEqual(painter.drawRoundedRect.call_count, 10)
+            finally:
+                painter.end()
+
+
 if __name__ == "__main__":
     unittest.main()
+

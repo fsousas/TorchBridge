@@ -70,6 +70,20 @@ from .models import (
     MERCHANT_GRID_COLS,
     merchant_slot_point,
     merchant_tab_point,
+    CHAR_ATTR_ORDER,
+    CHAR_MENU_NODES_NO_POINTS,
+    CHAR_MENU_NODES_HAS_POINTS,
+    char_menu_point,
+    char_attr_point,
+    char_attr_bridge_point,
+    char_attr_pink_point,
+    SKILL_TAB_NAMES,
+    SKILL_TREE_LAYOUTS,
+    skill_tab_point,
+    skill_slot_point,
+    skill_slot_pink_point,
+    skill_bridge_col,
+    skill_spell_slot_point,
 )
 from .native_overlay import FrameChannel, frame_size
 from .win32 import IS_WINDOWS, WindowLocator, make_overlay_clickthrough, position_overlay
@@ -1189,6 +1203,140 @@ class GameOverlay(QWidget):
                             painter.setPen(QPen(color, 1.5 * scale))
                             painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
                         painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+            # 13. Alvos do Menu de Personagem (C) - Atributos, Topo (XP/Fame/HP/MP) e Resistências
+            is_char_open = snapshot.char_menu_open or ("Atributos" in (snapshot.memory_open_menus or []))
+            if is_char_open:
+                c_verde = QColor(0x09, 0xB2, 0x00, 220)
+                c_laranja = QColor(0xFD, 0x61, 0x00, 220)
+                c_rosa = QColor(0xB2, 0x00, 0x7C, 220)
+                c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+
+                slot_box = 18.0 * scale * (rect.height / 768.0)
+                has_points = (snapshot.attr_points_remaining > 0)
+                nodes_dict = CHAR_MENU_NODES_HAS_POINTS if has_points else CHAR_MENU_NODES_NO_POINTS
+
+                for node_name, (base_x, base_y) in nodes_dict.items():
+                    nx = rect.left + base_x * (rect.height / 768.0)
+                    ny = rect.top + base_y * (rect.height / 768.0)
+                    lx = nx - rect.left - slot_box / 2.0
+                    ly = ny - rect.top - slot_box / 2.0
+
+                    is_focus = (snapshot.char_menu_focus == node_name)
+
+                    if node_name.endswith("_pink"):
+                        color = c_rosa
+                    elif node_name in ("xp", "fame", "mp", "res_fire", "res_ice") or node_name.endswith("_bridge"):
+                        color = c_laranja
+                    else:
+                        color = c_verde
+
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(c_amarelo)
+                    else:
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 150))
+                    painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+            # 14. Alvos do Menu de Habilidades (S) - Abas e Grid Dinâmica da Skill Tree
+            is_skills_open = snapshot.skill_menu_open or ("Habilidades" in (snapshot.memory_open_menus or []))
+            if is_skills_open:
+                c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
+                c_verde = QColor(0x09, 0xB2, 0x00, 220)
+                c_laranja = QColor(0xFD, 0x61, 0x00, 220)
+                c_rosa = QColor(0xB2, 0x00, 0x7C, 220)
+                c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+
+                tab_w = 90.0 * scale * (rect.height / 768.0)
+                tab_h = 22.0 * scale * (rect.height / 768.0)
+                slot_box = 40.0 * scale * (rect.height / 768.0)
+                pink_box = 15.0 * scale * (rect.height / 768.0)
+
+                active_tab = snapshot.skill_tab or 1
+                char_cls = (snapshot.char_class or "alchemist").lower()
+                if char_cls not in SKILL_TREE_LAYOUTS:
+                    char_cls = "alchemist"
+
+                # 1. Três Abas de Habilidades (1, 2, 3)
+                for tab_idx in (1, 2, 3):
+                    tx, ty = skill_tab_point(rect, tab_idx)
+                    tlx = tx - rect.left - tab_w / 2.0
+                    tly = ty - rect.top - tab_h / 2.0
+                    is_current_tab = (active_tab == tab_idx)
+                    is_tab_focus = (snapshot.skill_focus == f"tab_{tab_idx}")
+
+                    if is_tab_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(c_amarelo)
+                    elif is_current_tab:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.0 * scale))
+                        painter.setBrush(c_amarelo)
+                    else:
+                        painter.setPen(QPen(c_ciano, 1.5 * scale))
+                        painter.setBrush(QColor(0x0B, 0xE0, 0xEF, 100))
+                    painter.drawRoundedRect(QRectF(tlx, tly, tab_w, tab_h), 3.0 * scale, 3.0 * scale)
+
+                # 2. Grid de Habilidades da Aba Ativa
+                tab_name = SKILL_TAB_NAMES.get(char_cls, {}).get(active_tab, "arcane")
+                layout = SKILL_TREE_LAYOUTS.get(char_cls, {}).get(tab_name, [])
+
+                skill_pts = snapshot.skill_points_remaining
+                up_map = snapshot.skill_upgradeable or {}
+
+                for r, row_layout in enumerate(layout):
+                    bridge_col = skill_bridge_col(row_layout)
+                    for c, val in enumerate(row_layout):
+                        if val is None:
+                            continue  # Célula sem skill
+
+                        sx, sy = skill_slot_point(rect, r, c)
+                        slx = sx - rect.left - slot_box / 2.0
+                        sly = sy - rect.top - slot_box / 2.0
+
+                        is_bridge = (c == bridge_col)
+                        is_slot_focus = (snapshot.skill_focus == f"({r}, {c})")
+
+                        base_color = c_laranja if is_bridge else c_verde
+
+                        if is_slot_focus:
+                            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                            painter.setBrush(c_amarelo)
+                        else:
+                            painter.setPen(QPen(base_color, 1.5 * scale))
+                            painter.setBrush(QColor(base_color.red(), base_color.green(), base_color.blue(), 140))
+                        painter.drawRoundedRect(QRectF(slx, sly, slot_box, slot_box), 4.0 * scale, 4.0 * scale)
+
+                        # 3. Nó Rosa de Level-up (+): visível se skill_points > 0 e slot elegível
+                        is_upgradeable = up_map.get((r, c), False) if up_map else (skill_pts > 0)
+                        if skill_pts > 0 and is_upgradeable:
+                            px, py = skill_slot_pink_point(rect, r, c)
+                            plx = px - rect.left - pink_box / 2.0
+                            ply = py - rect.top - pink_box / 2.0
+                            is_pink_focus = (snapshot.skill_focus == f"({r}, {c}, pink)")
+
+                            if is_pink_focus:
+                                painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                                painter.setBrush(c_amarelo)
+                            else:
+                                painter.setPen(QPen(c_rosa, 1.5 * scale))
+                                painter.setBrush(QColor(c_rosa.red(), c_rosa.green(), c_rosa.blue(), 170))
+                            painter.drawRoundedRect(QRectF(plx, ply, pink_box, pink_box), 3.0 * scale, 3.0 * scale)
+
+                # 4. Slots de Spells no rodapé do Menu S
+                for s_i in range(4):
+                    sx, sy = skill_spell_slot_point(rect, s_i)
+                    slx = sx - rect.left - slot_box / 2.0
+                    sly = sy - rect.top - slot_box / 2.0
+                    s_color = c_laranja if s_i == 0 else c_verde
+                    is_spell_focus = (snapshot.skill_focus == f"spell_{s_i}")
+                    if is_spell_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(c_amarelo)
+                    else:
+                        painter.setPen(QPen(s_color, 1.5 * scale))
+                        painter.setBrush(QColor(s_color.red(), s_color.green(), s_color.blue(), 140))
+                    painter.drawRoundedRect(QRectF(slx, sly, slot_box, slot_box), 4.0 * scale, 4.0 * scale)
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração
