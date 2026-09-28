@@ -467,7 +467,7 @@ class BridgeEngine(threading.Thread):
             char_menu_open=False,
             char_menu_focus=None,
             skill_menu_open=False,
-            skill_tab=1,
+            skill_tab=self._skill_tab,
             skill_focus=None,
         )
         self._inventory_initialized = False
@@ -489,7 +489,6 @@ class BridgeEngine(threading.Thread):
         self._char_menu_initialized = False
         self._char_menu_focus = "strength"
         self._skill_menu_initialized = False
-        self._skill_tab = 1
         self._skill_focus_row = 0
         self._skill_focus_col = 1
         self._skill_in_tabbar = False
@@ -1757,21 +1756,27 @@ class BridgeEngine(threading.Thread):
         if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
 
-        # 1. Inicialização: aba 1, posição L1-Col2 (sempre tem skill lá).
+        # 1. Inicialização: preserva a aba ativa atual (self._skill_tab) pois o jogo não reseta para a aba 1 ao fechar/abrir.
         if not self._skill_menu_initialized:
             self._skill_menu_initialized = True
-            self._skill_tab = 1
+            if self._skill_tab not in (1, 2, 3):
+                self._skill_tab = 1
             self._skill_focus_row = 0
-            self._skill_focus_col = 1
+            layout = skill_layout_for(char_class, self._skill_tab)
+            if layout and layout[0]:
+                self._skill_focus_col = skill_snap_col(layout[0], 1) or 1
+            else:
+                self._skill_focus_col = 1
             self._skill_in_tabbar = False
             self._skill_in_pink = False
-            tx, ty = skill_slot_point(rect, 0, 1)
+            self._skill_in_spells = False
+            tx, ty = skill_slot_point(rect, self._skill_focus_row, self._skill_focus_col)
             self.injector.move(tx, ty)
             hub.rumble(0.04, 0.08, 30)
             self.shared.update(
                 skill_menu_open=True,
                 skill_tab=self._skill_tab,
-                skill_focus="(0, 1)",
+                skill_focus=f"({self._skill_focus_row}, {self._skill_focus_col})",
             )
             return
 
@@ -4162,6 +4167,8 @@ class BridgeEngine(threading.Thread):
                 # _char_class é mantido entre ticks; atualiza quando muda.
                 raw_class = getattr(self._memory_state, "char_class", "").lower()
                 if raw_class in ("destroyer", "vanquisher", "alchemist"):
+                    if self._char_class and self._char_class != raw_class:
+                        self._skill_tab = 1
                     self._char_class = raw_class
 
                 # Contexto para os handlers
@@ -4208,14 +4215,13 @@ class BridgeEngine(threading.Thread):
 
             if not is_skills and self._skill_menu_initialized:
                 self._skill_menu_initialized = False
-                self._skill_tab = 1
                 self._skill_focus_row = 0
                 self._skill_focus_col = 1
                 self._skill_in_tabbar = False
                 self._skill_in_pink = False
                 self._skill_in_spells = False
                 self._skill_spell_idx = 0
-                self.shared.update(skill_menu_open=False, skill_tab=1, skill_focus=None)
+                self.shared.update(skill_menu_open=False, skill_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -4293,14 +4299,13 @@ class BridgeEngine(threading.Thread):
                 self.shared.update(char_menu_open=False, char_menu_focus=None)
             if self._skill_menu_initialized:
                 self._skill_menu_initialized = False
-                self._skill_tab = 1
                 self._skill_focus_row = 0
                 self._skill_focus_col = 1
                 self._skill_in_tabbar = False
                 self._skill_in_pink = False
                 self._skill_in_spells = False
                 self._skill_spell_idx = 0
-                self.shared.update(skill_menu_open=False, skill_tab=1, skill_focus=None)
+                self.shared.update(skill_menu_open=False, skill_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.

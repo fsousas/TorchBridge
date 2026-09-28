@@ -399,6 +399,50 @@ class CharSkillMenuEngineTests(unittest.TestCase):
         self.assertEqual(self.engine._skill_tab, 3)
         self.assertEqual(self.shared.get().skill_tab, 3)
 
+    def test_skill_tab_preserved_on_menu_close_and_reopen(self):
+        mem_open = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Habilidades"],
+            char_class="alchemist",
+            player_level=5,
+        )
+        mem_closed = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=[],
+            char_class="alchemist",
+            player_level=5,
+        )
+
+        # 1. Abre menu de habilidades e inicializa na aba 1 (arcane)
+        self.engine._memory_state = mem_open
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.0, dt=0.016)
+        self.assertEqual(self.engine._skill_tab, 1)
+
+        # 2. Troca para a aba 2 (lore) via RT
+        s = self._make_state(rt=1.0)
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.05, dt=0.016)
+        self.assertEqual(self.engine._skill_tab, 2)
+        self.assertEqual(self.shared.get().skill_tab, 2)
+
+        # 3. Fecha o menu (jogo fecha a janela)
+        self.engine._memory_state = mem_closed
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.10, dt=0.016)
+        self.assertFalse(self.engine._skill_menu_initialized)
+        self.assertEqual(self.engine._skill_tab, 2)  # Deve preservar aba 2
+
+        # 4. Reabre o menu de habilidades
+        self.engine._memory_state = mem_open
+        s = self._make_state()
+        self.engine._process_active(self.hub, s, self.rect, self.cfg, now=1.15, dt=0.016)
+        self.assertTrue(self.engine._skill_menu_initialized)
+        # O jogo não reseta para aba 1 ao reabrir: overlay e engine continuam na aba 2
+        self.assertEqual(self.engine._skill_tab, 2)
+        self.assertEqual(self.shared.get().skill_tab, 2)
+
     def test_skill_spells_navigation(self):
         mem = GameMemoryState(
             is_connected=True,
