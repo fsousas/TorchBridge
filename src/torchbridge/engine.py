@@ -53,7 +53,29 @@ from .models import (
     merchant_tab_point,
     crafting_button_point,
     crafting_slot_point,
+    # Menu de Personagem (C) e Árvore de Habilidades (S)
+    CHAR_ATTR_ORDER,
+    CHAR_MENU_NODES_NO_POINTS,
+    CHAR_MENU_NODES_HAS_POINTS,
+    CHAR_MENU_ROWS_NO_POINTS,
+    CHAR_MENU_ROWS_HAS_POINTS,
+    char_menu_point,
+    char_attr_point,
+    char_attr_bridge_point,
+    char_attr_pink_point,
+    SKILL_TAB_NAMES,
+    SKILL_TREE_LAYOUTS,
+    SKILL_GRID_COL_X,
+    SKILL_SPELL_COLS_X,
+    skill_tab_point,
+    skill_slot_point,
+    skill_slot_pink_point,
+    skill_spell_slot_point,
+    skill_bridge_col,
+    skill_snap_col,
+    skill_layout_for,
 )
+
 from .memory import GameMemoryState, TorchlightMemoryReader
 from .win32 import (
     InputInjector,
@@ -218,6 +240,27 @@ class BridgeEngine(threading.Thread):
         self._crafting_initialized: bool = False
         self._crafting_menu: str | None = None
         self._crafting_focus: str | None = None
+        # Navegação no Menu de Personagem (C) — atributos Strength/Dex/Magic/Defense
+        # e pontos de atributo (nó rosa à direita quando points_remaining > 0).
+        self._char_menu_initialized: bool = False
+        self._char_menu_focus: str = "strength"  # atributo com foco atual
+        # Navegação na Árvore de Habilidades (S) — 6 linhas × 3 colunas por aba.
+        # _skill_focus_row/col: posição na grade (base-0). "tab" indica foco na tab bar.
+        # _skill_in_tabbar: cursor na barra de abas (não em um slot).
+        # _skill_in_pink: cursor no nó rosa de level-up (abaixo do slot atual).
+        self._skill_menu_initialized: bool = False
+        self._skill_tab: int = 1           # aba ativa: 1, 2 ou 3
+        self._skill_focus_row: int = 0     # linha atual base-0 (0 = L1)
+        self._skill_focus_col: int = 1     # coluna atual base-0 (1 = Col-2, posição inicial)
+        self._skill_in_tabbar: bool = False
+        self._skill_in_pink: bool = False  # cursor no nó rosa de level-up
+        self._skill_in_spells: bool = False # cursor nos feitiços (rodapé)
+        self._skill_spell_idx: int = 0      # índice do slot de spell (0..3)
+        self._skill_tab_debounce: float = 0.0 # debounce de troca de aba
+        # Classe do personagem atual — lida da memória; necessária para skill_layout_for().
+        # Valores esperados: "destroyer", "vanquisher", "alchemist" (ou "" se desconhecida).
+        self._char_class: str = ""
+
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
     def _reset_active_panels(self) -> None:
@@ -264,6 +307,16 @@ class BridgeEngine(threading.Thread):
         self._crafting_initialized = False
         self._crafting_menu = None
         self._crafting_focus = None
+        self._char_menu_initialized = False
+        self._char_menu_focus = "strength"
+        self._skill_menu_initialized = False
+        self._skill_tab = 1
+        self._skill_focus_row = 0
+        self._skill_focus_col = 1
+        self._skill_in_tabbar = False
+        self._skill_in_pink = False
+        self._skill_in_spells = False
+        self._skill_spell_idx = 0
         self.shared.update(
             radial_selection=None,
             pause_menu_focus=None,
@@ -291,6 +344,11 @@ class BridgeEngine(threading.Thread):
             crafting_open=False,
             crafting_menu=None,
             crafting_focus=None,
+            char_menu_open=False,
+            char_menu_focus=None,
+            skill_menu_open=False,
+            skill_tab=1,
+            skill_focus=None,
         )
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
@@ -406,6 +464,11 @@ class BridgeEngine(threading.Thread):
             crafting_open=False,
             crafting_menu=None,
             crafting_focus=None,
+            char_menu_open=False,
+            char_menu_focus=None,
+            skill_menu_open=False,
+            skill_tab=1,
+            skill_focus=None,
         )
         self._inventory_initialized = False
         self._inventory_tab = None
@@ -423,6 +486,16 @@ class BridgeEngine(threading.Thread):
         self._crafting_initialized = False
         self._crafting_menu = None
         self._crafting_focus = None
+        self._char_menu_initialized = False
+        self._char_menu_focus = "strength"
+        self._skill_menu_initialized = False
+        self._skill_tab = 1
+        self._skill_focus_row = 0
+        self._skill_focus_col = 1
+        self._skill_in_tabbar = False
+        self._skill_in_pink = False
+        self._skill_in_spells = False
+        self._skill_spell_idx = 0
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -1504,6 +1577,565 @@ class BridgeEngine(threading.Thread):
 
         # Movimento final até o slot de destino
         self.injector.move(target_x, target_y)
+
+    # Navegação no Menu de Personagem (C) — atributos + pontos de atributo (nó rosa)
+    def _handle_char_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        skill_also_open: bool,
+        attr_points: int,
+    ) -> None:
+        """Gerencia a navegação pelo menu de Personagem (C) via D-pad.
+
+        Navega por todos os nós do menu:
+        - Topo: XP, Fame, HP, MP
+        - Atributos: Strength, Dexterity, Magic, Defense (nós verdes, laranjas e rosas)
+        - Resistências: Poison, Fire, Lightning, Ice
+
+        Nós laranjas são sempre acessíveis pelo D-pad. Quando o menu de Habilidades (S)
+        está aberto, o D-pad direita no nó laranja atravessa a ponte para o menu S.
+        """
+        if not rect.valid:
+            return
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
+            return
+
+        has_points = (attr_points > 0)
+        rows = CHAR_MENU_ROWS_HAS_POINTS if has_points else CHAR_MENU_ROWS_NO_POINTS
+        nodes_dict = CHAR_MENU_NODES_HAS_POINTS if has_points else CHAR_MENU_NODES_NO_POINTS
+
+        # 1. Inicialização: posiciona no primeiro atributo (Strength).
+        if not self._char_menu_initialized or not self._char_menu_focus:
+            self._char_menu_initialized = True
+            self._char_menu_focus = "strength"
+            tx, ty = char_menu_point(rect, "strength", has_points=has_points)
+            self.injector.move(tx, ty)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(char_menu_open=True, char_menu_focus="strength")
+            return
+
+        dpad_up    = state.pressed("dpad_up")    and not self._previous.pressed("dpad_up")
+        dpad_down  = state.pressed("dpad_down")  and not self._previous.pressed("dpad_down")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left  = state.pressed("dpad_left")  and not self._previous.pressed("dpad_left")
+
+        focus = self._char_menu_focus
+
+        # Localiza linha e coluna atuais na matriz de navegação
+        cur_r = None
+        cur_c = None
+        for r_idx, r_nodes in enumerate(rows):
+            if focus in r_nodes:
+                cur_r = r_idx
+                cur_c = r_nodes.index(focus)
+                break
+
+        if cur_r is None:
+            # Fallback se o foco não existir na matriz atual
+            cur_r = 3
+            cur_c = 0
+            focus = "strength"
+
+        # Clique A no nó rosa de incremento de atributo
+        if state.pressed("a") and not self._previous.pressed("a"):
+            if focus.endswith("_pink"):
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.12, 50)
+                return
+
+        new_focus = focus
+
+        if dpad_left:
+            if cur_c > 0:
+                new_focus = rows[cur_r][cur_c - 1]
+
+        elif dpad_right:
+            if cur_c < len(rows[cur_r]) - 1:
+                # Navega para o nó da direita na mesma linha (ex: verde -> laranja ou verde -> rosa)
+                new_focus = rows[cur_r][cur_c + 1]
+            elif skill_also_open:
+                # Estamos no nó mais à direita (laranja / ponte) e Menu S está aberto: atravessa a ponte!
+                if cur_r >= 7:
+                    # Linhas de resistência (fogo e gelo) atravessam para a seção de Spells (slot 0)
+                    self._skill_in_spells = True
+                    self._skill_spell_idx = 0
+                    self._skill_in_tabbar = False
+                    self._skill_in_pink = False
+                    self._skill_menu_initialized = True
+
+                    tx, ty = skill_spell_slot_point(rect, 0)
+                    self._move_cursor_with_leave_step(focus, *self.injector.cursor_position(), tx, ty, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        char_menu_open=True,
+                        char_menu_focus=focus,
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus="spell_0",
+                    )
+                    return
+                elif cur_r <= 3:
+                    s_row = 0
+                elif cur_r == 4:
+                    s_row = 1
+                elif cur_r == 5:
+                    s_row = 2
+                else:
+                    s_row = 3
+
+                char_cls = self._char_class or "alchemist"
+                tab_name = SKILL_TAB_NAMES.get(char_cls, {}).get(self._skill_tab, "arcane")
+                layout = SKILL_TREE_LAYOUTS.get(char_cls, {}).get(tab_name, [])
+                row_layout = layout[s_row] if s_row < len(layout) else layout[0]
+                s_col = skill_bridge_col(row_layout)
+                if s_col is None:
+                    s_col = 0
+
+                self._skill_focus_row = s_row
+                self._skill_focus_col = s_col
+                self._skill_in_tabbar = False
+                self._skill_in_pink = False
+                self._skill_menu_initialized = True
+
+                tx, ty = skill_slot_point(rect, s_row, s_col)
+                self._move_cursor_with_leave_step(focus, *self.injector.cursor_position(), tx, ty, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    char_menu_open=True,
+                    char_menu_focus=focus,
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"({s_row}, {s_col})",
+                )
+                return
+            # Se Menu S não estiver aberto: borda direita, sem ação (mantém foco no nó laranja)
+
+        elif dpad_up:
+            if cur_r > 0:
+                target_row = rows[cur_r - 1]
+                cur_x = nodes_dict.get(focus, (134.5, 0))[0]
+                new_focus = min(target_row, key=lambda n: abs(nodes_dict.get(n, (134.5, 0))[0] - cur_x))
+
+        elif dpad_down:
+            if cur_r < len(rows) - 1:
+                target_row = rows[cur_r + 1]
+                cur_x = nodes_dict.get(focus, (134.5, 0))[0]
+                new_focus = min(target_row, key=lambda n: abs(nodes_dict.get(n, (134.5, 0))[0] - cur_x))
+
+        if new_focus == focus:
+            return
+
+        self._char_menu_focus = new_focus
+        tx, ty = char_menu_point(rect, new_focus, has_points=has_points)
+        self._move_cursor_with_leave_step(focus, *self.injector.cursor_position(), tx, ty, rect)
+        hub.rumble(0.03, 0.08, 30)
+        self.shared.update(char_menu_open=True, char_menu_focus=new_focus)
+
+    # Navegação na Árvore de Habilidades (S) — 6×3 grid + tab bar
+    def _handle_skill_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        char_also_open: bool,
+        skill_points: int,
+        char_class: str,
+        now: float = 0.0,
+    ) -> None:
+        """Gerencia a navegação pela skill tree do personagem via D-pad e L2/R2.
+
+        char_also_open: True quando o menu C também está aberto (permite ponte ←).
+        skill_points:   número de pontos de habilidade disponíveis (>0 → nós rosas abaixo).
+        char_class:     "destroyer", "vanquisher" ou "alchemist".
+        """
+        if not rect.valid:
+            return
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
+            return
+
+        # 1. Inicialização: aba 1, posição L1-Col2 (sempre tem skill lá).
+        if not self._skill_menu_initialized:
+            self._skill_menu_initialized = True
+            self._skill_tab = 1
+            self._skill_focus_row = 0
+            self._skill_focus_col = 1
+            self._skill_in_tabbar = False
+            self._skill_in_pink = False
+            tx, ty = skill_slot_point(rect, 0, 1)
+            self.injector.move(tx, ty)
+            hub.rumble(0.04, 0.08, 30)
+            self.shared.update(
+                skill_menu_open=True,
+                skill_tab=self._skill_tab,
+                skill_focus="(0, 1)",
+            )
+            return
+
+        dpad_up    = state.pressed("dpad_up")    and not self._previous.pressed("dpad_up")
+        dpad_down  = state.pressed("dpad_down")  and not self._previous.pressed("dpad_down")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left  = state.pressed("dpad_left")  and not self._previous.pressed("dpad_left")
+
+        layout = skill_layout_for(char_class, self._skill_tab)
+        if layout is None:
+            # Classe desconhecida: tenta "destroyer" como fallback seguro.
+            layout = skill_layout_for("destroyer", self._skill_tab)
+        if layout is None:
+            return
+
+
+        # 2. Troca de aba com L2/R2 (a qualquer momento no menu S).
+        now_ts = now if now > 0 else time.monotonic()
+        if (self._rt_edge_up or self._lt_edge_up) and now_ts >= self._skill_tab_debounce:
+            self._skill_tab_debounce = now_ts + 0.25
+            curr = self._skill_tab
+            if self._rt_edge_up:
+                new_tab = (curr % 3) + 1
+            else:
+                new_tab = (curr - 2) % 3 + 1
+
+            # Clica na aba para sincronizar o jogo (timing calibrado como no inventário)
+            tab_x, tab_y = skill_tab_point(rect, new_tab)
+            self.injector.move(tab_x, tab_y)
+            time.sleep(0.060)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            time.sleep(0.030)
+
+            self._skill_tab = new_tab
+            layout = skill_layout_for(char_class, new_tab) or skill_layout_for("destroyer", new_tab)
+            row0 = layout[0] if layout else [None, 1, None]
+            target_col = skill_bridge_col(row0) if skill_bridge_col(row0) is not None else 1
+
+            self._skill_focus_row = 0
+            self._skill_focus_col = target_col
+            self._skill_in_tabbar = False
+            self._skill_in_pink = False
+            self._skill_in_spells = False
+
+            tx, ty = skill_slot_point(rect, 0, target_col)
+            self.injector.move(tx, ty)
+            hub.rumble(0.04, 0.10, 40)
+            self.shared.update(
+                skill_menu_open=True,
+                skill_tab=new_tab,
+                skill_focus=f"(0, {target_col})",
+            )
+            return
+
+        row = self._skill_focus_row
+        col = self._skill_focus_col
+        new_row, new_col = row, col
+        move_to_tabbar = False
+        move_to_pink = False
+        leave_pink = False
+
+        # 3. Foco na tab bar (↑ a partir da L1)
+        if self._skill_in_tabbar:
+            if state.pressed("a") and not self._previous.pressed("a"):
+                # Pressionar A ativa a aba focada na tabbar
+                tab_idx = self._skill_focus_col + 1
+                if tab_idx != self._skill_tab:
+                    tab_x, tab_y = skill_tab_point(rect, tab_idx)
+                    self.injector.move(tab_x, tab_y)
+                    time.sleep(0.060)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.040)
+                    self.injector.mouse_button("left", False)
+                    time.sleep(0.030)
+                    self._skill_tab = tab_idx
+                    hub.rumble(0.04, 0.10, 40)
+                    self.shared.update(skill_menu_open=True, skill_tab=tab_idx)
+                return
+            if dpad_down:
+                self._skill_in_tabbar = False
+                new_row, new_col = 0, 1  # volta para L1-Col2
+            elif dpad_left:
+                new_col = max(0, col - 1)
+            elif dpad_right:
+                new_col = min(2, col + 1)
+            # ↑ na tabbar: sem ação (borda superior)
+            if not self._skill_in_tabbar:
+                tx, ty = skill_slot_point(rect, new_row, new_col)
+            else:
+                self._skill_focus_col = new_col
+                tx, ty = skill_tab_point(rect, new_col + 1)
+                self.injector.move(tx, ty)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"tab_{new_col + 1}",
+                )
+                return
+            self._skill_focus_row = new_row
+            self._skill_focus_col = new_col
+            self.injector.move(tx, ty)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                skill_menu_open=True,
+                skill_tab=self._skill_tab,
+                skill_focus=f"({new_row}, {new_col})",
+            )
+            return
+
+        # 4. Foco na seção de Spells (feitiços no rodapé)
+        if self._skill_in_spells:
+            s_idx = self._skill_spell_idx
+            if dpad_left:
+                if s_idx > 0:
+                    self._skill_spell_idx = s_idx - 1
+                    tx, ty = skill_spell_slot_point(rect, self._skill_spell_idx)
+                    self.injector.move(tx, ty)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus=f"spell_{self._skill_spell_idx}",
+                    )
+                    return
+                elif char_also_open:
+                    # Ponte para o Menu C (res_ice, nó laranja da última linha)
+                    target_attr = "res_ice"
+                    self._char_menu_focus = target_attr
+                    self._char_menu_initialized = True
+                    has_points = (skill_points > 0 or getattr(self._memory_state, "attr_points_remaining", 0) > 0)
+                    tx, ty = char_menu_point(rect, target_attr, has_points=has_points)
+                    self._move_cursor_with_leave_step(
+                        f"spell_{s_idx}", *self.injector.cursor_position(), tx, ty, rect
+                    )
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus=f"spell_{s_idx}",
+                        char_menu_open=True,
+                        char_menu_focus=target_attr,
+                    )
+                    return
+            elif dpad_right:
+                if s_idx < 3:
+                    self._skill_spell_idx = s_idx + 1
+                    tx, ty = skill_spell_slot_point(rect, self._skill_spell_idx)
+                    self.injector.move(tx, ty)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus=f"spell_{self._skill_spell_idx}",
+                    )
+                    return
+            elif dpad_up:
+                # Sobe para a última linha da grade (Row 5)
+                self._skill_in_spells = False
+                last_row = len(layout) - 1
+                row_layout = layout[last_row]
+                spell_x = SKILL_SPELL_COLS_X[s_idx]
+                filled = [c for c, v in enumerate(row_layout) if v is not None]
+                if not filled:
+                    filled = [0, 1, 2]
+                snapped_col = min(filled, key=lambda c: abs(SKILL_GRID_COL_X[c] - spell_x))
+                self._skill_focus_row = last_row
+                self._skill_focus_col = snapped_col
+                tx, ty = skill_slot_point(rect, last_row, snapped_col)
+                self.injector.move(tx, ty)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"({last_row}, {snapped_col})",
+                )
+                return
+            return
+
+        # 5. Foco no nó rosa de level-up (abaixo do slot atual)
+        if self._skill_in_pink:
+            if state.pressed("a") and not self._previous.pressed("a"):
+                # Clica no botão de melhoria da habilidade
+                self.injector.mouse_button("left", True)
+                time.sleep(0.04)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.12, 50)
+                return
+            if dpad_up:
+                # Volta para o nó da skill acima
+                self._skill_in_pink = False
+                tx, ty = skill_slot_point(rect, row, col)
+                self.injector.move(tx, ty)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"({row}, {col})",
+                )
+                return
+            if dpad_down:
+                self._skill_in_pink = False
+                if row < len(layout) - 1:
+                    # Desce do nó rosa para a próxima linha da árvore
+                    target_layout = layout[row + 1]
+                    snapped = skill_snap_col(target_layout, col)
+                    if snapped is not None:
+                        self._skill_focus_row = row + 1
+                        self._skill_focus_col = snapped
+                        tx, ty = skill_slot_point(rect, row + 1, snapped)
+                        self.injector.move(tx, ty)
+                        hub.rumble(0.03, 0.08, 30)
+                        self.shared.update(
+                            skill_menu_open=True,
+                            skill_tab=self._skill_tab,
+                            skill_focus=f"({row + 1}, {snapped})",
+                        )
+                    return
+                else:
+                    # Desce da última linha (row 5) para Spells
+                    self._skill_in_spells = True
+                    cur_col_x = SKILL_GRID_COL_X[col]
+                    self._skill_spell_idx = min(range(4), key=lambda i: abs(SKILL_SPELL_COLS_X[i] - cur_col_x))
+                    tx, ty = skill_spell_slot_point(rect, self._skill_spell_idx)
+                    self.injector.move(tx, ty)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus=f"spell_{self._skill_spell_idx}",
+                    )
+                    return
+            # ←/→ no pink: sem ação (mantém foco)
+            return
+
+        # 6. Foco em um slot da grid
+        row_layout = layout[row]
+
+        if dpad_up:
+            if row == 0:
+                # Sobe para a tab bar
+                move_to_tabbar = True
+            else:
+                target_layout = layout[row - 1]
+                snapped = skill_snap_col(target_layout, col)
+                if snapped is not None:
+                    new_row, new_col = row - 1, snapped
+
+        elif dpad_down:
+            # Verifica se o slot atual está liberado para melhoria com base em pontos, nível e rank
+            up_map = getattr(self._memory_state, "skill_upgradeable", {})
+            tier_reqs = [1, 5, 10, 15, 20, 25]
+            tier_lvl = tier_reqs[row] if row < len(tier_reqs) else 1
+            pl_lvl = getattr(self._memory_state, "player_level", 1)
+            is_slot_upgradeable = up_map.get((row, col), False) if up_map else (skill_points > 0 and pl_lvl >= tier_lvl)
+
+            if skill_points > 0 and is_slot_upgradeable and not self._skill_in_pink:
+                # Desce para o nó rosa de level-up abaixo do slot atual
+                move_to_pink = True
+            elif row < len(layout) - 1:
+                target_layout = layout[row + 1]
+                snapped = skill_snap_col(target_layout, col)
+                if snapped is not None:
+                    new_row, new_col = row + 1, snapped
+            else:
+                # Row 5 (última linha) e sem nó rosa: desce para a seção de Spells
+                self._skill_in_spells = True
+                cur_col_x = SKILL_GRID_COL_X[col]
+                self._skill_spell_idx = min(range(4), key=lambda i: abs(SKILL_SPELL_COLS_X[i] - cur_col_x))
+                tx, ty = skill_spell_slot_point(rect, self._skill_spell_idx)
+                self.injector.move(tx, ty)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"spell_{self._skill_spell_idx}",
+                )
+                return
+
+        elif dpad_left:
+            bridge_col = skill_bridge_col(row_layout)
+            if col == bridge_col and char_also_open:
+                # Ponte: sai do menu S para o menu C no nó laranja alinhado com essa linha.
+                attr_map = {
+                    0: "strength_bridge",
+                    1: "dexterity_bridge",
+                    2: "magic_bridge",
+                    3: "defense_bridge",
+                    4: "res_fire",
+                    5: "res_ice",
+                }
+                target_attr = attr_map.get(row, "defense_bridge")
+                self._char_menu_focus = target_attr
+                self._char_menu_initialized = True
+                has_points = (skill_points > 0 or getattr(self._memory_state, "attr_points_remaining", 0) > 0)
+                tx, ty = char_menu_point(rect, target_attr, has_points=has_points)
+                self._move_cursor_with_leave_step(
+                    f"({row},{col})", *self.injector.cursor_position(), tx, ty, rect
+                )
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"({row}, {col})",
+                    char_menu_open=True,
+                    char_menu_focus=target_attr,
+                )
+                return
+            else:
+                # Move para a coluna imediatamente à esquerda com skill
+                filled = [i for i, v in enumerate(row_layout) if v is not None]
+                lefts = [c for c in filled if c < col]
+                if lefts:
+                    new_col = max(lefts)
+
+        elif dpad_right:
+            filled = [i for i, v in enumerate(row_layout) if v is not None]
+            rights = [c for c in filled if c > col]
+            if rights:
+                new_col = min(rights)
+            # Se não há coluna à direita: borda, sem ação
+
+        if move_to_tabbar:
+            self._skill_in_tabbar = True
+            self._skill_focus_col = self._skill_tab - 1  # aba ativa
+            tx, ty = skill_tab_point(rect, self._skill_tab)
+            self.injector.move(tx, ty)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                skill_menu_open=True,
+                skill_tab=self._skill_tab,
+                skill_focus=f"tab_{self._skill_tab}",
+            )
+            return
+
+        if move_to_pink:
+            self._skill_in_pink = True
+            tx, ty = skill_slot_pink_point(rect, row, col)
+            self.injector.move(tx, ty)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(
+                skill_menu_open=True,
+                skill_tab=self._skill_tab,
+                skill_focus=f"({row}, {col}, pink)",
+            )
+            return
+
+        if new_row == row and new_col == col:
+            return
+
+        self._skill_focus_row = new_row
+        self._skill_focus_col = new_col
+        tx, ty = skill_slot_point(rect, new_row, new_col)
+        self._move_cursor_with_leave_step(
+            f"({row},{col})", *self.injector.cursor_position(), tx, ty, rect
+        )
+        hub.rumble(0.03, 0.08, 30)
+        self.shared.update(
+            skill_menu_open=True,
+            skill_tab=self._skill_tab,
+            skill_focus=f"({new_row}, {new_col})",
+        )
 
     # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
     def _handle_inventory_navigation(
@@ -3030,15 +3662,17 @@ class BridgeEngine(threading.Thread):
 
     def _is_radial_allowed(self) -> bool:
         """Determina se a roda de habilidades pode ser aberta.
-        Regra: somente permitida quando em gameplay (is_in_game) e sem outros menus abertos (permite apenas quando
-        nenhum menu está aberto, ou quando somente o Inventário está aberto)."""
+        Regra: somente permitida quando em gameplay (is_in_game) e sem menus modais/diálogos/configurações abertos.
+        Permitida quando nenhum menu está aberto, ou quando os menus de painel (Inventário, Pet, Atributos, Habilidades)
+        estão abertos."""
         if not self._memory_state.is_connected:
             return True
         if not self._memory_state.is_in_game:
             return False
         menus = self._memory_state.open_menus or []
-        # Permitido sem menus abertos, ou quando somente o Inventário ou Pet está aberto
-        other_menus = [m for m in menus if m not in ("Inventário", "Pet")]
+        # Permitido sem menus abertos, ou quando painéis comuns de gameplay (Inventário, Pet, Atributos, Habilidades) estão abertos
+        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades"}
+        other_menus = [m for m in menus if m not in allowed_panels]
         if other_menus:
             return False
         desc = (self._memory_state.state_desc or "").lower()
@@ -3288,10 +3922,10 @@ class BridgeEngine(threading.Thread):
             if not radial_active and rmag > 0:
                 cursor_x, cursor_y, cursor_mag = rx, ry, rmag
             # No modo cursor/menus, o analógico esquerdo assume o papel de cursor.
-            elif effective_mode == "cursor" and lmag > 0:
+            elif not radial_active and effective_mode == "cursor" and lmag > 0:
                 cursor_x, cursor_y, cursor_mag = lx, ly, lmag
             # Ambos os painéis abertos: o esquerdo vira cursor livre (sem o click-to-move).
-            elif lmag > 0 and both_panels_open(self._active_panels):
+            elif not radial_active and lmag > 0 and both_panels_open(self._active_panels):
                 cursor_x, cursor_y, cursor_mag = lx, ly, lmag
 
             # Há movimento de cursor: desloca da posição atual em vez de saltar para um ponto fixo.
@@ -3518,6 +4152,70 @@ class BridgeEngine(threading.Thread):
                     crafting_menu=None,
                     crafting_focus=None,
                 )
+
+            # Menu de Personagem (C) e Árvore de Habilidades (S)
+            is_char   = "Atributos"    in (self._memory_state.open_menus or [])
+            is_skills = "Habilidades"  in (self._memory_state.open_menus or [])
+
+            if is_char or is_skills:
+                # Lê classe do personagem da memória (ex: "destroyer", "vanquisher", "alchemist").
+                # _char_class é mantido entre ticks; atualiza quando muda.
+                raw_class = getattr(self._memory_state, "char_class", "").lower()
+                if raw_class in ("destroyer", "vanquisher", "alchemist"):
+                    self._char_class = raw_class
+
+                # Contexto para os handlers
+                char_also_open  = is_char
+                skill_also_open = is_skills
+                attr_points  = getattr(self._memory_state, "attr_points_remaining",  0)
+                skill_points = getattr(self._memory_state, "skill_points_remaining", 0)
+
+                # Decide qual handler recebe o dpad com base na posição do cursor.
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+
+                if is_char and is_skills:
+                    # Ambos abertos: cursor à esquerda → menu C; à direita → menu S.
+                    if cur_x < mid_x:
+                        self._handle_char_menu_navigation(
+                            state, rect, hub, skill_also_open=True, attr_points=attr_points
+                        )
+                    else:
+                        self._handle_skill_menu_navigation(
+                            state, rect, hub,
+                            char_also_open=True,
+                            skill_points=skill_points,
+                            char_class=self._char_class,
+                            now=now,
+                        )
+                elif is_char:
+                    self._handle_char_menu_navigation(
+                        state, rect, hub, skill_also_open=False, attr_points=attr_points
+                    )
+                else:
+                    self._handle_skill_menu_navigation(
+                        state, rect, hub,
+                        char_also_open=False,
+                        skill_points=skill_points,
+                        char_class=self._char_class,
+                        now=now,
+                    )
+
+            if not is_char and self._char_menu_initialized:
+                self._char_menu_initialized = False
+                self._char_menu_focus = "strength"
+                self.shared.update(char_menu_open=False, char_menu_focus=None)
+
+            if not is_skills and self._skill_menu_initialized:
+                self._skill_menu_initialized = False
+                self._skill_tab = 1
+                self._skill_focus_row = 0
+                self._skill_focus_col = 1
+                self._skill_in_tabbar = False
+                self._skill_in_pink = False
+                self._skill_in_spells = False
+                self._skill_spell_idx = 0
+                self.shared.update(skill_menu_open=False, skill_tab=1, skill_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -3589,6 +4287,20 @@ class BridgeEngine(threading.Thread):
                 self._crafting_menu = None
                 self._crafting_focus = None
                 self.shared.update(crafting_open=False, crafting_menu=None, crafting_focus=None)
+            if self._char_menu_initialized:
+                self._char_menu_initialized = False
+                self._char_menu_focus = "strength"
+                self.shared.update(char_menu_open=False, char_menu_focus=None)
+            if self._skill_menu_initialized:
+                self._skill_menu_initialized = False
+                self._skill_tab = 1
+                self._skill_focus_row = 0
+                self._skill_focus_col = 1
+                self._skill_in_tabbar = False
+                self._skill_in_pink = False
+                self._skill_in_spells = False
+                self._skill_spell_idx = 0
+                self.shared.update(skill_menu_open=False, skill_tab=1, skill_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -3827,6 +4539,19 @@ class BridgeEngine(threading.Thread):
                     stash_open=self._stash_initialized,
                     stash_tab=self._stash_tab,
                     stash_focus=str(self._stash_focus) if self._stash_focus else None,
+                    char_menu_open=self._char_menu_initialized,
+                    char_menu_focus=self._char_menu_focus if self._char_menu_initialized else None,
+                    skill_menu_open=self._skill_menu_initialized,
+                    skill_tab=self._skill_tab,
+                    skill_focus=(
+                        f"tab_{self._skill_focus_col + 1}" if self._skill_in_tabbar else (
+                            f"({self._skill_focus_row}, {self._skill_focus_col}, pink)" if self._skill_in_pink else f"({self._skill_focus_row}, {self._skill_focus_col})"
+                        )
+                    ) if self._skill_menu_initialized else None,
+                    char_class=self._char_class or getattr(self._memory_state, "char_class", "").lower(),
+                    attr_points_remaining=getattr(self._memory_state, "attr_points_remaining", 0),
+                    skill_points_remaining=getattr(self._memory_state, "skill_points_remaining", 0),
+                    skill_upgradeable=dict(getattr(self._memory_state, "skill_upgradeable", {})),
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.

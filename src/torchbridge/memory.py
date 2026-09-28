@@ -180,6 +180,11 @@ class GameMemoryState:
     dialog_quest_title: str = ""
     dialog_has_item_reward: bool = False
     merchant_npc_name: str = ""
+    char_class: str = ""  # "destroyer", "vanquisher", "alchemist"
+    player_level: int = 1
+    attr_points_remaining: int = 0
+    skill_points_remaining: int = 0
+    skill_upgradeable: dict[tuple[int, int], bool] = field(default_factory=dict)
 
 
 class TorchlightMemoryReader:
@@ -682,6 +687,84 @@ class TorchlightMemoryReader:
         if p_options and self.read_u8(p_options + 0x18) == 1:
             open_menus.append("Pause")
 
+        # Dados do Personagem (CPlayer)
+        char_class = ""
+        player_level = 1
+        attr_points_remaining = 0
+        skill_points_remaining = 0
+        skill_upgradeable: dict[tuple[int, int], bool] = {}
+
+        if p_player:
+            # 1. Classe do herói (ex: "destroyer", "vanquisher", "alchemist")
+            p_cls = self.read_u32(p_player + 0x34)
+            raw_cls = self.read_wstring(p_cls) if p_cls else ""
+            if not raw_cls:
+                raw_cls = self.read_wstring(p_player + 0x30)
+            char_class = raw_cls.strip().lower()
+
+            # 2. Nível e pontos restantes
+            player_level = self.read_u32(p_player + 0xF0) or self.read_u32(p_player + 0x3D0) or 1
+            attr_points_remaining = self.read_u32(p_player + 0x3DC) or 0
+            skill_points_remaining = self.read_u32(p_player + 0x3E0) or 0
+
+            # 3. Mapeamento de elegibilidade de upgrade das habilidades (CSkillManager +0x184)
+            p_skill_mgr = self.read_u32(p_player + 0x184)
+            guid_to_rank: dict[tuple[int, int], int] = {}
+            if p_skill_mgr:
+                vec_skills = self.read_u32(p_skill_mgr + 0x3C)
+                num_skills = self.read_u32(p_skill_mgr + 0x40) or 0
+                if vec_skills and 0 < num_skills < 100:
+                    for i in range(num_skills):
+                        p_sk = self.read_u32(vec_skills + i * 4)
+                        if p_sk:
+                            glo = self.read_u32(p_sk + 0x180)
+                            ghi = self.read_u32(p_sk + 0x184)
+                            rank = self.read_u32(p_sk + 0xA4) or 0
+                            if glo and ghi:
+                                guid_to_rank[(glo, ghi)] = rank
+
+            # Se o menu de Habilidades estiver aberto, lê os slots na CSkillMenu (+0x030C)
+            p_skill_menu = self.read_u32(p_ui + 0x030C) if p_ui else None
+            tier_reqs = [1, 5, 10, 15, 20, 25]
+            if p_skill_menu and "Habilidades" in open_menus:
+                slot_guids: list[tuple[int, int]] = []
+                for slot_idx in range(28):
+                    glo = self.read_u32(p_skill_menu + 0x80 + slot_idx * 8)
+                    ghi = self.read_u32(p_skill_menu + 0x84 + slot_idx * 8)
+                    if glo and ghi and (glo, ghi) in guid_to_rank:
+                        slot_guids.append((glo, ghi))
+
+                from .models import SKILL_TREE_LAYOUTS
+                cls_layouts = SKILL_TREE_LAYOUTS.get(char_class or "destroyer", {})
+                matched = False
+                for _tab_name, rows in cls_layouts.items():
+                    tab_skill_count = sum(1 for r in rows for c in r if c is not None)
+                    if len(slot_guids) == tab_skill_count:
+                        slot_i = 0
+                        for r_i, row in enumerate(rows):
+                            tier_req = tier_reqs[r_i]
+                            for c_i in row:
+                                if c_i is not None:
+                                    guid = slot_guids[slot_i] if slot_i < len(slot_guids) else (0, 0)
+                                    rank = guid_to_rank.get(guid, 0)
+                                    req_lvl = tier_req if rank == 0 else (tier_req + rank * 2)
+                                    can_up = (skill_points_remaining > 0 and rank < 10 and player_level >= req_lvl)
+                                    skill_upgradeable[(r_i, c_i)] = can_up
+                                    slot_i += 1
+                        matched = True
+                        break
+
+                if not matched:
+                    # Fallback usando primeira aba conhecida se slots ainda não bateram
+                    for _tab_name, rows in cls_layouts.items():
+                        for r_i, row in enumerate(rows):
+                            tier_req = tier_reqs[r_i]
+                            for c_i in row:
+                                if c_i is not None:
+                                    can_up = (skill_points_remaining > 0 and player_level >= tier_req)
+                                    skill_upgradeable[(r_i, c_i)] = can_up
+                        break
+
         is_menu_open = len(open_menus) > 0
         return GameMemoryState(
             is_connected=True,
@@ -702,4 +785,9 @@ class TorchlightMemoryReader:
             dialog_quest_title=dialog_quest_title,
             dialog_has_item_reward=dialog_has_item_reward,
             merchant_npc_name=merchant_npc_name,
+            char_class=char_class,
+            player_level=player_level,
+            attr_points_remaining=attr_points_remaining,
+            skill_points_remaining=skill_points_remaining,
+            skill_upgradeable=skill_upgradeable,
         )
