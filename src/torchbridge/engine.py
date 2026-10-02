@@ -1585,8 +1585,9 @@ class BridgeEngine(threading.Thread):
         state: ControllerState,
         rect: Rect,
         hub: ControllerHub,
-        skill_also_open: bool,
-        attr_points: int,
+        skill_also_open: bool = False,
+        inv_also_open: bool = False,
+        attr_points: int = 0,
     ) -> None:
         """Gerencia a navegação pelo menu de Personagem (C) via D-pad.
 
@@ -1596,7 +1597,7 @@ class BridgeEngine(threading.Thread):
         - Resistências: Poison, Fire, Lightning, Ice
 
         Nós laranjas são sempre acessíveis pelo D-pad. Quando o menu de Habilidades (S)
-        está aberto, o D-pad direita no nó laranja atravessa a ponte para o menu S.
+        ou o Inventário (I) está aberto, o D-pad direita no nó laranja atravessa a ponte.
         """
         if not rect.valid:
             return
@@ -1713,7 +1714,65 @@ class BridgeEngine(threading.Thread):
                     skill_focus=f"({s_row}, {s_col})",
                 )
                 return
-            # Se Menu S não estiver aberto: borda direita, sem ação (mantém foco no nó laranja)
+            elif inv_also_open:
+                # Estamos no nó mais à direita (laranja / ponte) e Inventário está aberto: atravessa a ponte!
+                # Mapeamento 1-a-1 por alinhamento vertical:
+                # Linhas 0, 1 (xp, fame) -> helmet
+                # Linha 2 (mp) -> gloves
+                # Linha 3 (strength_bridge) -> belt
+                # Linha 4 (dexterity_bridge) -> main_hand
+                # Linha 5 (magic_bridge) -> spell_1
+                # Linha 6 (defense_bridge) -> Grid (1, 1)
+                # Linha 7 (res_fire) -> Grid (2, 1)
+                # Linha 8 (res_ice) -> Grid (3, 1)
+                self._inventory_initialized = True
+                if cur_r <= 1:
+                    inv_target = "helmet"
+                    target_x, target_y = inventory_upper_point(rect, inv_target)
+                    self._inventory_focus = inv_target
+                elif cur_r == 2:
+                    inv_target = "gloves"
+                    target_x, target_y = inventory_upper_point(rect, inv_target)
+                    self._inventory_focus = inv_target
+                elif cur_r == 3:
+                    inv_target = "belt"
+                    target_x, target_y = inventory_upper_point(rect, inv_target)
+                    self._inventory_focus = inv_target
+                elif cur_r == 4:
+                    inv_target = "main_hand"
+                    target_x, target_y = inventory_upper_point(rect, inv_target)
+                    self._inventory_focus = inv_target
+                elif cur_r == 5:
+                    inv_target = "spell_1"
+                    target_x, target_y = inventory_upper_point(rect, inv_target)
+                    self._inventory_focus = inv_target
+                elif cur_r == 6:
+                    grid_r = 1
+                    target_x, target_y = inventory_slot_point(rect, grid_r, 1)
+                    self._inventory_focus = (grid_r, 1)
+                    inv_target = f"({grid_r}, 1)"
+                elif cur_r == 7:
+                    grid_r = 2
+                    target_x, target_y = inventory_slot_point(rect, grid_r, 1)
+                    self._inventory_focus = (grid_r, 1)
+                    inv_target = f"({grid_r}, 1)"
+                else:
+                    grid_r = 3
+                    target_x, target_y = inventory_slot_point(rect, grid_r, 1)
+                    self._inventory_focus = (grid_r, 1)
+                    inv_target = f"({grid_r}, 1)"
+
+                self._move_cursor_with_leave_step(focus, *self.injector.cursor_position(), target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    char_menu_open=True,
+                    char_menu_focus=focus,
+                    inventory_open=True,
+                    inventory_tab=self._inventory_tab or "tab-1",
+                    inventory_focus=inv_target,
+                )
+                return
+            # Se nem Menu S nem Inventário estiverem abertos: borda direita, sem ação (mantém foco no nó laranja)
 
         elif dpad_up:
             if cur_r > 0:
@@ -1746,10 +1805,12 @@ class BridgeEngine(threading.Thread):
         skill_points: int,
         char_class: str,
         now: float = 0.0,
+        pet_also_open: bool = False,
     ) -> None:
         """Gerencia a navegação pela skill tree do personagem via D-pad e L2/R2.
 
         char_also_open: True quando o menu C também está aberto (permite ponte ←).
+        pet_also_open:  True quando o menu Pet também está aberto (permite ponte ←).
         skill_points:   número de pontos de habilidade disponíveis (>0 → nós rosas abaixo).
         char_class:     "destroyer", "vanquisher" ou "alchemist".
         """
@@ -1796,9 +1857,12 @@ class BridgeEngine(threading.Thread):
             return
 
 
-        # 2. Troca de aba com L2/R2 (a qualquer momento no menu S).
+        # 2. Troca de aba com L2/R2 (se um menu da esquerda estiver aberto, restringe à metade direita).
         now_ts = now if now > 0 else time.monotonic()
-        if (self._rt_edge_up or self._lt_edge_up) and now_ts >= self._skill_tab_debounce:
+        cur_x, _ = self.injector.cursor_position()
+        mid_x = rect.left + rect.width * 0.5
+        is_left_menu_open = char_also_open or pet_also_open
+        if (not is_left_menu_open or cur_x >= mid_x) and (self._rt_edge_up or self._lt_edge_up) and now_ts >= self._skill_tab_debounce:
             self._skill_tab_debounce = now_ts + 0.25
             curr = self._skill_tab
             if self._rt_edge_up:
@@ -1926,6 +1990,24 @@ class BridgeEngine(threading.Thread):
                         skill_focus=f"spell_{s_idx}",
                         char_menu_open=True,
                         char_menu_focus=target_attr,
+                    )
+                    return
+                elif pet_also_open:
+                    # Ponte para o Menu do Pet: spell_0 -> linha 3, coluna 7 do Pet
+                    target_x, target_y = pet_inventory_slot_point(rect, 3, 7)
+                    self._pet_inventory_focus = (3, 7)
+                    self._pet_inventory_initialized = True
+                    self._move_cursor_with_leave_step(
+                        f"spell_{s_idx}", *self.injector.cursor_position(), target_x, target_y, rect
+                    )
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus=f"spell_{s_idx}",
+                        pet_inventory_open=True,
+                        pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                        pet_inventory_focus="(3, 7)",
                     )
                     return
             elif dpad_right:
@@ -2092,6 +2174,33 @@ class BridgeEngine(threading.Thread):
                     char_menu_focus=target_attr,
                 )
                 return
+            elif col == bridge_col and pet_also_open:
+                # Ponte: sai do menu S para o menu do Pet na borda direita correspondente.
+                if row <= 3:
+                    target_slot: str | tuple[int, int] = "pet_spell_2"
+                    target_x, target_y = pet_inventory_upper_point(rect, "pet_spell_2")
+                elif row == 4:
+                    target_slot = (1, 7)
+                    target_x, target_y = pet_inventory_slot_point(rect, 1, 7)
+                else:  # row == 5
+                    target_slot = (2, 7)
+                    target_x, target_y = pet_inventory_slot_point(rect, 2, 7)
+
+                self._pet_inventory_focus = target_slot
+                self._pet_inventory_initialized = True
+                self._move_cursor_with_leave_step(
+                    f"({row},{col})", *self.injector.cursor_position(), target_x, target_y, rect
+                )
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"({row}, {col})",
+                    pet_inventory_open=True,
+                    pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                    pet_inventory_focus=str(target_slot),
+                )
+                return
             else:
                 # Move para a coluna imediatamente à esquerda com skill
                 filled = [i for i, v in enumerate(row_layout) if v is not None]
@@ -2238,6 +2347,7 @@ class BridgeEngine(threading.Thread):
         is_stash_open = "Baú" in (self._memory_state.open_menus or [])
         is_merchant_open = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
         is_crafting_open = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
+        is_char_open = "Atributos" in (self._memory_state.open_menus or [])
 
         if isinstance(current, tuple):
             row, col = current
@@ -2253,6 +2363,32 @@ class BridgeEngine(threading.Thread):
             elif dpad_left:
                 if col > 1:
                     new_focus = (row, col - 1)
+                elif is_char_open:
+                    # Ponte para o Menu de Personagem/Atributos (C):
+                    # Linha 1 (1, 1) -> defense_bridge
+                    # Linha 2 (2, 1) -> res_fire
+                    # Linha 3 (3, 1) -> res_ice
+                    has_points = getattr(self._memory_state, "attr_points_remaining", 0) > 0
+                    if row == 1:
+                        char_target = "defense_bridge"
+                    elif row == 2:
+                        char_target = "res_fire"
+                    else:
+                        char_target = "res_ice"
+
+                    target_x, target_y = char_menu_point(rect, char_target, has_points=has_points)
+                    self._char_menu_focus = char_target
+                    self._char_menu_initialized = True
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        char_menu_open=True,
+                        char_menu_focus=char_target,
+                        inventory_open=True,
+                        inventory_tab=self._inventory_tab or "tab-1",
+                        inventory_focus=f"({row}, 1)",
+                    )
+                    return
                 elif is_crafting_open:
                     # Ponte para Crafting (Transmutador / Sockets / Encantador)
                     active_craft = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
@@ -2345,7 +2481,31 @@ class BridgeEngine(threading.Thread):
                     else:
                         new_focus = "spell_4"
         else:
-            if is_crafting_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+            if is_char_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
+                # Ponte para o Menu de Personagem/Atributos (C):
+                has_points = getattr(self._memory_state, "attr_points_remaining", 0) > 0
+                INV_TO_CHAR_MAP = {
+                    "helmet": "xp",
+                    "gloves": "mp",
+                    "belt": "strength_bridge",
+                    "main_hand": "dexterity_bridge",
+                    "spell_1": "magic_bridge",
+                }
+                char_target = INV_TO_CHAR_MAP.get(str(current), "defense_bridge")
+                target_x, target_y = char_menu_point(rect, char_target, has_points=has_points)
+                self._char_menu_focus = char_target
+                self._char_menu_initialized = True
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    char_menu_open=True,
+                    char_menu_focus=char_target,
+                    inventory_open=True,
+                    inventory_tab=self._inventory_tab or "tab-1",
+                    inventory_focus=str(current),
+                )
+                return
+            elif is_crafting_open and dpad_left and str(current) in ("spell_1", "main_hand", "belt", "gloves", "helmet"):
                 active_craft = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (self._memory_state.open_menus or [])), "Transmutador")
                 if active_craft == "Transmutador":
                     if str(current) in ("helmet", "gloves"):
@@ -2537,6 +2697,7 @@ class BridgeEngine(threading.Thread):
         new_focus: tuple[int, int] | str = current
 
         is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
+        is_skills_open = "Habilidades" in (self._memory_state.open_menus or [])
 
         if isinstance(current, tuple):
             row, col = current
@@ -2553,6 +2714,56 @@ class BridgeEngine(threading.Thread):
                         inventory_open=True,
                         inventory_tab=self._inventory_tab or "tab-1",
                         inventory_focus=f"({row}, 1)",
+                    )
+                    return
+                elif is_skills_open:
+                    # Ponte para o Menu de Habilidades (Skill Tree)
+                    char_cls = self._char_class or "alchemist"
+                    tab_name = SKILL_TAB_NAMES.get(char_cls, {}).get(self._skill_tab, "arcane")
+                    layout = SKILL_TREE_LAYOUTS.get(char_cls, {}).get(tab_name, [])
+
+                    if row == 1:
+                        s_row = 4
+                        row_layout = layout[s_row] if s_row < len(layout) else layout[0]
+                        s_col = skill_bridge_col(row_layout) if skill_bridge_col(row_layout) is not None else 0
+                        self._skill_focus_row = s_row
+                        self._skill_focus_col = s_col
+                        self._skill_in_tabbar = False
+                        self._skill_in_pink = False
+                        self._skill_in_spells = False
+                        self._skill_menu_initialized = True
+                        target_x, target_y = skill_slot_point(rect, s_row, s_col)
+                        focus_str = f"({s_row}, {s_col})"
+                    elif row == 2:
+                        s_row = 5
+                        row_layout = layout[s_row] if s_row < len(layout) else layout[0]
+                        s_col = skill_bridge_col(row_layout) if skill_bridge_col(row_layout) is not None else 0
+                        self._skill_focus_row = s_row
+                        self._skill_focus_col = s_col
+                        self._skill_in_tabbar = False
+                        self._skill_in_pink = False
+                        self._skill_in_spells = False
+                        self._skill_menu_initialized = True
+                        target_x, target_y = skill_slot_point(rect, s_row, s_col)
+                        focus_str = f"({s_row}, {s_col})"
+                    else:  # row == 3
+                        self._skill_in_spells = True
+                        self._skill_spell_idx = 0
+                        self._skill_in_tabbar = False
+                        self._skill_in_pink = False
+                        self._skill_menu_initialized = True
+                        target_x, target_y = skill_spell_slot_point(rect, 0)
+                        focus_str = "spell_0"
+
+                    self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        pet_inventory_open=True,
+                        pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                        pet_inventory_focus=f"({row}, 7)",
+                        skill_menu_open=True,
+                        skill_tab=self._skill_tab,
+                        skill_focus=focus_str,
                     )
                     return
                 elif row == 1:
@@ -2600,6 +2811,34 @@ class BridgeEngine(threading.Thread):
                     inventory_open=True,
                     inventory_tab=self._inventory_tab or "tab-1",
                     inventory_focus="spell_1",
+                )
+                return
+            elif is_skills_open and dpad_right and str(current) == "pet_spell_2":
+                # Ponte para o Menu de Habilidades: pet_spell_2 -> Linha 0 (nó laranja) da Skill Tree
+                char_cls = self._char_class or "alchemist"
+                tab_name = SKILL_TAB_NAMES.get(char_cls, {}).get(self._skill_tab, "arcane")
+                layout = SKILL_TREE_LAYOUTS.get(char_cls, {}).get(tab_name, [])
+                s_row = 0
+                row_layout = layout[s_row] if s_row < len(layout) else layout[0]
+                s_col = skill_bridge_col(row_layout) if skill_bridge_col(row_layout) is not None else 0
+
+                self._skill_focus_row = s_row
+                self._skill_focus_col = s_col
+                self._skill_in_tabbar = False
+                self._skill_in_pink = False
+                self._skill_in_spells = False
+                self._skill_menu_initialized = True
+                target_x, target_y = skill_slot_point(rect, s_row, s_col)
+
+                self._move_cursor_with_leave_step(current, cur_x, cur_y, target_x, target_y, rect)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    pet_inventory_open=True,
+                    pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                    pet_inventory_focus="pet_spell_2",
+                    skill_menu_open=True,
+                    skill_tab=self._skill_tab,
+                    skill_focus=f"({s_row}, {s_col})",
                 )
                 return
 
@@ -3476,9 +3715,9 @@ class BridgeEngine(threading.Thread):
         open_menus = self._memory_state.open_menus or []
         cur_x, _ = self.injector.cursor_position()
         mid_x = rect.left + rect.width * 0.5
-        if "Inventário" in open_menus and cur_x >= mid_x:
+        if ("Inventário" in open_menus or "Habilidades" in open_menus) and cur_x >= mid_x:
             return
-        if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus or any(m in open_menus for m in ("Transmutador", "Sockets", "Encantador"))) and cur_x < mid_x:
+        if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus or "Atributos" in open_menus or any(m in open_menus for m in ("Transmutador", "Sockets", "Encantador"))) and cur_x < mid_x:
             return
         lt_now = self._lt_current
         # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
@@ -4111,6 +4350,25 @@ class BridgeEngine(threading.Thread):
             is_stash = "Baú" in (self._memory_state.open_menus or [])
             is_merchant = "Vendedor (Loja)" in (self._memory_state.open_menus or [])
             is_crafting = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
+            is_char   = "Atributos"    in (self._memory_state.open_menus or [])
+            is_skills = "Habilidades"  in (self._memory_state.open_menus or [])
+
+            if is_char or is_skills:
+                # Lê classe do personagem da memória (ex: "destroyer", "vanquisher", "alchemist").
+                # _char_class é mantido entre ticks; atualiza e reseta a aba para 1 quando muda.
+                raw_class = getattr(self._memory_state, "char_class", "").strip().lower()
+                if raw_class in ("destroyer", "vanquisher", "alchemist"):
+                    if self._char_class != raw_class:
+                        self._char_class = raw_class
+                        self._skill_tab = 1
+                        self._skill_menu_initialized = False
+                        self._skill_focus_row = 0
+                        self._skill_focus_col = 1
+                        self._skill_in_tabbar = False
+                        self._skill_in_pink = False
+                        self._skill_in_spells = False
+                        self.shared.update(char_class=raw_class, skill_tab=1)
+                    self._char_class = raw_class
 
             if is_crafting and not self._crafting_initialized:
                 self._handle_crafting_navigation(state, rect, hub)
@@ -4120,7 +4378,10 @@ class BridgeEngine(threading.Thread):
                 self._handle_stash_navigation(state, rect, hub)
             elif is_pet and not self._pet_inventory_initialized:
                 self._handle_pet_inventory_navigation(state, rect, hub)
-            elif is_inventory and not self._inventory_initialized:
+            elif is_char and not self._char_menu_initialized and not is_skills and not is_inventory:
+                attr_points = getattr(self._memory_state, "attr_points_remaining", 0)
+                self._handle_char_menu_navigation(state, rect, hub, skill_also_open=False, inv_also_open=False, attr_points=attr_points)
+            elif is_inventory and not self._inventory_initialized and not is_char:
                 self._handle_inventory_navigation(state, rect, hub)
             elif (is_pet or is_stash or is_merchant or is_crafting) and is_inventory:
                 cur_x, _ = self.injector.cursor_position()
@@ -4134,6 +4395,34 @@ class BridgeEngine(threading.Thread):
                         self._handle_stash_navigation(state, rect, hub)
                     else:
                         self._handle_pet_inventory_navigation(state, rect, hub)
+                else:
+                    self._handle_inventory_navigation(state, rect, hub)
+            elif is_pet and is_skills:
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+                if cur_x < mid_x:
+                    self._handle_pet_inventory_navigation(state, rect, hub)
+                else:
+                    skill_points = getattr(self._memory_state, "skill_points_remaining", 0)
+                    self._handle_skill_menu_navigation(
+                        state, rect, hub,
+                        char_also_open=False,
+                        pet_also_open=True,
+                        skill_points=skill_points,
+                        char_class=self._char_class,
+                        now=now,
+                    )
+            elif is_char and is_inventory:
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+                if cur_x < mid_x:
+                    attr_points = getattr(self._memory_state, "attr_points_remaining", 0)
+                    self._handle_char_menu_navigation(
+                        state, rect, hub,
+                        skill_also_open=False,
+                        inv_also_open=True,
+                        attr_points=attr_points,
+                    )
                 else:
                     self._handle_inventory_navigation(state, rect, hub)
             elif is_crafting:
@@ -4188,26 +4477,7 @@ class BridgeEngine(threading.Thread):
                 )
 
             # Menu de Personagem (C) e Árvore de Habilidades (S)
-            is_char   = "Atributos"    in (self._memory_state.open_menus or [])
-            is_skills = "Habilidades"  in (self._memory_state.open_menus or [])
-
-            if is_char or is_skills:
-                # Lê classe do personagem da memória (ex: "destroyer", "vanquisher", "alchemist").
-                # _char_class é mantido entre ticks; atualiza e reseta a aba para 1 quando muda.
-                raw_class = getattr(self._memory_state, "char_class", "").strip().lower()
-                if raw_class in ("destroyer", "vanquisher", "alchemist"):
-                    if self._char_class != raw_class:
-                        self._char_class = raw_class
-                        self._skill_tab = 1
-                        self._skill_menu_initialized = False
-                        self._skill_focus_row = 0
-                        self._skill_focus_col = 1
-                        self._skill_in_tabbar = False
-                        self._skill_in_pink = False
-                        self._skill_in_spells = False
-                        self.shared.update(char_class=raw_class, skill_tab=1)
-                    self._char_class = raw_class
-
+            if (is_char or is_skills) and not (is_pet and is_skills) and not (is_char and is_inventory):
                 # Contexto para os handlers
                 char_also_open  = is_char
                 skill_also_open = is_skills
@@ -4222,24 +4492,26 @@ class BridgeEngine(threading.Thread):
                     # Ambos abertos: cursor à esquerda → menu C; à direita → menu S.
                     if cur_x < mid_x:
                         self._handle_char_menu_navigation(
-                            state, rect, hub, skill_also_open=True, attr_points=attr_points
+                            state, rect, hub, skill_also_open=True, inv_also_open=False, attr_points=attr_points
                         )
                     else:
                         self._handle_skill_menu_navigation(
                             state, rect, hub,
                             char_also_open=True,
+                            pet_also_open=False,
                             skill_points=skill_points,
                             char_class=self._char_class,
                             now=now,
                         )
                 elif is_char:
                     self._handle_char_menu_navigation(
-                        state, rect, hub, skill_also_open=False, attr_points=attr_points
+                        state, rect, hub, skill_also_open=False, inv_also_open=False, attr_points=attr_points
                     )
                 else:
                     self._handle_skill_menu_navigation(
                         state, rect, hub,
                         char_also_open=False,
+                        pet_also_open=False,
                         skill_points=skill_points,
                         char_class=self._char_class,
                         now=now,

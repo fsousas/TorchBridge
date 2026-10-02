@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtGui import QGuiApplication, QPainter, QPixmap
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from torchbridge.config import ConfigManager
@@ -281,6 +281,80 @@ class OverlayCalibrationTests(unittest.TestCase):
                 painter.end()
 
 
+    def test_draw_calibration_pet_skill_bridge_colors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_state_desc="Em Jogo",
+                pet_inventory_open=True,
+                skill_menu_open=True,
+                memory_open_menus=["Pet", "Habilidades"],
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            colors = []
+            orig_setBrush = painter.setBrush
+
+            def capture_brush(b):
+                if isinstance(b, QColor):
+                    colors.append((b.red(), b.green(), b.blue()))
+                elif hasattr(b, "color") and callable(b.color):
+                    c = b.color()
+                    colors.append((c.red(), c.green(), c.blue()))
+                orig_setBrush(b)
+
+            painter.setBrush = capture_brush
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                # O tom laranja de ponte é (0xFD=253, 0x61=97, 0x00=0)
+                orange_count = sum(1 for r, g, b in colors if r == 253 and g == 97 and b == 0)
+                # 3 slots do grid (coluna 7: 3 linhas) + 1 slot superior (pet_spell_2) = 4 slots no pet + slots na skill tree
+                self.assertGreaterEqual(orange_count, 4)
+            finally:
+                painter.end()
+
+    def test_draw_calibration_char_inventory_bridge_colors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_state_desc="Em Jogo",
+                inventory_open=True,
+                char_menu_open=True,
+                memory_open_menus=["Atributos", "Inventário"],
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            colors = []
+            orig_setBrush = painter.setBrush
+
+            def capture_brush(b):
+                if isinstance(b, QColor):
+                    colors.append((b.red(), b.green(), b.blue()))
+                elif hasattr(b, "color") and callable(b.color):
+                    c = b.color()
+                    colors.append((c.red(), c.green(), c.blue()))
+                orig_setBrush(b)
+
+            painter.setBrush = capture_brush
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                # O tom laranja de ponte é (0xFD=253, 0x61=97, 0x00=0)
+                orange_count = sum(1 for r, g, b in colors if r == 253 and g == 97 and b == 0)
+                # No inventário: coluna 1 (3 linhas) + 5 slots superiores (spell_1, main_hand, belt, gloves, helmet) = 8
+                # No menu de atributos: nós de ponte (xp, fame, mp, res_fire, res_ice, 4 attr_bridge) = 9
+                # Total esperado >= 17 slots laranjas
+                self.assertGreaterEqual(orange_count, 17)
+            finally:
+                painter.end()
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

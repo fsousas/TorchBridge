@@ -966,7 +966,8 @@ class GameOverlay(QWidget):
                 is_stash_also_open = snapshot.stash_open or ("Baú" in (snapshot.memory_open_menus or []))
                 is_merchant_also_open = snapshot.merchant_open or ("Vendedor (Loja)" in (snapshot.memory_open_menus or []))
                 is_crafting_also_open = snapshot.crafting_open or any(m in (snapshot.memory_open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
-                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open or is_crafting_also_open
+                is_char_also_open = snapshot.char_menu_open or ("Atributos" in (snapshot.memory_open_menus or []))
+                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open or is_crafting_also_open or is_char_also_open
                 for r in range(1, INVENTORY_GRID_ROWS + 1):
                     for c in range(1, INVENTORY_GRID_COLS + 1):
                         sx, sy = inventory_slot_point(rect, r, c)
@@ -975,7 +976,7 @@ class GameOverlay(QWidget):
                         is_slot1 = (r == 1 and c == 1)
                         is_focus = (snapshot.inventory_focus in (f"({r}, {c})", f"({r},{c})"))
                         is_bridge = is_left_also_open and (c == 1)
-                        color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
+                        color = c_laranja if is_bridge else (c_amarelo if is_slot1 else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
                             painter.setBrush(color)
@@ -1027,6 +1028,8 @@ class GameOverlay(QWidget):
                 # Slots do Grid 3x7 (Linha 1..3, Coluna 1..7)
                 slot_box = 18.0 * scale * (rect.height / 768.0)
                 is_inv_also_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
+                is_skills_also_open = snapshot.skill_menu_open or ("Habilidades" in (snapshot.memory_open_menus or []))
+                is_right_also_open = is_inv_also_open or is_skills_also_open
                 for r in range(1, PET_GRID_ROWS + 1):
                     for c in range(1, PET_GRID_COLS + 1):
                         sx, sy = pet_inventory_slot_point(rect, r, c)
@@ -1034,7 +1037,7 @@ class GameOverlay(QWidget):
                         ly = sy - rect.top - slot_box / 2.0
                         is_slot1 = (r == 1 and c == 1)
                         is_focus = (snapshot.pet_inventory_focus in (f"({r}, {c})", f"({r},{c})"))
-                        is_bridge = is_inv_also_open and (c == 7)
+                        is_bridge = is_right_also_open and (c == 7)
                         color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
@@ -1050,7 +1053,7 @@ class GameOverlay(QWidget):
                     lx = ux - rect.left - slot_box / 2.0
                     ly = uy - rect.top - slot_box / 2.0
                     is_focus = (snapshot.pet_inventory_focus == slot_name)
-                    is_bridge = is_inv_also_open and (slot_name == "pet_spell_2")
+                    is_bridge = is_right_also_open and (slot_name == "pet_spell_2")
                     color = c_laranja if is_bridge else c_verde
                     if is_focus:
                         painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
