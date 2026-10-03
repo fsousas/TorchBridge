@@ -1703,6 +1703,62 @@ def skill_layout_for(char_class: str, tab_index: int) -> list[list[int | None]] 
     return SKILL_TREE_LAYOUTS.get(cls, {}).get(tab_name)
 
 
+# ==============================================================================
+# Menu de Missões / Quests (Q) (Base de referência 1024×768 — painel direito)
+# ==============================================================================
+# Calibrado a partir de assets/images/menus/quest/Quest-menu-open.png
+# e assets/images/menus/quest/Quest-menu-plus-other-menus-open.png
+# Painel direito ancorado a rect.right:
+# x = rect.right - (1024.0 - base_x) * scale
+# y = rect.top + base_y * scale
+
+QUEST_ROW_ORIGIN = (976.5, 106.5)
+QUEST_ROW_STEP_Y = 25.0
+QUEST_ROW_COUNT = 6
+
+QUEST_REWARD_POINT = (964.5, 573.5)
+QUEST_ABANDON_POINT = (894.5, 646.5)
+
+
+def quest_slot_point(rect: Rect, index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de uma linha de missão na lista (index 0..5)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    idx = int(clamp(index, 0, QUEST_ROW_COUNT - 1))
+    base_x = QUEST_ROW_ORIGIN[0]
+    base_y = QUEST_ROW_ORIGIN[1] + idx * QUEST_ROW_STEP_Y
+    x = rect.right - (1024.0 - base_x) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def quest_reward_point(rect: Rect) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do slot de recompensa de item do menu de missões."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    x = rect.right - (1024.0 - QUEST_REWARD_POINT[0]) * scale
+    y = rect.top + QUEST_REWARD_POINT[1] * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
+def quest_abandon_point(rect: Rect) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) do botão Abandon (Abandonar Missão)."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    x = rect.right - (1024.0 - QUEST_ABANDON_POINT[0]) * scale
+    y = rect.top + QUEST_ABANDON_POINT[1] * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
@@ -1784,6 +1840,14 @@ class OverlaySnapshot:
     attr_points_remaining: int = 0
     skill_points_remaining: int = 0
     skill_upgradeable: dict[tuple[int, int], bool] = field(default_factory=dict)
+    # Menu de Missões / Quests (Q)
+    quest_menu_open: bool = False
+    quest_focus: str | None = None  # "quest_0".."quest_5", "reward", "abandon"
+    quest_count: int = 0
+    quest_selected_idx: int = 0
+    quest_visible_rows: int = 0
+    quest_can_abandon: bool = False
+    quest_has_item_reward: bool = False
 
 
 

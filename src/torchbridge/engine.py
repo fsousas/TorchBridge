@@ -74,6 +74,10 @@ from .models import (
     skill_bridge_col,
     skill_snap_col,
     skill_layout_for,
+    QUEST_ROW_COUNT,
+    quest_slot_point,
+    quest_reward_point,
+    quest_abandon_point,
 )
 
 from .memory import GameMemoryState, TorchlightMemoryReader
@@ -260,6 +264,11 @@ class BridgeEngine(threading.Thread):
         # Classe do personagem atual — lida da memória; necessária para skill_layout_for().
         # Valores esperados: "destroyer", "vanquisher", "alchemist" (ou "" se desconhecida).
         self._char_class: str = ""
+        # Navegação no Menu de Missões / Quests (Q)
+        self._quest_menu_initialized: bool = False
+        self._quest_focus: str = "quest_0"
+        self._last_quest_slot: int = 0
+        self._quest_b_consumed: bool = False
 
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
@@ -351,7 +360,18 @@ class BridgeEngine(threading.Thread):
             skill_menu_open=False,
             skill_tab=1,
             skill_focus=None,
+            quest_menu_open=False,
+            quest_focus=None,
+            quest_count=0,
+            quest_selected_idx=0,
+            quest_visible_rows=0,
+            quest_can_abandon=False,
+            quest_has_item_reward=False,
         )
+        self._quest_menu_initialized = False
+        self._quest_focus = "quest_0"
+        self._last_quest_slot = 0
+        self._quest_b_consumed = False
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
 
@@ -497,6 +517,10 @@ class BridgeEngine(threading.Thread):
         self._skill_in_pink = False
         self._skill_in_spells = False
         self._skill_spell_idx = 0
+        self._quest_menu_initialized = False
+        self._quest_focus = "quest_0"
+        self._last_quest_slot = 0
+        self._quest_b_consumed = False
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -1587,6 +1611,7 @@ class BridgeEngine(threading.Thread):
         hub: ControllerHub,
         skill_also_open: bool = False,
         inv_also_open: bool = False,
+        quest_also_open: bool = False,
         attr_points: int = 0,
     ) -> None:
         """Gerencia a navegação pelo menu de Personagem (C) via D-pad.
@@ -1772,7 +1797,25 @@ class BridgeEngine(threading.Thread):
                     inventory_focus=inv_target,
                 )
                 return
-            # Se nem Menu S nem Inventário estiverem abertos: borda direita, sem ação (mantém foco no nó laranja)
+            elif quest_also_open:
+                # Estamos no nó mais à direita (laranja / ponte) e Missões está aberto: atravessa a ponte!
+                q_idx = getattr(self._memory_state, "quest_selected_idx", 0) or 0
+                q_rows = getattr(self._memory_state, "quest_visible_rows", 1) or 1
+                target_idx = int(clamp(q_idx, 0, max(0, q_rows - 1)))
+                self._quest_menu_initialized = True
+                self._quest_focus = f"quest_{target_idx}"
+                self._last_quest_slot = target_idx
+                target_x, target_y = quest_slot_point(rect, target_idx)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    char_menu_open=True,
+                    char_menu_focus=focus,
+                    quest_menu_open=True,
+                    quest_focus=self._quest_focus,
+                )
+                return
+            # Se nem Menu S, nem Inventário, nem Quests estiverem abertos: borda direita, sem ação
 
         elif dpad_up:
             if cur_r > 0:
@@ -2259,6 +2302,291 @@ class BridgeEngine(threading.Thread):
             char_class=char_class,
         )
 
+    # Navegação no Menu de Missões / Quests (Q)
+    def _handle_quest_menu_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        pet_also_open: bool = False,
+        char_also_open: bool = False,
+    ) -> None:
+        """Gerencia a navegação por D-pad no Menu de Missões / Quests (Q).
+
+        - 6 slots superiores na lista de missões (quest_0..quest_5).
+        - D-pad Up / Down navega e realiza clique simples com o botão esquerdo para o jogo
+          atualizar Description e Rewards.
+        - Memória interna: recupera e armazena o último slot selecionado ao fechar e reabrir.
+        - Slots inferiores dinâmicos conforme propriedades da missão selecionada:
+          recompensa de item (reward) e botão Abandon (abandon).
+        - Ações de ponte bidirecionais quando Pet ou Character estiver aberto na lateral esquerda.
+        """
+        if not rect.valid:
+            return
+
+        # LB abre o menu radial quando permitido
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
+            return
+
+        visible_rows = getattr(self._memory_state, "quest_visible_rows", 1) or 1
+        can_abandon = getattr(self._memory_state, "quest_can_abandon", False)
+        has_reward = getattr(self._memory_state, "quest_has_item_reward", False)
+
+        # 1. Inicialização ao abrir o menu de missões
+        if not self._quest_menu_initialized:
+            self._quest_menu_initialized = True
+            mem_selected = getattr(self._memory_state, "quest_selected_idx", 0)
+            initial_idx = mem_selected if mem_selected is not None else self._last_quest_slot
+            initial_idx = int(clamp(initial_idx, 0, max(0, visible_rows - 1)))
+            self._quest_focus = f"quest_{initial_idx}"
+            self._last_quest_slot = initial_idx
+
+            target_x, target_y = quest_slot_point(rect, initial_idx)
+            self.injector.move(target_x, target_y)
+            self.shared.update(
+                quest_menu_open=True,
+                quest_focus=self._quest_focus,
+                quest_count=getattr(self._memory_state, "quest_count", 0),
+                quest_selected_idx=initial_idx,
+                quest_visible_rows=visible_rows,
+                quest_can_abandon=can_abandon,
+                quest_has_item_reward=has_reward,
+            )
+            return
+
+        # 2. Leitura de borda dos botões D-pad e botões A / B
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        a_pressed = state.pressed("a") and not self._previous.pressed("a")
+        b_pressed = state.pressed("b") and not self._previous.pressed("b")
+
+        current = self._quest_focus or "quest_0"
+
+        # Botão B (Bolinha no PS / B no Xbox) nas opções inferiores (reward / abandon):
+        # retorna o cursor para a navegação da parte de cima (última missão selecionada)
+        if b_pressed and current in ("reward", "abandon"):
+            last_idx = int(clamp(self._last_quest_slot, 0, max(0, visible_rows - 1)))
+            self._quest_focus = f"quest_{last_idx}"
+            self._last_quest_slot = last_idx
+            target_x, target_y = quest_slot_point(rect, last_idx)
+            self.injector.move(target_x, target_y)
+            time.sleep(0.075)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.02, 0.06, 25)
+            self.shared.update(
+                quest_menu_open=True,
+                quest_focus=self._quest_focus,
+                quest_count=getattr(self._memory_state, "quest_count", 0),
+                quest_selected_idx=self._last_quest_slot,
+                quest_visible_rows=visible_rows,
+                quest_can_abandon=can_abandon,
+                quest_has_item_reward=has_reward,
+            )
+            self._quest_b_consumed = True
+            return
+
+        # Clique no botão Abandon se focado e botão A (Sul / X no PS) pressionado
+        if a_pressed and current == "abandon" and can_abandon:
+            target_x, target_y = quest_abandon_point(rect)
+            self.injector.move(target_x, target_y)
+            time.sleep(0.075)
+            self.injector.mouse_button("left", True)
+            time.sleep(0.040)
+            self.injector.mouse_button("left", False)
+            hub.rumble(0.04, 0.10, 35)
+            return
+
+        # Atalho do botão A (Sul / X no PS) na lista de missões superior:
+        # Move para recompensa (se houver) ou abandonar (se puder abandonar).
+        # Se não tiver nenhum dos dois, não faz nada.
+        if a_pressed and current.startswith("quest_"):
+            if has_reward:
+                self._quest_focus = "reward"
+                target_x, target_y = quest_reward_point(rect)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.02, 0.06, 25)
+                self.shared.update(
+                    quest_menu_open=True,
+                    quest_focus=self._quest_focus,
+                    quest_count=getattr(self._memory_state, "quest_count", 0),
+                    quest_selected_idx=self._last_quest_slot,
+                    quest_visible_rows=visible_rows,
+                    quest_can_abandon=can_abandon,
+                    quest_has_item_reward=has_reward,
+                )
+                return
+            elif can_abandon:
+                self._quest_focus = "abandon"
+                target_x, target_y = quest_abandon_point(rect)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.02, 0.06, 25)
+                self.shared.update(
+                    quest_menu_open=True,
+                    quest_focus=self._quest_focus,
+                    quest_count=getattr(self._memory_state, "quest_count", 0),
+                    quest_selected_idx=self._last_quest_slot,
+                    quest_visible_rows=visible_rows,
+                    quest_can_abandon=can_abandon,
+                    quest_has_item_reward=has_reward,
+                )
+                return
+            # Se não tiver recompensa nem abandonar, não faz nada
+            return
+
+        if not (dpad_up or dpad_down or dpad_left or dpad_right):
+            return
+
+        # 3. D-pad Left: Ponte para o menu do lado esquerdo (Pet ou Character)
+        if dpad_left:
+            if pet_also_open:
+                # Ponte para o Pet: extremidade direita do grid do pet (coluna 7)
+                if current == "quest_0":
+                    pet_target = (1, 7)
+                elif current == "quest_1":
+                    pet_target = (1, 7)
+                elif current == "quest_2":
+                    pet_target = (2, 7)
+                else:
+                    pet_target = (3, 7)
+                self._pet_inventory_initialized = True
+                self._pet_inventory_focus = pet_target
+                target_x, target_y = pet_inventory_slot_point(rect, pet_target[0], pet_target[1])
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    pet_inventory_open=True,
+                    pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                    pet_inventory_focus=f"({pet_target[0]}, {pet_target[1]})",
+                    quest_menu_open=True,
+                    quest_focus=self._quest_focus,
+                )
+                return
+            elif char_also_open:
+                # Ponte para o Character: extremidade direita dos atributos
+                if current == "quest_0":
+                    char_target = "xp"
+                elif current == "quest_1":
+                    char_target = "fame"
+                elif current == "quest_2":
+                    char_target = "strength_bridge"
+                elif current == "quest_3":
+                    char_target = "dexterity_bridge"
+                elif current == "quest_4":
+                    char_target = "magic_bridge"
+                elif current == "quest_5":
+                    char_target = "defense_bridge"
+                elif current == "reward":
+                    char_target = "res_fire"
+                else:  # abandon
+                    char_target = "res_ice"
+
+                self._char_menu_initialized = True
+                self._char_menu_focus = char_target
+                has_points = (getattr(self._memory_state, "attr_points_remaining", 0) > 0)
+                nodes_dict = CHAR_MENU_NODES_HAS_POINTS if has_points else CHAR_MENU_NODES_NO_POINTS
+                base_x, base_y = nodes_dict.get(char_target, (282.5, 309.5))
+                scale = rect.height / 768.0
+                target_x = int(clamp(round(rect.left + base_x * scale), rect.left + 2, rect.right - 2))
+                target_y = int(clamp(round(rect.top + base_y * scale), rect.top + 2, rect.bottom - 2))
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    char_menu_open=True,
+                    char_menu_focus=char_target,
+                    quest_menu_open=True,
+                    quest_focus=self._quest_focus,
+                )
+                return
+
+        # 4. D-pad Down: Desce na lista de missões ou para os slots inferiores
+        if dpad_down:
+            if current.startswith("quest_"):
+                idx = int(current.split("_")[1])
+                if idx + 1 < visible_rows:
+                    new_idx = idx + 1
+                    self._quest_focus = f"quest_{new_idx}"
+                    self._last_quest_slot = new_idx
+                    target_x, target_y = quest_slot_point(rect, new_idx)
+                    self.injector.move(target_x, target_y)
+                    time.sleep(0.075)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.040)
+                    self.injector.mouse_button("left", False)
+                    hub.rumble(0.02, 0.06, 25)
+                elif has_reward:
+                    self._quest_focus = "reward"
+                    target_x, target_y = quest_reward_point(rect)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.02, 0.06, 25)
+                elif can_abandon:
+                    self._quest_focus = "abandon"
+                    target_x, target_y = quest_abandon_point(rect)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.02, 0.06, 25)
+            elif current == "reward":
+                if can_abandon:
+                    self._quest_focus = "abandon"
+                    target_x, target_y = quest_abandon_point(rect)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.02, 0.06, 25)
+
+        # 5. D-pad Up: Sobe na lista ou a partir de abandon/reward
+        elif dpad_up:
+            if current == "abandon":
+                if has_reward:
+                    self._quest_focus = "reward"
+                    target_x, target_y = quest_reward_point(rect)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.02, 0.06, 25)
+                else:
+                    last_idx = max(0, visible_rows - 1)
+                    self._quest_focus = f"quest_{last_idx}"
+                    self._last_quest_slot = last_idx
+                    target_x, target_y = quest_slot_point(rect, last_idx)
+                    self.injector.move(target_x, target_y)
+                    time.sleep(0.075)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.040)
+                    self.injector.mouse_button("left", False)
+                    hub.rumble(0.02, 0.06, 25)
+            elif current == "reward":
+                last_idx = max(0, visible_rows - 1)
+                self._quest_focus = f"quest_{last_idx}"
+                self._last_quest_slot = last_idx
+                target_x, target_y = quest_slot_point(rect, last_idx)
+                self.injector.move(target_x, target_y)
+                time.sleep(0.075)
+                self.injector.mouse_button("left", True)
+                time.sleep(0.040)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.02, 0.06, 25)
+            elif current.startswith("quest_"):
+                idx = int(current.split("_")[1])
+                if idx > 0:
+                    new_idx = idx - 1
+                    self._quest_focus = f"quest_{new_idx}"
+                    self._last_quest_slot = new_idx
+                    target_x, target_y = quest_slot_point(rect, new_idx)
+                    self.injector.move(target_x, target_y)
+                    time.sleep(0.075)
+                    self.injector.mouse_button("left", True)
+                    time.sleep(0.040)
+                    self.injector.mouse_button("left", False)
+                    hub.rumble(0.02, 0.06, 25)
+
+        self.shared.update(
+            quest_menu_open=True,
+            quest_focus=self._quest_focus,
+            quest_selected_idx=self._last_quest_slot,
+            quest_visible_rows=visible_rows,
+            quest_can_abandon=can_abandon,
+            quest_has_item_reward=has_reward,
+        )
+
     # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
     def _handle_inventory_navigation(
         self,
@@ -2698,6 +3026,7 @@ class BridgeEngine(threading.Thread):
 
         is_inv_open = "Inventário" in (self._memory_state.open_menus or [])
         is_skills_open = "Habilidades" in (self._memory_state.open_menus or [])
+        is_quest_open = "Missões (Quests)" in (self._memory_state.open_menus or [])
 
         if isinstance(current, tuple):
             row, col = current
@@ -2764,6 +3093,25 @@ class BridgeEngine(threading.Thread):
                         skill_menu_open=True,
                         skill_tab=self._skill_tab,
                         skill_focus=focus_str,
+                    )
+                    return
+                elif is_quest_open:
+                    # Ponte para o Menu de Quests: pula para a quest ativa selecionada
+                    q_idx = getattr(self._memory_state, "quest_selected_idx", 0) or 0
+                    q_rows = getattr(self._memory_state, "quest_visible_rows", 1) or 1
+                    target_idx = int(clamp(q_idx, 0, max(0, q_rows - 1)))
+                    self._quest_menu_initialized = True
+                    self._quest_focus = f"quest_{target_idx}"
+                    self._last_quest_slot = target_idx
+                    target_x, target_y = quest_slot_point(rect, target_idx)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+                    self.shared.update(
+                        pet_inventory_open=True,
+                        pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                        pet_inventory_focus=f"({row}, 7)",
+                        quest_menu_open=True,
+                        quest_focus=self._quest_focus,
                     )
                     return
                 elif row == 1:
@@ -2839,6 +3187,25 @@ class BridgeEngine(threading.Thread):
                     skill_menu_open=True,
                     skill_tab=self._skill_tab,
                     skill_focus=f"({s_row}, {s_col})",
+                )
+                return
+            elif is_quest_open and dpad_right and str(current) == "pet_spell_2":
+                # Ponte para o Menu de Quests: pet_spell_2 -> quest ativa selecionada
+                q_idx = getattr(self._memory_state, "quest_selected_idx", 0) or 0
+                q_rows = getattr(self._memory_state, "quest_visible_rows", 1) or 1
+                target_idx = int(clamp(q_idx, 0, max(0, q_rows - 1)))
+                self._quest_menu_initialized = True
+                self._quest_focus = f"quest_{target_idx}"
+                self._last_quest_slot = target_idx
+                target_x, target_y = quest_slot_point(rect, target_idx)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                self.shared.update(
+                    pet_inventory_open=True,
+                    pet_inventory_tab=self._pet_inventory_tab or "tab-1",
+                    pet_inventory_focus="pet_spell_2",
+                    quest_menu_open=True,
+                    quest_focus=self._quest_focus,
                 )
                 return
 
@@ -3793,7 +4160,9 @@ class BridgeEngine(threading.Thread):
         # sairia ESC E 8 no mesmo tick). Sem LT: com painel aberto no tick anterior,
         # B = ESC + reset; senão B toca o 2.
         if state.pressed("b") and not self._previous.pressed("b") and not lt_now:
-            if panels_open:
+            if getattr(self, "_quest_b_consumed", False):
+                self._quest_b_consumed = False
+            elif panels_open:
                 # ESC direto no injetor (não _tap_binding): o jogo fechou os menus,
                 # o rastreador acompanha. O clique esquerdo retido do click-to-move
                 # segue intacto — a parte de cursor roda depois no mesmo tick.
@@ -3922,8 +4291,8 @@ class BridgeEngine(threading.Thread):
         if not self._memory_state.is_in_game:
             return False
         menus = self._memory_state.open_menus or []
-        # Permitido sem menus abertos, ou quando painéis comuns de gameplay (Inventário, Pet, Atributos, Habilidades) estão abertos
-        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades"}
+        # Permitido sem menus abertos, ou quando painéis comuns de gameplay (Inventário, Pet, Atributos, Habilidades, Missões (Quests)) estão abertos
+        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades", "Missões (Quests)"}
         other_menus = [m for m in menus if m not in allowed_panels]
         if other_menus:
             return False
@@ -4352,6 +4721,7 @@ class BridgeEngine(threading.Thread):
             is_crafting = any(m in (self._memory_state.open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
             is_char   = "Atributos"    in (self._memory_state.open_menus or [])
             is_skills = "Habilidades"  in (self._memory_state.open_menus or [])
+            is_quest  = "Missões (Quests)" in (self._memory_state.open_menus or [])
 
             if is_char or is_skills:
                 # Lê classe do personagem da memória (ex: "destroyer", "vanquisher", "alchemist").
@@ -4378,9 +4748,9 @@ class BridgeEngine(threading.Thread):
                 self._handle_stash_navigation(state, rect, hub)
             elif is_pet and not self._pet_inventory_initialized:
                 self._handle_pet_inventory_navigation(state, rect, hub)
-            elif is_char and not self._char_menu_initialized and not is_skills and not is_inventory:
+            elif is_char and not self._char_menu_initialized and not is_skills and not is_inventory and not is_quest:
                 attr_points = getattr(self._memory_state, "attr_points_remaining", 0)
-                self._handle_char_menu_navigation(state, rect, hub, skill_also_open=False, inv_also_open=False, attr_points=attr_points)
+                self._handle_char_menu_navigation(state, rect, hub, skill_also_open=False, inv_also_open=False, quest_also_open=False, attr_points=attr_points)
             elif is_inventory and not self._inventory_initialized and not is_char:
                 self._handle_inventory_navigation(state, rect, hub)
             elif (is_pet or is_stash or is_merchant or is_crafting) and is_inventory:
@@ -4421,10 +4791,34 @@ class BridgeEngine(threading.Thread):
                         state, rect, hub,
                         skill_also_open=False,
                         inv_also_open=True,
+                        quest_also_open=False,
                         attr_points=attr_points,
                     )
                 else:
                     self._handle_inventory_navigation(state, rect, hub)
+            elif is_pet and is_quest:
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+                if cur_x < mid_x:
+                    self._handle_pet_inventory_navigation(state, rect, hub)
+                else:
+                    self._handle_quest_menu_navigation(state, rect, hub, pet_also_open=True, char_also_open=False)
+            elif is_char and is_quest:
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+                if cur_x < mid_x:
+                    attr_points = getattr(self._memory_state, "attr_points_remaining", 0)
+                    self._handle_char_menu_navigation(
+                        state, rect, hub,
+                        skill_also_open=False,
+                        inv_also_open=False,
+                        quest_also_open=True,
+                        attr_points=attr_points,
+                    )
+                else:
+                    self._handle_quest_menu_navigation(state, rect, hub, pet_also_open=False, char_also_open=True)
+            elif is_quest:
+                self._handle_quest_menu_navigation(state, rect, hub, pet_also_open=False, char_also_open=False)
             elif is_crafting:
                 self._handle_crafting_navigation(state, rect, hub)
             elif is_merchant:
@@ -4477,7 +4871,7 @@ class BridgeEngine(threading.Thread):
                 )
 
             # Menu de Personagem (C) e Árvore de Habilidades (S)
-            if (is_char or is_skills) and not (is_pet and is_skills) and not (is_char and is_inventory):
+            if (is_char or is_skills) and not (is_pet and is_skills) and not (is_char and is_inventory) and not (is_char and is_quest):
                 # Contexto para os handlers
                 char_also_open  = is_char
                 skill_also_open = is_skills
@@ -4492,7 +4886,7 @@ class BridgeEngine(threading.Thread):
                     # Ambos abertos: cursor à esquerda → menu C; à direita → menu S.
                     if cur_x < mid_x:
                         self._handle_char_menu_navigation(
-                            state, rect, hub, skill_also_open=True, inv_also_open=False, attr_points=attr_points
+                            state, rect, hub, skill_also_open=True, inv_also_open=False, quest_also_open=False, attr_points=attr_points
                         )
                     else:
                         self._handle_skill_menu_navigation(
@@ -4505,7 +4899,7 @@ class BridgeEngine(threading.Thread):
                         )
                 elif is_char:
                     self._handle_char_menu_navigation(
-                        state, rect, hub, skill_also_open=False, inv_also_open=False, attr_points=attr_points
+                        state, rect, hub, skill_also_open=False, inv_also_open=False, quest_also_open=False, attr_points=attr_points
                     )
                 else:
                     self._handle_skill_menu_navigation(
@@ -4531,6 +4925,11 @@ class BridgeEngine(threading.Thread):
                 self._skill_in_spells = False
                 self._skill_spell_idx = 0
                 self.shared.update(skill_menu_open=False, skill_focus=None)
+
+            if not is_quest and self._quest_menu_initialized:
+                self._quest_menu_initialized = False
+                self._quest_b_consumed = False
+                self.shared.update(quest_menu_open=False, quest_focus=None)
         else:
             if self._title_screen_initialized:
                 self._title_screen_initialized = False
@@ -4615,6 +5014,10 @@ class BridgeEngine(threading.Thread):
                 self._skill_in_spells = False
                 self._skill_spell_idx = 0
                 self.shared.update(skill_menu_open=False, skill_focus=None)
+            if self._quest_menu_initialized:
+                self._quest_menu_initialized = False
+                self._quest_b_consumed = False
+                self.shared.update(quest_menu_open=False, quest_focus=None)
 
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
@@ -4670,11 +5073,28 @@ class BridgeEngine(threading.Thread):
         # dos botões A e X são tratadas inteiramente pelos respectivos handlers (que realizam o
         # clique e movem o cursor para o próximo destino). Suprimimos o mouse aqui para que o botão
         # ainda segurado no controle não dispare um clique falso/residual no destino do cursor.
+        in_quest_side = False
+        if self._quest_menu_initialized and getattr(self, "_memory_state", None):
+            is_quest_open = (
+                "Missões (Quests)" in (self._memory_state.open_menus or [])
+                or getattr(self._memory_state, "quest_menu_open", False)
+            )
+            if is_quest_open:
+                cur_x, _ = self.injector.cursor_position()
+                mid_x = rect.left + rect.width * 0.5
+                is_pet_open = "Pet" in (self._memory_state.open_menus or [])
+                is_char_open = "Atributos" in (self._memory_state.open_menus or [])
+                if is_pet_open or is_char_open:
+                    in_quest_side = (cur_x >= mid_x)
+                else:
+                    in_quest_side = True
+
         suppress_mouse = (
             self._load_char_initialized
             or self._settings_initialized
             or self._fishing_initialized
             or self._modal_confirm_initialized
+            or in_quest_side
         )
         left_pressed = auto_move or (
             state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
@@ -4878,6 +5298,13 @@ class BridgeEngine(threading.Thread):
                             f"({self._skill_focus_row}, {self._skill_focus_col}, pink)" if self._skill_in_pink else f"({self._skill_focus_row}, {self._skill_focus_col})"
                         )
                     ) if self._skill_menu_initialized else None,
+                    quest_menu_open=self._quest_menu_initialized and ("Missões (Quests)" in (self._memory_state.open_menus or [])),
+                    quest_focus=self._quest_focus if self._quest_menu_initialized else None,
+                    quest_count=getattr(self._memory_state, "quest_count", 0) if self._quest_menu_initialized else 0,
+                    quest_selected_idx=self._last_quest_slot if self._quest_menu_initialized else 0,
+                    quest_visible_rows=getattr(self._memory_state, "quest_visible_rows", 0) if self._quest_menu_initialized else 0,
+                    quest_can_abandon=getattr(self._memory_state, "quest_can_abandon", False) if self._quest_menu_initialized else False,
+                    quest_has_item_reward=getattr(self._memory_state, "quest_has_item_reward", False) if self._quest_menu_initialized else False,
                     char_class=self._char_class or getattr(self._memory_state, "char_class", "").lower(),
                     attr_points_remaining=getattr(self._memory_state, "attr_points_remaining", 0),
                     skill_points_remaining=getattr(self._memory_state, "skill_points_remaining", 0),
