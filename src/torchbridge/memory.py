@@ -185,6 +185,13 @@ class GameMemoryState:
     attr_points_remaining: int = 0
     skill_points_remaining: int = 0
     skill_upgradeable: dict[tuple[int, int], bool] = field(default_factory=dict)
+    # Menu de Missões / Quests (Q)
+    quest_menu_open: bool = False
+    quest_count: int = 0
+    quest_selected_idx: int = 0
+    quest_visible_rows: int = 0
+    quest_can_abandon: bool = False
+    quest_has_item_reward: bool = False
 
 
 class TorchlightMemoryReader:
@@ -765,6 +772,44 @@ class TorchlightMemoryReader:
                                     skill_upgradeable[(r_i, c_i)] = can_up
                         break
 
+        # Menu de Missões (CQuestMenu em +0x0314)
+        quest_menu_open = "Missões (Quests)" in open_menus
+        quest_count = 0
+        quest_selected_idx = 0
+        quest_visible_rows = 0
+        quest_can_abandon = False
+        quest_has_item_reward = False
+
+        if quest_menu_open and p_ui:
+            p_qm = self.read_u32(p_ui + 0x0314)
+            if p_qm:
+                quest_selected_idx = self.read_u32(p_qm + 0xCC) or 0
+                quest_count = self.read_u32(p_qm + 0xD0) or 0
+
+                # 6 botões das linhas de quests (CEGUI::PushButton* em +0x3C + i*4)
+                v_rows = 0
+                for i in range(6):
+                    btn = self.read_u32(p_qm + 0x3C + i * 4)
+                    if btn and self.read_u8(btn + 0x1A1) == 1:
+                        v_rows += 1
+                quest_visible_rows = v_rows if v_rows > 0 else max(1, min(quest_count, 6))
+
+                # Botão Abandon (CEGUI::PushButton* em +0x20)
+                btn_abandon = self.read_u32(p_qm + 0x20)
+                if btn_abandon:
+                    en = (self.read_u8(btn_abandon + 0x1A1) == 1)
+                    vis = (self.read_u8(btn_abandon + 0x1A0) == 1)
+                    quest_can_abandon = en and vis
+
+                # Slots de itens de recompensa (CEGUI::Window* em +0x9C, +0xA0, +0xA4)
+                has_item_reward = False
+                for r_off in (0x9C, 0xA0, 0xA4):
+                    w_rew = self.read_u32(p_qm + r_off)
+                    if w_rew and self.read_u8(w_rew + 0x1A1) == 1:
+                        has_item_reward = True
+                        break
+                quest_has_item_reward = has_item_reward
+
         is_menu_open = len(open_menus) > 0
         return GameMemoryState(
             is_connected=True,
@@ -790,4 +835,10 @@ class TorchlightMemoryReader:
             attr_points_remaining=attr_points_remaining,
             skill_points_remaining=skill_points_remaining,
             skill_upgradeable=skill_upgradeable,
+            quest_menu_open=quest_menu_open,
+            quest_count=quest_count,
+            quest_selected_idx=quest_selected_idx,
+            quest_visible_rows=quest_visible_rows,
+            quest_can_abandon=quest_can_abandon,
+            quest_has_item_reward=quest_has_item_reward,
         )

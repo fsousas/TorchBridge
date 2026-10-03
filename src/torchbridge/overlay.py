@@ -84,6 +84,10 @@ from .models import (
     skill_slot_pink_point,
     skill_bridge_col,
     skill_spell_slot_point,
+    QUEST_ROW_COUNT,
+    quest_slot_point,
+    quest_reward_point,
+    quest_abandon_point,
 )
 from .native_overlay import FrameChannel, frame_size
 from .win32 import IS_WINDOWS, WindowLocator, make_overlay_clickthrough, position_overlay
@@ -966,7 +970,8 @@ class GameOverlay(QWidget):
                 is_stash_also_open = snapshot.stash_open or ("Baú" in (snapshot.memory_open_menus or []))
                 is_merchant_also_open = snapshot.merchant_open or ("Vendedor (Loja)" in (snapshot.memory_open_menus or []))
                 is_crafting_also_open = snapshot.crafting_open or any(m in (snapshot.memory_open_menus or []) for m in ("Transmutador", "Sockets", "Encantador"))
-                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open or is_crafting_also_open
+                is_char_also_open = snapshot.char_menu_open or ("Atributos" in (snapshot.memory_open_menus or []))
+                is_left_also_open = is_pet_also_open or is_stash_also_open or is_merchant_also_open or is_crafting_also_open or is_char_also_open
                 for r in range(1, INVENTORY_GRID_ROWS + 1):
                     for c in range(1, INVENTORY_GRID_COLS + 1):
                         sx, sy = inventory_slot_point(rect, r, c)
@@ -975,7 +980,7 @@ class GameOverlay(QWidget):
                         is_slot1 = (r == 1 and c == 1)
                         is_focus = (snapshot.inventory_focus in (f"({r}, {c})", f"({r},{c})"))
                         is_bridge = is_left_also_open and (c == 1)
-                        color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
+                        color = c_laranja if is_bridge else (c_amarelo if is_slot1 else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
                             painter.setBrush(color)
@@ -1027,6 +1032,9 @@ class GameOverlay(QWidget):
                 # Slots do Grid 3x7 (Linha 1..3, Coluna 1..7)
                 slot_box = 18.0 * scale * (rect.height / 768.0)
                 is_inv_also_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
+                is_skills_also_open = snapshot.skill_menu_open or ("Habilidades" in (snapshot.memory_open_menus or []))
+                is_quest_also_open = "Missões (Quests)" in (snapshot.memory_open_menus or [])
+                is_right_also_open = is_inv_also_open or is_skills_also_open or is_quest_also_open
                 for r in range(1, PET_GRID_ROWS + 1):
                     for c in range(1, PET_GRID_COLS + 1):
                         sx, sy = pet_inventory_slot_point(rect, r, c)
@@ -1034,7 +1042,7 @@ class GameOverlay(QWidget):
                         ly = sy - rect.top - slot_box / 2.0
                         is_slot1 = (r == 1 and c == 1)
                         is_focus = (snapshot.pet_inventory_focus in (f"({r}, {c})", f"({r},{c})"))
-                        is_bridge = is_inv_also_open and (c == 7)
+                        is_bridge = is_right_also_open and (c == 7)
                         color = c_amarelo if is_slot1 else (c_laranja if is_bridge else c_verde)
                         if is_focus:
                             painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
@@ -1050,7 +1058,7 @@ class GameOverlay(QWidget):
                     lx = ux - rect.left - slot_box / 2.0
                     ly = uy - rect.top - slot_box / 2.0
                     is_focus = (snapshot.pet_inventory_focus == slot_name)
-                    is_bridge = is_inv_also_open and (slot_name == "pet_spell_2")
+                    is_bridge = is_right_also_open and (slot_name == "pet_spell_2")
                     color = c_laranja if is_bridge else c_verde
                     if is_focus:
                         painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
@@ -1216,6 +1224,11 @@ class GameOverlay(QWidget):
                 has_points = (snapshot.attr_points_remaining > 0)
                 nodes_dict = CHAR_MENU_NODES_HAS_POINTS if has_points else CHAR_MENU_NODES_NO_POINTS
 
+                is_inv_also_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
+                is_skills_also_open = snapshot.skill_menu_open or ("Habilidades" in (snapshot.memory_open_menus or []))
+                is_quest_also_open = "Missões (Quests)" in (snapshot.memory_open_menus or [])
+                is_right_also_open = is_inv_also_open or is_skills_also_open or is_quest_also_open
+
                 for node_name, (base_x, base_y) in nodes_dict.items():
                     nx = rect.left + base_x * (rect.height / 768.0)
                     ny = rect.top + base_y * (rect.height / 768.0)
@@ -1227,7 +1240,7 @@ class GameOverlay(QWidget):
                     if node_name.endswith("_pink"):
                         color = c_rosa
                     elif node_name in ("xp", "fame", "mp", "res_fire", "res_ice") or node_name.endswith("_bridge"):
-                        color = c_laranja
+                        color = c_laranja if is_right_also_open else c_verde
                     else:
                         color = c_verde
 
@@ -1337,6 +1350,70 @@ class GameOverlay(QWidget):
                         painter.setPen(QPen(s_color, 1.5 * scale))
                         painter.setBrush(QColor(s_color.red(), s_color.green(), s_color.blue(), 140))
                     painter.drawRoundedRect(QRectF(slx, sly, slot_box, slot_box), 4.0 * scale, 4.0 * scale)
+
+            # 15. Alvos do Menu de Missões / Quests (Q)
+            is_quest_open = "Missões (Quests)" in (snapshot.memory_open_menus or [])
+            if is_quest_open:
+                c_verde = QColor(0x09, 0xB2, 0x00, 220)
+                c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
+                c_laranja = QColor(0xFD, 0x61, 0x00, 220)
+
+                slot_box = 18.0 * scale * (rect.height / 768.0)
+                is_pet_also_open = snapshot.pet_inventory_open or ("Pet" in (snapshot.memory_open_menus or []))
+                is_char_also_open = snapshot.char_menu_open or ("Atributos" in (snapshot.memory_open_menus or []))
+                has_left_menu = is_pet_also_open or is_char_also_open
+
+                # Cor padrão dos slots: laranja se houver menu à esquerda (ponte), verde se não
+                normal_color = c_laranja if has_left_menu else c_verde
+
+                # 6 slots da lista de missões (ou quantidade visível de linhas ativas)
+                rows_to_draw = snapshot.quest_visible_rows or max(1, min(snapshot.quest_count or QUEST_ROW_COUNT, QUEST_ROW_COUNT))
+                for i in range(rows_to_draw):
+                    sx, sy = quest_slot_point(rect, i)
+                    lx = sx - rect.left - slot_box / 2.0
+                    ly = sy - rect.top - slot_box / 2.0
+                    is_focus = (snapshot.quest_focus == f"quest_{i}")
+
+                    color = c_amarelo if is_focus else normal_color
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(color)
+                    else:
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
+                    painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+                # Slot de recompensa de item (se a missão selecionada tiver recompensa)
+                if snapshot.quest_has_item_reward:
+                    rx, ry = quest_reward_point(rect)
+                    lx = rx - rect.left - slot_box / 2.0
+                    ly = ry - rect.top - slot_box / 2.0
+                    is_focus = (snapshot.quest_focus == "reward")
+
+                    color = c_amarelo if is_focus else normal_color
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(color)
+                    else:
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
+                    painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
+
+                # Botão Abandon (se a missão selecionada puder ser abandonada)
+                if snapshot.quest_can_abandon:
+                    ax, ay = quest_abandon_point(rect)
+                    lx = ax - rect.left - slot_box / 2.0
+                    ly = ay - rect.top - slot_box / 2.0
+                    is_focus = (snapshot.quest_focus == "abandon")
+
+                    color = c_amarelo if is_focus else normal_color
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(color)
+                    else:
+                        painter.setPen(QPen(color, 1.5 * scale))
+                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 140))
+                    painter.drawRoundedRect(QRectF(lx, ly, slot_box, slot_box), 3.0 * scale, 3.0 * scale)
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração

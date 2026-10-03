@@ -650,6 +650,344 @@ class CharSkillMenuEngineTests(unittest.TestCase):
         self.assertEqual(self.shared.get().skill_tab, 1)
 
 
+class PetSkillMenuBridgeTests(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.config = ConfigManager(Path(self._temp_dir.name) / "perfil.json")
+        self.shared = SharedOverlayState()
+        self.engine = BridgeEngine(self.config, self.shared)
+        self.engine.injector = MagicMock()
+        self.engine.injector.cursor_position.return_value = (200, 500)
+        self.hub_mock = MagicMock()
+        self.rect = Rect(left=0, top=0, width=1024, height=768)
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
+
+    def test_pet_to_skill_bridge_jumps(self):
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Pet", "Habilidades"],
+            char_class="destroyer",
+        )
+        self.engine._pet_inventory_initialized = True
+        self.engine._skill_menu_initialized = True
+        self.engine._skill_tab = 1
+        self.engine._char_class = "destroyer"
+
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (200, 500)
+
+        # 1. Pet pet_spell_2 + D-pad Right -> Linha 0 (nó laranja) da Skill Tree
+        self.engine._pet_inventory_focus = "pet_spell_2"
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        # Destroyer tab 1 (berserker) row 0: [None, 1, 2] -> bridge col is 1
+        self.assertEqual(self.engine._skill_focus_row, 0)
+        self.assertEqual(self.engine._skill_focus_col, 1)
+        self.assertFalse(self.engine._skill_in_spells)
+
+        # 2. Pet (1, 7) + D-pad Right -> Linha 4 da Skill Tree
+        self.engine._pet_inventory_focus = (1, 7)
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        # Destroyer tab 1 row 4: [None, 1, 2] -> bridge col is 1
+        self.assertEqual(self.engine._skill_focus_row, 4)
+        self.assertEqual(self.engine._skill_focus_col, 1)
+        self.assertFalse(self.engine._skill_in_spells)
+
+        # 3. Pet (2, 7) + D-pad Right -> Linha 5 da Skill Tree
+        self.engine._pet_inventory_focus = (2, 7)
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        # Destroyer tab 1 row 5: [0, 1, None] -> bridge col is 0
+        self.assertEqual(self.engine._skill_focus_row, 5)
+        self.assertEqual(self.engine._skill_focus_col, 0)
+        self.assertFalse(self.engine._skill_in_spells)
+
+        # 4. Pet (3, 7) + D-pad Right -> Spells (spell_0 no rodapé)
+        self.engine._pet_inventory_focus = (3, 7)
+        self.engine._handle_pet_inventory_navigation(state_r, self.rect, self.hub_mock)
+        self.assertTrue(self.engine._skill_in_spells)
+        self.assertEqual(self.engine._skill_spell_idx, 0)
+
+    def test_skill_to_pet_bridge_jumps(self):
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Pet", "Habilidades"],
+            char_class="destroyer",
+        )
+        self.engine._pet_inventory_initialized = True
+        self.engine._skill_menu_initialized = True
+        self.engine._skill_tab = 1
+        self.engine._char_class = "destroyer"
+
+        state_l = ControllerState(connected=True, buttons={"dpad_left"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (800, 500)
+
+        # 1. Skill Linha 0 (nó laranja) + D-pad Left -> Pet pet_spell_2
+        self.engine._skill_focus_row = 0
+        self.engine._skill_focus_col = 1
+        self.engine._skill_in_spells = False
+        self.engine._handle_skill_menu_navigation(
+            state_l, self.rect, self.hub_mock,
+            char_also_open=False, pet_also_open=True,
+            skill_points=0, char_class="destroyer"
+        )
+        self.assertEqual(self.engine._pet_inventory_focus, "pet_spell_2")
+
+        # 2. Skill Linha 2 (nó laranja col 0) + D-pad Left -> Pet pet_spell_2
+        self.engine._skill_focus_row = 2
+        self.engine._skill_focus_col = 0
+        self.engine._handle_skill_menu_navigation(
+            state_l, self.rect, self.hub_mock,
+            char_also_open=False, pet_also_open=True,
+            skill_points=0, char_class="destroyer"
+        )
+        self.assertEqual(self.engine._pet_inventory_focus, "pet_spell_2")
+
+        # 3. Skill Linha 4 (nó laranja col 1) + D-pad Left -> Pet (1, 7)
+        self.engine._skill_focus_row = 4
+        self.engine._skill_focus_col = 1
+        self.engine._handle_skill_menu_navigation(
+            state_l, self.rect, self.hub_mock,
+            char_also_open=False, pet_also_open=True,
+            skill_points=0, char_class="destroyer"
+        )
+        self.assertEqual(self.engine._pet_inventory_focus, (1, 7))
+
+        # 4. Skill Linha 5 (nó laranja col 0) + D-pad Left -> Pet (2, 7)
+        self.engine._skill_focus_row = 5
+        self.engine._skill_focus_col = 0
+        self.engine._handle_skill_menu_navigation(
+            state_l, self.rect, self.hub_mock,
+            char_also_open=False, pet_also_open=True,
+            skill_points=0, char_class="destroyer"
+        )
+        self.assertEqual(self.engine._pet_inventory_focus, (2, 7))
+
+        # 5. Skill Spells (spell_0) + D-pad Left -> Pet (3, 7)
+        self.engine._skill_in_spells = True
+        self.engine._skill_spell_idx = 0
+        self.engine._handle_skill_menu_navigation(
+            state_l, self.rect, self.hub_mock,
+            char_also_open=False, pet_also_open=True,
+            skill_points=0, char_class="destroyer"
+        )
+        self.assertEqual(self.engine._pet_inventory_focus, (3, 7))
+
+    def test_dual_pet_skill_dispatch_by_cursor_position(self):
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Pet", "Habilidades"],
+            char_class="destroyer",
+        )
+        self.engine._pet_inventory_initialized = True
+        self.engine._pet_inventory_focus = (1, 1)
+        self.engine._skill_menu_initialized = True
+        self.engine._skill_tab = 1
+        self.engine._skill_focus_row = 0
+        self.engine._skill_focus_col = 1
+        self.engine._char_class = "destroyer"
+
+        cfg = self.config.get()
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        self.engine._previous = ControllerState(connected=True)
+
+        # 1. Cursor na esquerda (x=200 < 512): navega no Pet, Skill focus não muda!
+        self.engine.injector.cursor_position.return_value = (200, 500)
+        self.engine._process_active(self.hub_mock, state_r, self.rect, cfg, 1.0, 0.016)
+        self.assertEqual(self.engine._pet_inventory_focus, (1, 2))
+        self.assertEqual(self.engine._skill_focus_row, 0)
+        self.assertEqual(self.engine._skill_focus_col, 1)
+
+        # 2. Cursor na direita (x=800 >= 512): navega na Skill, Pet focus não muda!
+        self.engine.injector.cursor_position.return_value = (800, 500)
+        self.engine._previous = ControllerState(connected=True)
+        # Destroyer tab 1 row 0: [None, 1, 2]. From col 1 + right -> col 2
+        self.engine._process_active(self.hub_mock, state_r, self.rect, cfg, 1.05, 0.016)
+        self.assertEqual(self.engine._pet_inventory_focus, (1, 2))
+        self.assertEqual(self.engine._skill_focus_row, 0)
+        self.assertEqual(self.engine._skill_focus_col, 2)
+
+
+class CharInventoryMenuBridgeTests(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.config = ConfigManager(Path(self._temp_dir.name) / "perfil.json")
+        self.shared = SharedOverlayState()
+        self.engine = BridgeEngine(self.config, self.shared)
+        self.engine.injector = MagicMock()
+        self.engine.injector.cursor_position.return_value = (200, 500)
+        self.hub_mock = MagicMock()
+        self.rect = Rect(left=0, top=0, width=1024, height=768)
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
+
+    def test_char_to_inventory_bridge_jumps(self):
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Atributos", "Inventário"],
+            char_class="destroyer",
+        )
+        self.engine._char_menu_initialized = True
+        self.engine._inventory_initialized = True
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (200, 500)
+
+        # 1. xp + D-pad Right -> helmet
+        self.engine._char_menu_focus = "xp"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, "helmet")
+
+        # 2. mp + D-pad Right -> gloves
+        self.engine._char_menu_focus = "mp"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, "gloves")
+
+        # 3. strength_bridge + D-pad Right -> belt
+        self.engine._char_menu_focus = "strength_bridge"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, "belt")
+
+        # 4. dexterity_bridge + D-pad Right -> main_hand
+        self.engine._char_menu_focus = "dexterity_bridge"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, "main_hand")
+
+        # 5. magic_bridge + D-pad Right -> spell_1
+        self.engine._char_menu_focus = "magic_bridge"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, "spell_1")
+
+        # 6. defense_bridge + D-pad Right -> Grid (1, 1)
+        self.engine._char_menu_focus = "defense_bridge"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, (1, 1))
+
+        # 7. res_fire + D-pad Right -> Grid (2, 1)
+        self.engine._char_menu_focus = "res_fire"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, (2, 1))
+
+        # 8. res_ice + D-pad Right -> Grid (3, 1)
+        self.engine._char_menu_focus = "res_ice"
+        self.engine._handle_char_menu_navigation(
+            state_r, self.rect, self.hub_mock,
+            skill_also_open=False, inv_also_open=True, attr_points=0
+        )
+        self.assertEqual(self.engine._inventory_focus, (3, 1))
+
+    def test_inventory_to_char_bridge_jumps(self):
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Atributos", "Inventário"],
+            char_class="destroyer",
+        )
+        self.engine._char_menu_initialized = True
+        self.engine._inventory_initialized = True
+        state_l = ControllerState(connected=True, buttons={"dpad_left"})
+        self.engine._previous = ControllerState(connected=True)
+        self.engine.injector.cursor_position.return_value = (800, 500)
+
+        # 1. helmet + D-pad Left -> xp
+        self.engine._inventory_focus = "helmet"
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "xp")
+
+        # 2. gloves + D-pad Left -> mp
+        self.engine._inventory_focus = "gloves"
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "mp")
+
+        # 3. belt + D-pad Left -> strength_bridge
+        self.engine._inventory_focus = "belt"
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "strength_bridge")
+
+        # 4. main_hand + D-pad Left -> dexterity_bridge
+        self.engine._inventory_focus = "main_hand"
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "dexterity_bridge")
+
+        # 5. spell_1 + D-pad Left -> magic_bridge
+        self.engine._inventory_focus = "spell_1"
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "magic_bridge")
+
+        # 6. Grid (1, 1) + D-pad Left -> defense_bridge
+        self.engine._inventory_focus = (1, 1)
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "defense_bridge")
+
+        # 7. Grid (2, 1) + D-pad Left -> res_fire
+        self.engine._inventory_focus = (2, 1)
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "res_fire")
+
+        # 8. Grid (3, 1) + D-pad Left -> res_ice
+        self.engine._inventory_focus = (3, 1)
+        self.engine._handle_inventory_navigation(state_l, self.rect, self.hub_mock)
+        self.assertEqual(self.engine._char_menu_focus, "res_ice")
+
+    def test_dual_char_inventory_dispatch_by_cursor_position(self):
+        self.engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            open_menus=["Atributos", "Inventário"],
+            char_class="destroyer",
+        )
+        self.engine._char_menu_initialized = True
+        self.engine._char_menu_focus = "strength"
+        self.engine._inventory_initialized = True
+        self.engine._inventory_focus = (1, 1)
+
+        cfg = self.config.get()
+        state_r = ControllerState(connected=True, buttons={"dpad_right"})
+        self.engine._previous = ControllerState(connected=True)
+
+        # 1. Cursor na esquerda (x=200 < 512): navega no menu Character, foco do Inventário não muda!
+        self.engine.injector.cursor_position.return_value = (200, 500)
+        self.engine._process_active(self.hub_mock, state_r, self.rect, cfg, 1.0, 0.016)
+        self.assertEqual(self.engine._char_menu_focus, "strength_bridge")
+        self.assertEqual(self.engine._inventory_focus, (1, 1))
+
+        # 2. Cursor na direita (x=800 >= 512): navega no Inventário, foco do Character não muda!
+        self.engine.injector.cursor_position.return_value = (800, 500)
+        self.engine._previous = ControllerState(connected=True)
+        self.engine._process_active(self.hub_mock, state_r, self.rect, cfg, 1.05, 0.016)
+        self.assertEqual(self.engine._char_menu_focus, "strength_bridge")
+        self.assertEqual(self.engine._inventory_focus, (1, 2))
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
