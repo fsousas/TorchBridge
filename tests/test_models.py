@@ -558,6 +558,36 @@ class DifficultyMenuButtonTests(unittest.TestCase):
         self.assertEqual(difficulty_menu_button_point(invalid_rect, "hardcore"), (0, 0))
 
 
+class AppIconTests(unittest.TestCase):
+    def test_app_icon_path_disabled(self):
+        from torchbridge.models import app_icon_path
+        path = app_icon_path(ativo=False, calibration=False)
+        self.assertIsNotNone(path)
+        self.assertTrue(path.is_file())
+        self.assertTrue(str(path).endswith("torchbridge-ativo-false-calibration-false.png"))
+
+    def test_app_icon_path_active_without_calibration(self):
+        from torchbridge.models import app_icon_path
+        path = app_icon_path(ativo=True, calibration=False)
+        self.assertIsNotNone(path)
+        self.assertTrue(path.is_file())
+        self.assertTrue(str(path).endswith("torchbridge-ativo-true-calibration-false.png"))
+
+    def test_app_icon_path_active_with_calibration(self):
+        from torchbridge.models import app_icon_path
+        path = app_icon_path(ativo=True, calibration=True)
+        self.assertIsNotNone(path)
+        self.assertTrue(path.is_file())
+        self.assertTrue(str(path).endswith("torchbridge-ativo-true-calibration-true.png"))
+
+    def test_app_icon_path_disabled_ignores_calibration(self):
+        from torchbridge.models import app_icon_path
+        path = app_icon_path(ativo=False, calibration=True)
+        self.assertIsNotNone(path)
+        self.assertTrue(path.is_file())
+        self.assertTrue(str(path).endswith("torchbridge-ativo-false-calibration-false.png"))
+
+
 class TypeHintsTests(unittest.TestCase):
     def test_models_type_hints_resolvable(self):
         import typing
@@ -568,4 +598,5 @@ class TypeHintsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

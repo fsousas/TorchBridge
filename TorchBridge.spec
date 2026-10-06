@@ -10,6 +10,7 @@ analysis = Analysis(
     binaries=[],
     datas=[
         ("assets/images/radial-menu-icons", "assets/images/radial-menu-icons"),
+        ("assets/images/app", "assets/images/app"),
         ("assets/hud", "assets/hud"),
     ] + native_datas,
     hiddenimports=["pygame._sdl2.controller"],
