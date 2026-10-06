@@ -5268,6 +5268,7 @@ class BridgeEngine(threading.Thread):
                     controller_connected=state.connected,
                     controller_name=state.name,
                     controller_mapping=state.mapping,
+                    controller_type=state.controller_type,
                     mode=effective_mode,
                     active_panels=list(self._active_panels),
                     memory_state_desc=self._memory_state.state_desc,

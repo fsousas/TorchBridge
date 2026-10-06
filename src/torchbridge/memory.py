@@ -41,6 +41,7 @@ OFFSET_MAIN_STATE = 0x0D84
 OFFSET_NEW_GAME_MENU = 0x0D78
 OFFSET_CHAR_EDITBOX  = 0x70
 OFFSET_CHAR_NAME_LEN = 0x88
+OFFSET_UI_STATE      = 0x169C  # CGameUI -> Estado ativo do gameplay / transição de nível (6: em jogo, != 6: transição/carregando)
 
 MAIN_MENU_STATES: dict[int, str] = {
     0: "Tela Inicial",
@@ -507,7 +508,17 @@ class TorchlightMemoryReader:
         main_state_id = self.read_u32(p_menu_mgr + OFFSET_MAIN_STATE) if p_menu_mgr else 6
         state_desc = MAIN_MENU_STATES.get(main_state_id, f"Estado {main_state_id}")
 
-        is_loading = bool((loading_parent is not None and loading_parent != 0) or (main_state_id == 6 and not p_player))
+        ui_state_id = self.read_u32(p_ui + OFFSET_UI_STATE) if (p_ui and p_menu_mgr) else 6
+
+        # A tela de carregamento / transição de nível está ativa se:
+        # 1. A janela loading.layout estiver anexada à folha da UI (loading_parent != 0)
+        # 2. O estado for em jogo (6) mas o jogador ainda não estiver spawnado (not p_player)
+        # 3. O estado interno de CGameUI for diferente de 6 (transição de andar, portal ou escadas acionada)
+        is_loading = bool(
+            (loading_parent is not None and loading_parent != 0)
+            or (main_state_id == 6 and not p_player)
+            or (main_state_id == 6 and ui_state_id is not None and ui_state_id != 6)
+        )
 
         # Overlays ativos
         if is_settings_open:
@@ -551,7 +562,7 @@ class TorchlightMemoryReader:
                 state_id=main_state_id,
                 state_desc="Carregando...",
                 is_loading=True,
-                is_in_game=(main_state_id == 6),
+                is_in_game=False,
                 is_menu_open=False,
                 recommended_mode="blocked",
                 save_count=self._cached_save_count,
@@ -692,7 +703,8 @@ class TorchlightMemoryReader:
         # Pause em jogo
         p_options = self.read_u32(p_ui + 0x02E8)
         if p_options and self.read_u8(p_options + 0x18) == 1:
-            open_menus.append("Pause")
+            if "Pause" not in open_menus:
+                open_menus.append("Pause")
 
         # Dados do Personagem (CPlayer)
         char_class = ""

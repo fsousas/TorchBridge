@@ -22,7 +22,7 @@ import pygame
 from pygame._sdl2 import controller as sdl_controller
 
 from .mathutils import clamp, trigger_value
-from .models import ControllerState
+from .models import ControllerState, controller_type_from_name
 
 
 # Eixos lógicos do GameController; getattr com fallback numérico preserva a ordem do SDL.
@@ -192,6 +192,7 @@ class ControllerHub:
             connected=True,
             name=self._name,
             mapping="SDL normalizado",
+            controller_type=controller_type_from_name(self._name),
             lx=self._normalized_axis(self._controller, AXES["lx"]),
             ly=self._normalized_axis(self._controller, AXES["ly"]),
             rx=self._normalized_axis(self._controller, AXES["rx"]),
@@ -274,6 +275,7 @@ class ControllerHub:
             connected=True,
             name=self._name,
             mapping="genérico calibrado" if raw.get("force_raw") else "genérico padrão",
+            controller_type=controller_type_from_name(self._name),
             lx=self._raw_axis(axes.get("left_x", {})),
             ly=self._raw_axis(axes.get("left_y", {})),
             rx=self._raw_axis(axes.get("right_x", {})),

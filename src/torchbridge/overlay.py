@@ -29,6 +29,10 @@ from .models import (
     close_tab_vertices,
     dialog_button_point,
     difficulty_menu_button_point,
+    bottom_hud_asset_path,
+    bottom_hud_target_rect,
+    BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
+    controller_type_from_name,
     hud_asset_path,
     hud_target_rect,
     panel_regions,
@@ -137,6 +141,8 @@ class GameOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         # Cache dos pixmaps do radial: carrega cada PNG uma única vez (desenhar a 60 FPS).
         self._radial_cache: dict[tuple[str, str], QPixmap] = {}
+        # Cache dos pixmaps do HUD inferior dos controles (Xbox, PlayStation, Nintendo).
+        self._bottom_hud_cache: dict[str, QPixmap] = {}
         # Silhueta verde da HUD (modo de calibração): renderizada uma vez do SVG, se existir.
         # None = asset ausente (nada a desenhar).
         self._hud_pixmap = self._load_hud_pixmap()
@@ -383,6 +389,119 @@ class GameOverlay(QWidget):
             return pixmap
         except Exception:  # noqa: BLE001 - sem Qt Svg o modo calibração segue sem ela.
             return None
+
+    # HUD inferior para controles: carrega o PNG do controle especificado e guarda em cache.
+    def _get_bottom_hud_pixmap(self, controller_type: str) -> QPixmap | None:
+        if controller_type in self._bottom_hud_cache:
+            return self._bottom_hud_cache[controller_type]
+        path = bottom_hud_asset_path(controller_type)
+        if path is None or not path.exists():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._bottom_hud_cache[controller_type] = pixmap
+        return pixmap
+
+    def _should_show_bottom_hud(self, snapshot: OverlaySnapshot) -> bool:
+        """Determina se o HUD inferior do controle deve ser renderizado.
+
+        Regras (assets/hud/inferior/descrição.md):
+        - A HUD deve ser aplicada de forma absoluta enquanto o ESTADO for igual a EM JOGO.
+        - A HUD NÃO deve ser aplicada em: DIALOG, QUEST, TITLE MENU, CHARACTER SELECT,
+          CUTSCENES, CHARACTER CREATE, LOADING SCREEN, OPTIONS SCREEN.
+        """
+        if not snapshot.controller_connected:
+            return False
+
+        if snapshot.mode == "blocked":
+            return False
+
+        if snapshot.memory_is_loading:
+            return False
+        state_desc = (snapshot.memory_state_desc or "").lower()
+        if any(k in state_desc for k in ("carregando", "loading")):
+            return False
+
+        if not snapshot.memory_is_in_game:
+            return False
+
+        open_menus = [m.lower() for m in (snapshot.memory_open_menus or [])]
+
+        # 1. OPTIONS SCREEN / Configurações (ex: tela de opções de áudio/vídeo)
+        # Nota: O menu de Pause (ESC em jogo) NÃO deve ocultar o HUD inferior.
+        if (
+            snapshot.settings_focus is not None
+            or any("configura" in m or "setting" in m for m in open_menus)
+            or any(k in state_desc for k in ("configura", "setting"))
+        ):
+            return False
+
+        # 2. DIALOG (NPCs, conversas)
+        if (
+            bool(snapshot.dialog_type)
+            or bool(snapshot.dialog_focus)
+            or any("diálogo" in m or "dialogo" in m or "história" in m or "historia" in m for m in open_menus)
+        ):
+            return False
+
+        # 3. QUEST (Menu de missões / diário)
+        if (
+            snapshot.quest_menu_open
+            or any("missão" in m or "missao" in m or "quest" in m for m in open_menus)
+        ):
+            return False
+
+        # 4. TITLE MENU, CHARACTER SELECT, CHARACTER CREATE, CUTSCENES
+        if any(
+            k in state_desc
+            for k in ("inicial", "criar", "dificuldade", "carregar", "cutscene", "cinematica")
+        ):
+            return False
+
+        return True
+
+    def _draw_bottom_hud(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
+        """Desenha o HUD inferior do controle sobre a janela do jogo."""
+        cfg = self.config.get()
+        overlay_cfg = cfg.get("overlay", {})
+        if not overlay_cfg.get("show_bottom_hud", True):
+            return
+
+        if not self._should_show_bottom_hud(snapshot):
+            return
+
+        rect = snapshot.game_rect
+        if not rect.valid:
+            return
+
+        layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
+        if layout_cfg in ("xbox", "playstation", "nintendo"):
+            controller_type = layout_cfg
+        else:
+            controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+
+        pixmap = self._get_bottom_hud_pixmap(controller_type)
+        if pixmap is None or pixmap.isNull():
+            return
+
+        offset_y = float(overlay_cfg.get("bottom_hud_offset_y_percent", BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION))
+        scale_hud = float(overlay_cfg.get("bottom_hud_scale", 1.0))
+        hl, ht, hw, hh = bottom_hud_target_rect(rect, offset_y, scale_hud)
+
+        local_x = hl - rect.left
+        local_y = ht - rect.top
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawPixmap(
+            int(round(local_x)),
+            int(round(local_y)),
+            int(round(hw)),
+            int(round(hh)),
+            pixmap,
+        )
+        painter.restore()
 
     # Roda central: emblema "Center" (assets) + um ícone por slot do perfil.
     # Sem arte disponível, volta ao desenho vetorial antigo (disco "MENUS" + círculos com letra).
@@ -768,6 +887,25 @@ class GameOverlay(QWidget):
                     label_box,
                     Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
                     "HUD (NÃO FECHA)",
+                )
+
+            # 4b. HUD inferior dos controles (calibração visual da área)
+            if not is_dialog:
+                overlay_cfg = cfg.get("overlay", {})
+                offset_y = float(overlay_cfg.get("bottom_hud_offset_y_percent", BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION))
+                scale_hud = float(overlay_cfg.get("bottom_hud_scale", 1.0))
+                bhl, bht, bhw, bhh = bottom_hud_target_rect(rect, offset_y, scale_hud)
+                bh_target = QRectF(bhl - rect.left, bht - rect.top, bhw, bhh)
+                painter.setPen(QPen(QColor(69, 211, 239, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                painter.setBrush(QColor(69, 211, 239, 25))
+                painter.drawRect(bh_target)
+                painter.setFont(self._font(max(7, round(9 * scale)), True))
+                painter.setPen(QColor(69, 211, 239, 240))
+                pct = int(round(offset_y * 100))
+                painter.drawText(
+                    QRectF(bh_target.left(), bh_target.top() - 18 * scale, bh_target.width(), 16 * scale),
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                    f"HUD CONTROLE (INFERIOR -{pct}%)",
                 )
 
             # 5. Pet actions: visível somente quando o painel esquerdo NÃO estiver cobrindo a HUD do pet e fora de diálogos/missões
@@ -1713,6 +1851,7 @@ class GameOverlay(QWidget):
     def _paint_overlay(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
         scale = float(self.config.get()["overlay"]["scale"])
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self._draw_bottom_hud(painter, snapshot)
         self._draw_aim(painter, snapshot, scale)
         self._draw_calibration(painter, snapshot, scale)
         self._draw_radial(painter, snapshot, scale)

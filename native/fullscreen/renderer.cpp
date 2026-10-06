@@ -48,7 +48,79 @@ UINT texture_extent(UINT value, const D3DCAPS9& caps) {
     while (result < value) result *= 2;
     return result;
 }
-} // namespace
+
+bool is_torchlight_process() noexcept {
+    static int cached = -1;
+    if (cached != -1) return cached == 1;
+    wchar_t path[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        cached = 0;
+        return false;
+    }
+    const wchar_t* target = L"torchlight.exe";
+    size_t target_len = 14;
+    if (len >= target_len) {
+        const wchar_t* p = path + len - target_len;
+        if (_wcsicmp(p, target) == 0) {
+            cached = 1;
+            return true;
+        }
+    }
+    cached = 0;
+    return false;
+}
+
+bool is_game_loading() noexcept {
+    if (!is_torchlight_process()) return false;
+    __try {
+        auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        if (!base) return false;
+
+        // Try GOG RVA (0x0081AD64) first, then Steam RVA (0x007F0E0C)
+        uintptr_t p_game = *reinterpret_cast<uintptr_t*>(base + 0x0081AD64);
+        if (!p_game || !*reinterpret_cast<uintptr_t*>(p_game + 0x64)) {
+            p_game = *reinterpret_cast<uintptr_t*>(base + 0x007F0E0C);
+        }
+        if (!p_game) return false;
+
+        uintptr_t p_client = *reinterpret_cast<uintptr_t*>(p_game + 0x64);
+        if (!p_client) return true;
+
+        uintptr_t p_player = *reinterpret_cast<uintptr_t*>(p_client + 0x2C);
+        uintptr_t p_ui = *reinterpret_cast<uintptr_t*>(p_client + 0x3C);
+        if (!p_ui) return true;
+
+        // 1. Loading window attached: CGameUI + 0x0298 -> loadingWindow
+        // If loadingWindow exists and loadingWindow->d_parent (+0x80) != 0, it's attached and showing
+        uintptr_t p_loading = *reinterpret_cast<uintptr_t*>(p_ui + 0x0298);
+        if (p_loading && *reinterpret_cast<uintptr_t*>(p_loading + 0x80) != 0) {
+            return true;
+        }
+
+        // 2. Transition state or unspawned player when in-game
+        uintptr_t p_menu_mgr = *reinterpret_cast<uintptr_t*>(p_ui + 0x0324);
+        if (p_menu_mgr) {
+            uint32_t main_state = *reinterpret_cast<uint32_t*>(p_menu_mgr + 0x0D84);
+            // When main_state == 6 ("Em Jogo"), we are transitioning/loading if:
+            // - Player pointer is null (not yet spawned)
+            // - OR ui_state != 6 (in-game level transition triggered via stairs/portal)
+            if (main_state == 6) {
+                if (!p_player) {
+                    return true;
+                }
+                uint32_t ui_state = *reinterpret_cast<uint32_t*>(p_ui + 0x169C);
+                if (ui_state != 6) {
+                    return true;
+                }
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return false;
+}
+} // namespace 
 
 Renderer::~Renderer() {
     reset();
@@ -88,6 +160,18 @@ bool Renderer::connect() noexcept {
 bool Renderer::read_frame(const D3DSURFACE_DESC& desc, const D3DPRESENT_PARAMETERS& params,
                           const D3DCAPS9& caps) {
     if (!connect()) return false;
+    if (is_game_loading()) {
+        frame_.visible = 0;
+        uploaded_ = false;
+        if (shared_) {
+            shared_->consumer_tick = GetTickCount();
+            shared_->backbuffer_width = desc.Width;
+            shared_->backbuffer_height = desc.Height;
+            shared_->fullscreen = !params.Windowed;
+            shared_->ready = 1;
+        }
+        return false;
+    }
     DWORD wait = WaitForSingleObject(mutex_, 0);
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED)
         return !params.Windowed && !pixels_.empty() && valid_frame(frame_, GetTickCount());
@@ -131,6 +215,11 @@ void Renderer::present(IDirect3DDevice9* device, IDirect3DSwapChain9* chain, HWN
         HWND target = params.hDeviceWindow ? params.hDeviceWindow : focus;
         if (!target || IsIconic(target) ||
             GetAncestor(GetForegroundWindow(), GA_ROOT) != GetAncestor(target, GA_ROOT)) return;
+        if (is_game_loading()) {
+            frame_.visible = 0;
+            uploaded_ = false;
+            return;
+        }
         draw(device, backbuffer.p, desc, caps);
     } catch (...) {
         reset();

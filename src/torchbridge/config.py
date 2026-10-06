@@ -50,6 +50,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_mode_badge": True,
         # Zonas de calibração dos painéis (caixas de fechar/central) visíveis no overlay.
         "show_calibration": False,
+        # HUD inferior dos controles (Xbox, PlayStation, Nintendo) sobreposto à barra do jogo.
+        "show_bottom_hud": True,
+        # Deslocamento vertical a partir da base da janela (fração da altura, padrão 1.5%).
+        "bottom_hud_offset_y_percent": 0.015,
+        # Escala adicional da HUD inferior (padrão 1.0; a proporção base já está reduzida em 27%).
+        "bottom_hud_scale": 1.0,
+        # Layout do controle: 'auto' (detecta automaticamente), 'xbox', 'playstation' ou 'nintendo'.
+        "controller_layout": "auto",
     },
     # Botões → teclas do Torchlight; radial_slots são os atalhos da roda (1..N, N = tamanho da lista).
     # Mapa do overworld (spec docs/REMAP-BOTOES): A/X = cliques de mouse; Y/B/RB/RT tocam

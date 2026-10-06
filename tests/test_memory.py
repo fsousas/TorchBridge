@@ -146,6 +146,65 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertFalse(state.is_connected)
         self.assertIsNone(reader.pid)
 
+    def test_ui_state_loading_detection(self):
+        """Valida que ui_state_id != 6 em CGameUI ativa imediatamente o estado Carregando..."""
+        from torchbridge.memory import (
+            OFFSET_GAMECLIENT,
+            OFFSET_GAMEUI,
+            OFFSET_MENU_MGR,
+            OFFSET_MAIN_STATE,
+            OFFSET_UI_STATE,
+            OFFSET_PLAYER,
+        )
+        reader = TorchlightMemoryReader()
+        reader.pid = 9999
+        reader._handle = 1234
+        reader._ensure_handle = MagicMock(return_value=True)
+
+        p_game = 0x1000
+        p_client = 0x2000
+        p_ui = 0x3000
+        p_menu_mgr = 0x4000
+        p_player = 0x5000
+
+        # Caso 1: ui_state_id = 1 (transição de masmorra disparada)
+        def fake_read_transition(addr):
+            if addr == ADDR_CGAME_GLOBAL:
+                return p_game
+            if addr == p_game + OFFSET_GAMECLIENT:
+                return p_client
+            if addr == p_client + OFFSET_GAMEUI:
+                return p_ui
+            if addr == p_client + OFFSET_PLAYER:
+                return p_player
+            if addr == p_ui + OFFSET_MENU_MGR:
+                return p_menu_mgr
+            if addr == p_menu_mgr + OFFSET_MAIN_STATE:
+                return 6  # Em jogo no switch principal
+            if addr == p_ui + OFFSET_UI_STATE:
+                return 1  # Transição ativa no CGameUI
+            return 0
+
+        reader.read_u32 = MagicMock(side_effect=fake_read_transition)
+        reader.read_u8 = MagicMock(return_value=0)
+
+        state = reader.update()
+        self.assertTrue(state.is_loading)
+        self.assertFalse(state.is_in_game)
+        self.assertEqual(state.state_desc, "Carregando...")
+
+        # Caso 2: ui_state_id = 6 (jogabilidade normal)
+        def fake_read_ingame(addr):
+            if addr == p_ui + OFFSET_UI_STATE:
+                return 6  # Gameplay ativo
+            return fake_read_transition(addr)
+
+        reader.read_u32 = MagicMock(side_effect=fake_read_ingame)
+        state_ingame = reader.update()
+        self.assertFalse(state_ingame.is_loading)
+        self.assertTrue(state_ingame.is_in_game)
+        self.assertEqual(state_ingame.state_desc, "Em Jogo")
+
 
 if __name__ == "__main__":
     unittest.main()

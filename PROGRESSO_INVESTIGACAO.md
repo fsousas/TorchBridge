@@ -92,11 +92,12 @@ A hierarquia real de objetos do motor do Torchlight é:
 - **Layout**: O motor carrega `media/ui/loading.layout` (UTF-16) e armazena o ponteiro da janela CEGUI em **`CGameUI + 0x0298`**.
 - **Mecanismo Interno**:
   - O jogo controla a visibilidade via a função `CGameUI::ShowLoading(bool bShow)` em `VA 0x00540CA0`.
-  - Ao iniciar o carregamento (ao clicar em Continue, transicionar de mapa, portal ou escadas da dungeon): o jogo chama `addChildWindow` anexando `loadingWindow` à folha principal (`CGameUI + 0x0294`). Na estrutura da CEGUI, o membro `d_parent` no offset **`+0x80`** passa a apontar para a folha principal (`!= 0`).
-  - Ao terminar o carregamento: o jogo chama `removeChildWindow`, desanexando a tela de loading e zerando `loadingWindow->d_parent` (`+0x80 == 0`).
+  - No instante exato em que o jogador ativa escadas, portal ou teleporte, o motor chama `CGameUI::SetNextState` (`VA 0x0053F1B0`), alterando imediatamente **`CGameUI + 0x169C`** para um valor diferente de `6` (onde 6 representa o estado ativo de gameplay).
+  - Em seguida, anexa `loadingWindow` à folha principal (`CGameUI + 0x0294`), onde `loadingWindow->d_parent` no offset **`+0x80`** passa a apontar para a folha principal (`!= 0`).
+  - Ao terminar o carregamento: o motor desanexa a janela de loading e chama `VA 0x0053F1D0`, restaurando **`CGameUI + 0x169C = 6`**.
   - Além disso, durante todo o carregamento do mapa, o ponteiro do jogador `CPlayer*` (`CGameClient + 0x2C`) permanece em **`0` (NULL)** até que o spawn seja concluído.
-- **Critério de Detecção no Leitor**:
-  `is_loading = (loading_parent != 0) or (main_state_id == 6 and p_player == 0)`
+- **Critério de Detecção Imediata no Leitor**:
+  `is_loading = (loading_parent != 0) or (main_state_id == 6 and (p_player == 0 or ui_state != 6))`
 
 ---
 
