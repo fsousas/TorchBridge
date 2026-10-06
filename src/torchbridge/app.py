@@ -50,7 +50,7 @@ def main() -> int:
 
     from .config import ConfigManager, user_config_dir
     from .engine import BridgeEngine
-    from .models import SharedOverlayState
+    from .models import SharedOverlayState, app_icon_path
     from .overlay import GameOverlay
     from .win32 import SingleInstance, enable_dpi_awareness, show_information
 
@@ -73,20 +73,38 @@ def main() -> int:
     # Não fecha ao esconder o overlay — vive na bandeja até 'Sair'.
     app.setQuitOnLastWindowClosed(False)
 
-    # Ícone 'TB' desenhado em código (sem asset externo) para a bandeja.
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pixmap)
+    # Ícone fallback desenhado em código caso os assets PNG estejam ausentes.
+    fallback_pixmap = QPixmap(64, 64)
+    fallback_pixmap.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(fallback_pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setBrush(QColor(7, 24, 34))
     painter.setPen(QColor(75, 222, 247))
     painter.drawEllipse(4, 4, 56, 56)
     painter.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
     painter.setPen(QColor(238, 250, 252))
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "TB")
+    painter.drawText(fallback_pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "TB")
     painter.end()
-    icon = QIcon(pixmap)
-    app.setWindowIcon(icon)
+    fallback_icon = QIcon(fallback_pixmap)
+
+    # Cache dos ícones da bandeja por estado: (ativo, calibração) -> QIcon.
+    icon_cache: dict[tuple[bool, bool], QIcon] = {}
+
+    def get_app_icon(ativo: bool, calibration: bool) -> QIcon:
+        key = (bool(ativo), bool(calibration))
+        if key in icon_cache:
+            return icon_cache[key]
+        path = app_icon_path(ativo, calibration)
+        if path is not None and path.is_file():
+            ico = QIcon(str(path))
+            if not ico.isNull():
+                icon_cache[key] = ico
+                return ico
+        return fallback_icon
+
+    initial_calib = bool(config.get()["overlay"].get("show_calibration", False))
+    current_icon = get_app_icon(True, initial_calib)
+    app.setWindowIcon(current_icon)
 
     # Estado compartilhado motor ↔ overlay (ponte thread-safe).
     shared = SharedOverlayState()
@@ -95,30 +113,53 @@ def main() -> int:
     # Overlay Qt; a exibição é controlada pelo próprio _refresh conforme o jogo.
     overlay = GameOverlay(shared, config)
     # Ícone da bandeja: pausa, perfil, recarga e saída.
-    tray = QSystemTrayIcon(icon, app)
+    tray = QSystemTrayIcon(current_icon, app)
     tray.setToolTip("TorchBridge — aguardando o Torchlight")
+
+    _last_icon_state: tuple[bool, bool] = (True, initial_calib)
+
+    def update_tray_icon() -> None:
+        nonlocal _last_icon_state
+        ativo = engine.is_enabled()
+        calib = bool(config.get()["overlay"].get("show_calibration", False))
+        state_key = (ativo, calib)
+        if state_key == _last_icon_state:
+            return
+        _last_icon_state = state_key
+        new_icon = get_app_icon(ativo, calib)
+        tray.setIcon(new_icon)
+        app.setWindowIcon(new_icon)
+
     menu = QMenu()
     # Checkbox 'Ativado': liga/desliga o envio de comandos.
     enabled_action = menu.addAction("Ativado")
     enabled_action.setCheckable(True)
     enabled_action.setChecked(True)
-    enabled_action.triggered.connect(engine.set_enabled)
+
+    def toggle_enabled(checked: bool) -> None:
+        engine.set_enabled(checked)
+        update_tray_icon()
+
+    enabled_action.triggered.connect(toggle_enabled)
 
     # Checkbox 'Modo de calibração': liga/desliga o desenho das marcações de calibração no overlay.
     calib_action = menu.addAction("Modo de calibração")
     calib_action.setCheckable(True)
-    calib_action.setChecked(config.get()["overlay"].get("show_calibration", False))
+    calib_action.setChecked(initial_calib)
 
     def toggle_calibration(checked: bool) -> None:
         config.set_show_calibration(checked)
+        update_tray_icon()
         overlay.update()
         shared.toast("Calibração ativada" if checked else "Calibração desativada")
 
     calib_action.triggered.connect(toggle_calibration)
 
-    # Mantém o checkbox sincronizado caso o perfil seja alterado externamente.
+    # Mantém os checkboxes sincronizados caso o perfil seja alterado externamente.
     def sync_menu_state() -> None:
+        enabled_action.setChecked(engine.is_enabled())
         calib_action.setChecked(config.get()["overlay"].get("show_calibration", False))
+        update_tray_icon()
 
     menu.aboutToShow.connect(sync_menu_state)
 
@@ -140,6 +181,7 @@ def main() -> int:
     def reload_profile() -> None:
         config.reload(force=True)
         sync_menu_state()
+        update_tray_icon()
         overlay.update()
         shared.toast("Perfil recarregado")
 
@@ -160,8 +202,9 @@ def main() -> int:
 
     tooltip_timer = QTimer()
 
-    # Dica do ícone atualizada a cada 500 ms com o estado.
+    # Dica do ícone e estado atualizados a cada 500 ms.
     def update_tooltip() -> None:
+        update_tray_icon()
         state = shared.get()
         # Caso completo: controle + jogo (mostra se está ativo ou em segundo plano).
         if state.controller_connected and state.game_found:

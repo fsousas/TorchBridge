@@ -388,6 +388,36 @@ def pet_actions_asset_path() -> Path | None:
     return base / "assets" / "hud" / PET_ACTIONS_ASSET
 
 
+# Ícones do aplicativo para a bandeja do sistema por estado (ativo, calibração).
+APP_ICON_ASSETS: dict[tuple[bool, bool], str] = {
+    (False, False): "torchbridge-ativo-false-calibration-false.png",
+    (False, True): "torchbridge-ativo-false-calibration-false.png",
+    (True, False): "torchbridge-ativo-true-calibration-false.png",
+    (True, True): "torchbridge-ativo-true-calibration-true.png",
+}
+
+
+def app_icon_path(ativo: bool = True, calibration: bool = False) -> Path | None:
+    """Retorna o caminho do ícone do TorchBridge na bandeja do sistema.
+
+    Estados:
+    - Desativado: torchbridge-ativo-false-calibration-false.png
+    - Ativado sem calibração: torchbridge-ativo-true-calibration-false.png
+    - Ativado com calibração: torchbridge-ativo-true-calibration-true.png
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    filename = APP_ICON_ASSETS.get(
+        (bool(ativo), bool(calibration)),
+        "torchbridge-ativo-true-calibration-false.png",
+    )
+    path = base / "assets" / "images" / "app" / filename
+    return path if path.is_file() else None
+
+
+
 # Alvos de clique das 4 ações do pet (coordenadas no viewBox 156x201 do Pet-actions.svg):
 # centro de cada botão. Ordem = a dos quadradinhos da sublinha: 1 = círculo vermelho
 # (agressivo), 2 = azul (defensivo), 3 = branco (passivo), 4 = quadrado amarelo
