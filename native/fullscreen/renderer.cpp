@@ -120,7 +120,7 @@ bool is_game_loading() noexcept {
     }
     return false;
 }
-} // namespace
+} // namespace 
 
 Renderer::~Renderer() {
     reset();
