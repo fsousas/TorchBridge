@@ -40,12 +40,27 @@ class Rect:
         return self.left <= x < self.right and self.top <= y < self.bottom
 
 
+def controller_type_from_name(name: str) -> str:
+    """Classifica o controle como 'playstation', 'nintendo' ou 'xbox' (padrão) a partir do nome."""
+    if not name:
+        return "xbox"
+    lower = name.lower()
+    if any(k in lower for k in ("xbox", "xinput", "microsoft")):
+        return "xbox"
+    if any(k in lower for k in ("dualsense", "dualshock", "playstation", "ps5", "ps4", "ps3", "sony")) or lower.strip() == "wireless controller":
+        return "playstation"
+    if any(k in lower for k in ("switch", "joy-con", "pro controller", "nintendo")):
+        return "nintendo"
+    return "xbox"
+
+
 @dataclass(frozen=True)
 # Fotografia imutável do controle em um tick: eixos (-1..1), gatilhos (0..1) e botões.
 class ControllerState:
     connected: bool = False
     name: str = ""
     mapping: str = ""
+    controller_type: str = "xbox"
     lx: float = 0.0
     ly: float = 0.0
     rx: float = 0.0
@@ -283,6 +298,55 @@ def hud_asset_path() -> Path | None:
     else:
         base = Path(__file__).resolve().parent.parent.parent
     return base / "assets" / "hud" / HUD_ASSET
+
+
+# HUD inferior para controles: layouts por tipo de controle (Xbox, PlayStation, Nintendo)
+# Imagens PNG em assets/hud/inferior/, dimensão original 1347x242 na referência 1080p.
+BOTTOM_HUD_ASSETS: dict[str, str] = {
+    "xbox": "hud-xbox.png",
+    "playstation": "hud-playstation.png",
+    "nintendo": "hud-nitendo.png",
+}
+
+BOTTOM_HUD_REF_HEIGHT = 1080.0
+BOTTOM_HUD_WIDTH = 1347.0
+BOTTOM_HUD_HEIGHT = 242.0
+BOTTOM_HUD_DEFAULT_SCALE = 0.73                                                   # Reduzido em 27% conforme calibração
+BOTTOM_HUD_WIDTH_FRACTION_OF_HEIGHT = (BOTTOM_HUD_WIDTH * BOTTOM_HUD_DEFAULT_SCALE) / BOTTOM_HUD_REF_HEIGHT   # ~0.910472
+BOTTOM_HUD_HEIGHT_FRACTION = (BOTTOM_HUD_HEIGHT * BOTTOM_HUD_DEFAULT_SCALE) / BOTTOM_HUD_REF_HEIGHT           # ~0.163574
+BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION = 0.015                                     # -1.5% da altura da janela
+
+
+def bottom_hud_asset_path(controller_type: str) -> Path | None:
+    """Retorna o caminho do asset PNG do layout do controle especificado."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    filename = BOTTOM_HUD_ASSETS.get(controller_type, "hud-xbox.png")
+    path = base / "assets" / "hud" / "inferior" / filename
+    return path if path.is_file() else None
+
+
+def bottom_hud_target_rect(
+    rect: Rect,
+    offset_y_fraction: float = BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
+    scale_multiplier: float = 1.0,
+) -> tuple[float, float, float, float]:
+    """Calcula (left, top, width, height) absolutos do HUD inferior para controles.
+
+    - Escala proporcionalmente à altura da janela (rect.height), preservando o aspect ratio original (1347x242).
+    - Proporção base reduzida em 27% (fator 0.73) para perfeito encaixe sobre a barra do jogo.
+    - Centralizada horizontalmente no eixo X.
+    - No eixo Y, na parte inferior da janela menos offset_y_fraction da altura da janela (padrão: 1.5%).
+    """
+    if not rect.valid:
+        return (0.0, 0.0, 0.0, 0.0)
+    width = rect.height * BOTTOM_HUD_WIDTH_FRACTION_OF_HEIGHT * scale_multiplier
+    height = rect.height * BOTTOM_HUD_HEIGHT_FRACTION * scale_multiplier
+    left = rect.left + (rect.width - width) / 2.0
+    top = rect.bottom - height - rect.height * offset_y_fraction
+    return (left, top, width, height)
 
 
 # Pet actions do jogo (caixinha com os botões de ação do pet) no CANTO SUPERIOR ESQUERDO
@@ -1771,6 +1835,7 @@ class OverlaySnapshot:
     controller_connected: bool = False
     controller_name: str = ""
     controller_mapping: str = ""
+    controller_type: str = "xbox"
     mode: str = "direct"
     radial_active: bool = False
     radial_selection: int | None = None

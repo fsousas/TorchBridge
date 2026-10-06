@@ -551,7 +551,7 @@ class TorchlightMemoryReader:
                 state_id=main_state_id,
                 state_desc="Carregando...",
                 is_loading=True,
-                is_in_game=(main_state_id == 6),
+                is_in_game=False,
                 is_menu_open=False,
                 recommended_mode="blocked",
                 save_count=self._cached_save_count,
@@ -692,7 +692,8 @@ class TorchlightMemoryReader:
         # Pause em jogo
         p_options = self.read_u32(p_ui + 0x02E8)
         if p_options and self.read_u8(p_options + 0x18) == 1:
-            open_menus.append("Pause")
+            if "Pause" not in open_menus:
+                open_menus.append("Pause")
 
         # Dados do Personagem (CPlayer)
         char_class = ""
