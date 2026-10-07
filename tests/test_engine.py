@@ -1640,21 +1640,38 @@ class OverworldDpadTests(unittest.TestCase):
             self.assertEqual(injector.moved[0], target)
             self.assertIsNotNone(engine._hud_click_seq)
 
-            # Tick 2: Fase down (now=0.07) -> botão esquerdo pressionado
+            # Tick 2: Fase down (now=0.07) -> botão esquerdo pressionado no alvo
             self._tick(engine, self._state(), now=0.07)
             self.assertIn(("mouse", "left", True), injector.events)
+            self.assertTrue(engine._hud_click_down)
+            self.assertFalse(engine._hud_click_up)
 
-            # Tick 3: Fase up (now=0.12) -> botão esquerdo liberado
-            self._tick(engine, self._state(), now=0.12)
+            # Tick 3: Fase up com delay (now=0.13) -> botão liberado, mas cursor AINDA no alvo (delay de estabilidade)
+            self._tick(engine, self._state(), now=0.13)
             self.assertIn(("mouse", "left", False), injector.events)
+            self.assertTrue(engine._hud_click_up)
+            self.assertFalse(engine._hud_click_returned)
+            self.assertNotEqual(injector.moved[-1], (500, 400))
 
-            # Tick 4: Conclusão (now=0.16) -> cursor retorna para a posição original (500, 400)
-            self._tick(engine, self._state(), now=0.16)
+            # Tick 4: Retorno (now=0.18) -> cursor retorna para a posição original (500, 400) com mouse solto
+            self._tick(engine, self._state(), now=0.18)
+            self.assertTrue(engine._hud_click_returned)
             self.assertEqual(injector.moved[-1], (500, 400))
+
+            # Tick 5: Conclusão (now=0.22) -> sequência finalizada
+            self._tick(engine, self._state(), now=0.22)
             self.assertIsNone(engine._hud_click_seq)
 
-            # Cronologia dos eventos: move(target) -> mouse(left, True) -> mouse(left, False) -> move(origin)
+            # Tick 6: Pós-conclusão (now=0.25) -> jogo opera normal sem cliques adicionais
+            self._tick(engine, self._state(), now=0.25)
+
+            # Validações estritas:
+            # 1. Exatamente UM clique DOWN e exatamente UM clique UP em toda a operação
             events = injector.events
+            self.assertEqual(events.count(("mouse", "left", True)), 1)
+            self.assertEqual(events.count(("mouse", "left", False)), 1)
+
+            # 2. Cronologia dos eventos: move(target) -> mouse(down) -> mouse(up) -> move(origin)
             down_idx = next(i for i, e in enumerate(events) if e == ("mouse", "left", True))
             up_idx = next(i for i, e in enumerate(events) if e == ("mouse", "left", False))
             target_move_idx = events.index(("move",) + target)
@@ -1662,6 +1679,35 @@ class OverworldDpadTests(unittest.TestCase):
             self.assertLess(target_move_idx, down_idx)
             self.assertLess(down_idx, up_idx)
             self.assertLess(up_idx, return_move_idx)
+
+    # Garante que cliques anteriores ou movimento direto ativo não vazem clique no alvo ou na volta
+    def test_dpad_left_releases_prior_held_mouse_cleanly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, _, injector = self._engine(directory)
+            injector.cursor = (600, 500)
+            rect = Rect(0, 0, 1920, 1080)
+            engine._held_mouse.add("left")
+            injector.buttons["left"] = True
+            engine._direct_move_active = True
+
+            # D-pad esquerdo pressionado
+            self._tick(engine, self._state(("dpad_left",)), now=0.0)
+            # Botão esquerdo prévio deve ter sido imediatamente solto
+            self.assertNotIn("left", engine._held_mouse)
+            self.assertFalse(engine._direct_move_active)
+
+            # Executa até a conclusão
+            self._tick(engine, self._state(), now=0.07)
+            self._tick(engine, self._state(), now=0.13)
+            self._tick(engine, self._state(), now=0.18)
+            self._tick(engine, self._state(), now=0.22)
+            self._tick(engine, self._state(), now=0.25)
+
+            # O clique prévio foi solto (1 release) + 1 clique na HUD (1 down, 1 release) = total 1 down, 2 up
+            events = injector.events
+            self.assertEqual(events.count(("mouse", "left", True)), 1)
+            self.assertEqual(events.count(("mouse", "left", False)), 2)
+            self.assertEqual(injector.moved[-1], (600, 500))
 
     # D-pad direito no overworld: executa a ação de TAB
     def test_dpad_right_taps_tab(self):

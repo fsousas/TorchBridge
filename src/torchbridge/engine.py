@@ -185,6 +185,8 @@ class BridgeEngine(threading.Thread):
         # (target_x, target_y, return_x, return_y, t0).
         self._hud_click_seq: tuple[int, int, int, int, float] | None = None
         self._hud_click_down = False
+        self._hud_click_up = False
+        self._hud_click_returned = False
         self._center_combo_seen = False
         self._center_combo_started: float | None = None
         self._center_combo_triggered = False
@@ -445,9 +447,11 @@ class BridgeEngine(threading.Thread):
             self._pet_click_seq = None
             self._pet_click_panel_done = False
         if self._hud_click_seq is not None:
-            if self._hud_click_down:
+            if self._hud_click_down and not self._hud_click_up:
                 self.injector.mouse_button("left", False)
-                self._hud_click_down = False
+            self._hud_click_down = False
+            self._hud_click_up = False
+            self._hud_click_returned = False
             self._hud_click_seq = None
         # Interrompe o "movimento direto ativo" para o retorno ao centro não disparar no tick de volta.
         self._direct_move_active = False
@@ -4246,6 +4250,16 @@ class BridgeEngine(threading.Thread):
         dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
 
         if dpad_left:
+            # Libera cliques retidos anteriores e cancela direct move ativo
+            if "left" in self._held_mouse:
+                self.injector.mouse_button("left", False)
+                self._held_mouse.discard("left")
+            if "right" in self._held_mouse:
+                self.injector.mouse_button("right", False)
+                self._held_mouse.discard("right")
+            self._direct_move_active = False
+            self._previous_left_pressed = False
+
             cur_x, cur_y = self.injector.cursor_position()
             if not rect.contains(cur_x, cur_y):
                 if self._last_anchor:
@@ -4264,6 +4278,8 @@ class BridgeEngine(threading.Thread):
                 now,
             )
             self._hud_click_down = False
+            self._hud_click_up = False
+            self._hud_click_returned = False
             self.injector.move(target_x, target_y)
             hub.rumble(0.04, 0.10, 35)
 
@@ -4356,11 +4372,13 @@ class BridgeEngine(threading.Thread):
     # O cursor é levado até o ponto roxo da imagem SVG (viewBox 942x137 calibrado),
     # clica no ponto e retorna à posição onde estava antes de sair.
     # Cronograma (t = segundos desde o D-pad esquerdo):
-    #   0.00  movimento absoluto até o botão roxo
+    #   0.00  movimento absoluto até o botão roxo (ocorre em _handle_overworld_dpad)
     #   0.05  mouse LEFT DOWN (~50 ms após a chegada para registrar hover)
-    #   0.10  mouse LEFT UP (~50 ms de clique)
-    #   0.14  retorno do cursor à posição de onde saiu
-    # Total ~140 ms. Durante a sequência o cursor é exclusivo dela.
+    #   0.11  mouse LEFT UP (~60 ms de duração de clique físico)
+    #   0.11..0.16 delay de ~50 ms mantendo o cursor sobre o botão roxo com mouse solto (estabilidade)
+    #   0.16  retorno do cursor à posição de onde saiu
+    #   0.20  fim da sequência (cursor já estabilizado na posição original)
+    # Total ~200 ms. Durante toda a sequência o cursor é exclusivo dela.
     def _handle_hud_purple_click(self, now: float) -> None:
         seq = self._hud_click_seq
         if seq is None:
@@ -4369,28 +4387,41 @@ class BridgeEngine(threading.Thread):
         t = now - t0
         if t < 0:
             return
+        # Fase 1: Hover no alvo
         if t < 0.05:
             self.injector.move(target_x, target_y)
             return
-        if t < 0.10:
+        # Fase 2: Pressiona o botão esquerdo exatamente uma vez
+        if t < 0.11:
             if not self._hud_click_down:
                 if self.injector.mouse_button("left", True):
                     self._hud_click_down = True
             return
-        if t < 0.14:
-            if self._hud_click_down:
+        # Fase 3: Solta o botão esquerdo e MANTÉM o cursor sobre o alvo (delay de ~50 ms)
+        # O jogo/Windows processa o UP no botão antes de o cursor se mover
+        if t < 0.16:
+            if self._hud_click_down and not self._hud_click_up:
                 self.injector.mouse_button("left", False)
-                self._hud_click_down = False
+                self._hud_click_up = True
             return
-        # Fim ou tick engasgado: garante clique se pulou e solta botão
-        if not self._hud_click_down and t >= 0.10:
-            self.injector.mouse_button("left", True)
+        # Fase 4: Retorno do cursor à posição original (mouse permanece estritamente solto)
+        if t < 0.20:
+            if not self._hud_click_returned:
+                self.injector.move(return_x, return_y)
+                self._hud_click_returned = True
+            return
+        # Fase 5: Conclusão da sequência
+        if self._hud_click_down and not self._hud_click_up:
             self.injector.mouse_button("left", False)
-        elif self._hud_click_down:
-            self.injector.mouse_button("left", False)
-            self._hud_click_down = False
+            self._hud_click_up = True
+        if not self._hud_click_returned:
+            self.injector.move(return_x, return_y)
+            self._hud_click_returned = True
         self._hud_click_seq = None
-        self.injector.move(return_x, return_y)
+        self._hud_click_down = False
+        self._hud_click_up = False
+        self._hud_click_returned = False
+        self._direct_move_active = False
 
     def _is_radial_allowed(self) -> bool:
         """Determina se a roda de habilidades pode ser aberta.
@@ -5131,6 +5162,7 @@ class BridgeEngine(threading.Thread):
                 self._quest_b_consumed = False
                 self.shared.update(quest_menu_open=False, quest_focus=None)
 
+        hud_active_before = self._hud_click_seq is not None
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
@@ -5152,7 +5184,11 @@ class BridgeEngine(threading.Thread):
         # Posiciona o cursor; retorna True quando o movimento direto deve segurar o clique esquerdo.
         # Com a sequência do pet ou hud em curso os sticks estão bloqueados: nenhum move, nenhum
         # clique retido e nenhuma borda de subida dispara a lógica de fechamento de painéis.
-        seq_active = self._pet_click_seq is not None or self._hud_click_seq is not None
+        seq_active = (
+            self._pet_click_seq is not None
+            or self._hud_click_seq is not None
+            or hud_active_before
+        )
         if seq_active:
             # O clique do pet é injetado direto pelo _handle_pet_click (fora de
             # _held_mouse): não mexe no botão esquerdo nem na borda de subida — o
@@ -5160,6 +5196,7 @@ class BridgeEngine(threading.Thread):
             # nem a borda de descida (soltar por engano) nem a borda de subida
             # (click_zone fechando painéis) disparam no meio do hover/clique.
             self._previous_panels = (self._active_panels[0], self._active_panels[1])
+            self._previous_left_pressed = False
             return
         # Clique modificado em curso (Shift+clique do Y / Ctrl+clique do LT+A): os
         # ticks intermediários pulam cursor/botões — o left da sequência vive fora de
