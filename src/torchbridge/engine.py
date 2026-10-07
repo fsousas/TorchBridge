@@ -30,6 +30,7 @@ from .models import (
     SETTINGS_BUTTONS,
     SETTINGS_DROPDOWNS,
     SETTINGS_NAV_MAP,
+    hud_purple_button_point,
     load_hud_mask,
     panels_x_shift,
     pet_click_point,
@@ -180,6 +181,10 @@ class BridgeEngine(threading.Thread):
         # já foi baixado? a letra do painel pendente já disparou?
         self._pet_click_down = False
         self._pet_click_panel_done = False
+        # Sequência de clique do ponto roxo (#8A38F5) da HUD inferior (D-pad esquerdo no overworld):
+        # (target_x, target_y, return_x, return_y, t0).
+        self._hud_click_seq: tuple[int, int, int, int, float] | None = None
+        self._hud_click_down = False
         self._center_combo_seen = False
         self._center_combo_started: float | None = None
         self._center_combo_triggered = False
@@ -439,6 +444,11 @@ class BridgeEngine(threading.Thread):
                 self._pet_click_down = False
             self._pet_click_seq = None
             self._pet_click_panel_done = False
+        if self._hud_click_seq is not None:
+            if self._hud_click_down:
+                self.injector.mouse_button("left", False)
+                self._hud_click_down = False
+            self._hud_click_seq = None
         # Interrompe o "movimento direto ativo" para o retorno ao centro não disparar no tick de volta.
         self._direct_move_active = False
         if self._settings_slider_dragging:
@@ -4147,7 +4157,7 @@ class BridgeEngine(threading.Thread):
         # Sequência do pet em curso: o cursor/click é exclusivo dela — o Shift+clique
         # do Y não pode mexer no cursor no meio do clique do pet, nem a ESC do B
         # pode fechar os menus no meio da sequência.
-        if self._pet_click_seq is not None:
+        if self._pet_click_seq is not None or self._hud_click_seq is not None:
             return
         # Clique modificado em curso: o left está com a sequência — o Y não arma um
         # segundo Shift+clique no meio do clique em andamento.
@@ -4200,6 +4210,67 @@ class BridgeEngine(threading.Thread):
                     self.shared.update(active_panels=list(self._active_panels))
             else:
                 self._tap_binding(bindings.get("y"))
+
+    def _handle_overworld_dpad(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+        bindings: dict[str, Any],
+        now: float,
+    ) -> None:
+        """Navegação e ações por D-pad no overworld quando ESTADO = EM JOGO e MENUS = NENHUM.
+
+        - D-pad para a esquerda:
+          -> mover o cursor para o ponto ROXO (#8A38F5) da imagem da HUD
+          -> clicar no ponto ROXO (#8A38F5)
+          -> voltar ao local que estava antes de sair
+        - D-pad para a direita:
+          -> realizar a ação do TAB quando clicado
+        """
+        # Só opera estritamente quando em jogo e nenhum menu estiver aberto
+        if not self._memory_state.is_connected or not self._memory_state.is_in_game:
+            return
+        if self._memory_state.open_menus or self._memory_state.dialog_type:
+            return
+
+        # Roda de habilidades aberta (LB segurado): o D-pad é da sublinha do pet
+        if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
+            return
+
+        # Sequências em andamento: não aceita nova ação enquanto já houver clique em curso
+        if self._pet_click_seq is not None or self._hud_click_seq is not None or self._modifier_seq is not None:
+            return
+
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+        if dpad_left:
+            cur_x, cur_y = self.injector.cursor_position()
+            if not rect.contains(cur_x, cur_y):
+                if self._last_anchor:
+                    cur_x, cur_y = self._last_anchor
+                else:
+                    movement = self.config.get()["movement"]
+                    cur_x = int(round(rect.left + rect.width * float(movement["anchor_x"])))
+                    cur_y = int(round(rect.top + rect.height * float(movement["anchor_y"])))
+
+            target_x, target_y = hud_purple_button_point(rect)
+            self._hud_click_seq = (
+                target_x,
+                target_y,
+                cur_x,
+                cur_y,
+                now,
+            )
+            self._hud_click_down = False
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.04, 0.10, 35)
+
+        elif dpad_right:
+            tab_action = bindings.get("dpad_right") or "TAB"
+            self._tap_binding(tab_action)
+            hub.rumble(0.03, 0.08, 30)
 
     # Sequência de clique das ações do pet (confirmada pelo A com a sublinha aberta).
     # Não há tecla de teclado para essas ações: o cursor é levado ATÉ O BOTÃO na
@@ -4279,6 +4350,46 @@ class BridgeEngine(threading.Thread):
             self.injector.mouse_button("left", False)
             self._pet_click_down = False
         self._pet_click_seq = None
+        self.injector.move(return_x, return_y)
+
+    # Sequência de clique do ponto roxo (#8A38F5) da HUD inferior (D-pad esquerdo no overworld).
+    # O cursor é levado até o ponto roxo da imagem SVG (viewBox 942x137 calibrado),
+    # clica no ponto e retorna à posição onde estava antes de sair.
+    # Cronograma (t = segundos desde o D-pad esquerdo):
+    #   0.00  movimento absoluto até o botão roxo
+    #   0.05  mouse LEFT DOWN (~50 ms após a chegada para registrar hover)
+    #   0.10  mouse LEFT UP (~50 ms de clique)
+    #   0.14  retorno do cursor à posição de onde saiu
+    # Total ~140 ms. Durante a sequência o cursor é exclusivo dela.
+    def _handle_hud_purple_click(self, now: float) -> None:
+        seq = self._hud_click_seq
+        if seq is None:
+            return
+        target_x, target_y, return_x, return_y, t0 = seq
+        t = now - t0
+        if t < 0:
+            return
+        if t < 0.05:
+            self.injector.move(target_x, target_y)
+            return
+        if t < 0.10:
+            if not self._hud_click_down:
+                if self.injector.mouse_button("left", True):
+                    self._hud_click_down = True
+            return
+        if t < 0.14:
+            if self._hud_click_down:
+                self.injector.mouse_button("left", False)
+                self._hud_click_down = False
+            return
+        # Fim ou tick engasgado: garante clique se pulou e solta botão
+        if not self._hud_click_down and t >= 0.10:
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+        elif self._hud_click_down:
+            self.injector.mouse_button("left", False)
+            self._hud_click_down = False
+        self._hud_click_seq = None
         self.injector.move(return_x, return_y)
 
     def _is_radial_allowed(self) -> bool:
@@ -4509,6 +4620,7 @@ class BridgeEngine(threading.Thread):
             and rmag == 0
             and not radial_active
             and self._pet_click_seq is None
+            and self._hud_click_seq is None
             and not both_panels_open(self._active_panels)
         ):
             # Âncora do herói em pixels, a partir das frações do perfil.
@@ -5023,6 +5135,7 @@ class BridgeEngine(threading.Thread):
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
         self._handle_pet_click(now)
+        self._handle_hud_purple_click(now)
         # Remap do overworld e combos de gatilho (mapa docs/REMAP-BOTOES): B/Y
         # contextuais (ESC / Shift+clique) e RB/RT/LT+ (3/4/5..0). Rodam depois da
         # roda: com LB de pé eles se auto-suprimem lá dentro. O cronômetro do clique
@@ -5033,13 +5146,14 @@ class BridgeEngine(threading.Thread):
         if not self._memory_state.is_connected or self._memory_state.is_in_game:
             self._handle_trigger_combos(state, rect, bindings, now)
             self._handle_overworld_remap(state, rect, bindings, now)
+            self._handle_overworld_dpad(state, rect, hub, bindings, now)
             self._handle_modifier_release(now)
 
         # Posiciona o cursor; retorna True quando o movimento direto deve segurar o clique esquerdo.
-        # Com a sequência do pet em curso os sticks estão bloqueados: nenhum move, nenhum
+        # Com a sequência do pet ou hud em curso os sticks estão bloqueados: nenhum move, nenhum
         # clique retido e nenhuma borda de subida dispara a lógica de fechamento de painéis.
-        pet_seq_active = self._pet_click_seq is not None
-        if pet_seq_active:
+        seq_active = self._pet_click_seq is not None or self._hud_click_seq is not None
+        if seq_active:
             # O clique do pet é injetado direto pelo _handle_pet_click (fora de
             # _held_mouse): não mexe no botão esquerdo nem na borda de subida — o
             # estado 'left' fica exatamente como estava antes da sequência, então

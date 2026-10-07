@@ -34,6 +34,7 @@ from .models import (
     BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
     controller_type_from_name,
     hud_asset_path,
+    hud_purple_button_point,
     hud_target_rect,
     panel_regions,
     panels_x_shift,
@@ -887,6 +888,20 @@ class GameOverlay(QWidget):
                     label_box,
                     Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
                     "HUD (NÃO FECHA)",
+                )
+
+                # Marcador do ponto roxo (#8A38F5 / D-pad esquerdo)
+                px, py = hud_purple_button_point(rect)
+                p_local = QPointF(px - rect.left, py - rect.top)
+                painter.setPen(QPen(QColor(138, 56, 245, 230), 1.5 * scale))
+                painter.setBrush(QColor(138, 56, 245, 80))
+                painter.drawEllipse(p_local, 7.0 * scale, 7.0 * scale)
+                painter.setFont(self._font(max(6, round(7.5 * scale)), True))
+                painter.setPen(QColor(210, 160, 255, 240))
+                painter.drawText(
+                    QRectF(p_local.x() - 40 * scale, p_local.y() - 18 * scale, 80 * scale, 14 * scale),
+                    Qt.AlignmentFlag.AlignCenter,
+                    "D-PAD ESQ",
                 )
 
             # 4b. HUD inferior dos controles (calibração visual da área)

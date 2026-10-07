@@ -12,6 +12,7 @@ from torchbridge.models import (
     click_zone,
     close_tab_vertices,
     hud_mask_hit,
+    hud_purple_button_point,
     hud_target_rect,
     load_hud_mask,
     point_in_polygon,
@@ -246,6 +247,26 @@ class HudMaskGeometryTests(unittest.TestCase):
         self.assertFalse(hud_mask_hit(mask, rect, 458.958 + 10, 930.78 + 10))
         # Fora da região da HUD → False.
         self.assertFalse(hud_mask_hit(mask, rect, 960, 540))
+
+    def test_hud_purple_button_point_invalid_rect(self):
+        self.assertEqual(hud_purple_button_point(Rect()), (0, 0))
+
+    def test_hud_purple_button_point_1080p(self):
+        rect = Rect(0, 0, 1920, 1080)
+        px, py = hud_purple_button_point(rect)
+        # Em 1080p: target é exatamente (775, 1016)
+        self.assertEqual((px, py), (775, 1016))
+        # O ponto roxo deve estar dentro da HUD
+        hl, ht, hw, hh = hud_target_rect(rect)
+        self.assertGreaterEqual(px, hl)
+        self.assertLessEqual(px, hl + hw)
+        self.assertGreaterEqual(py, ht)
+        self.assertLessEqual(py, ht + hh)
+
+    def test_hud_purple_button_point_offset(self):
+        rect = Rect(100, 50, 1920, 1080)
+        px, py = hud_purple_button_point(rect)
+        self.assertEqual((px, py), (775 + 100, 1016 + 50))
 
 
 class PetActionsGeometryTests(unittest.TestCase):
