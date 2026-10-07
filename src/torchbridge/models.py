@@ -300,6 +300,27 @@ def hud_asset_path() -> Path | None:
     return base / "assets" / "hud" / HUD_ASSET
 
 
+# Ponto roxo (#8A38F5) no viewBox 942x137 do SVG da HUD (assets/hud/hud-click-no-reset-variable.svg):
+# Forma octogonal/chanfrada entre X=[271, 319] e Y=[57, 104] — centro exato em (295.0, 80.5).
+HUD_PURPLE_TARGET = (295.0, 80.5)
+
+
+def hud_purple_button_point(rect: Rect) -> tuple[int, int]:
+    """Ponto de clique na tela (px absolutos) para o ponto ROXO (#8A38F5) da HUD.
+
+    Calcula a projeção do centro da forma roxa no SVG (viewBox 942x137) sobre o
+    retângulo calibrado da HUD inferior (hud_target_rect).
+    """
+    if not rect.valid:
+        return (0, 0)
+    svg_x, svg_y = HUD_PURPLE_TARGET
+    left, top, width, height = hud_target_rect(rect)
+    x = left + (svg_x / 942.0) * width
+    y = top + (svg_y / 137.0) * height
+    return (int(round(x)), int(round(y)))
+
+
+
 # HUD inferior para controles: layouts por tipo de controle (Xbox, PlayStation, Nintendo)
 # Imagens PNG em assets/hud/inferior/, dimensão original 1347x242 na referência 1080p.
 BOTTOM_HUD_ASSETS: dict[str, str] = {
