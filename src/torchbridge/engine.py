@@ -276,6 +276,7 @@ class BridgeEngine(threading.Thread):
         self._quest_focus: str = "quest_0"
         self._last_quest_slot: int = 0
         self._quest_b_consumed: bool = False
+        self._a_shift_held: bool = False
 
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
@@ -381,6 +382,7 @@ class BridgeEngine(threading.Thread):
         self._quest_b_consumed = False
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
+        self._a_shift_held = False
 
     # Pede a parada; a thread encerra no próximo ciclo.
     def stop(self) -> None:
@@ -431,6 +433,10 @@ class BridgeEngine(threading.Thread):
 
     # Segurança: solta todo clique/tecla retidos (perda de foco, pausa, troca de modo ou saída) e limpa o overlay.
     def _release_all(self) -> None:
+        if getattr(self, "_a_shift_held", False):
+            self._set_key("SHIFT", False)
+            self._ensure_modifier_released("SHIFT")
+            self._a_shift_held = False
         for key in tuple(self._held_keys):
             self.injector.key(key, False)
         for button in tuple(self._held_mouse):
@@ -5247,9 +5253,35 @@ class BridgeEngine(threading.Thread):
             or self._modal_confirm_initialized
             or in_quest_side
         )
-        left_pressed = auto_move or (
+        a_pressed = (
             state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
         )
+        is_overworld = bool(
+            getattr(self, "_memory_state", None)
+            and self._memory_state.is_connected
+            and self._memory_state.is_in_game
+            and not self._memory_state.is_menu_open
+            and not getattr(self._memory_state, "dialog_type", "")
+            and not self._active_panels[0]
+            and not self._active_panels[1]
+        )
+        want_shift = (
+            a_pressed
+            and is_overworld
+            and not getattr(self._memory_state, "is_hover_interactive", False)
+        )
+
+        if want_shift:
+            if not self._a_shift_held:
+                self._set_key("SHIFT", True)
+                self._a_shift_held = True
+        else:
+            if self._a_shift_held:
+                self._set_key("SHIFT", False)
+                self._ensure_modifier_released("SHIFT")
+                self._a_shift_held = False
+
+        left_pressed = auto_move or a_pressed
         right_pressed = (
             state.pressed("x") and not radial_held and not lt_held and not suppress_mouse
         )

@@ -2190,3 +2190,118 @@ class DifficultyNavigationTests(unittest.TestCase):
             self.assertIn(("mouse", "left", False), injector.events)
 
 
+class OverworldAttackInPlaceTests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def test_a_button_on_ground_holds_shift_and_left_click(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+                is_menu_open=False,
+                is_hover_interactive=False,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # 1. Pressiona botão A no chão: deve segurar SHIFT e Left Click
+            state_a = ControllerState(connected=True, buttons=frozenset({"a"}))
+            engine._process_active(hub, state_a, rect, cfg, 0.0, 0.05)
+            self.assertTrue(engine._a_shift_held)
+            self.assertIn(("key", "SHIFT", True), injector.events)
+            self.assertIn(("mouse", "left", True), injector.events)
+
+            # 2. Solta botão A: deve soltar SHIFT e Left Click
+            state_empty = ControllerState(connected=True)
+            engine._previous = state_a
+            engine._process_active(hub, state_empty, rect, cfg, 0.05, 0.05)
+            self.assertFalse(engine._a_shift_held)
+            self.assertIn(("key", "SHIFT", False), injector.events)
+            self.assertIn(("mouse", "left", False), injector.events)
+
+    def test_a_button_on_interactive_hover_sends_plain_left_click(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+                is_menu_open=False,
+                is_hover_interactive=True,  # NPC ou Baú
+                hover_flag=2,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Pressiona A sobre NPC: clique simples (SEM Shift)
+            state_a = ControllerState(connected=True, buttons=frozenset({"a"}))
+            engine._process_active(hub, state_a, rect, cfg, 0.0, 0.05)
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn(("key", "SHIFT", True), injector.events)
+            self.assertIn(("mouse", "left", True), injector.events)
+
+    def test_auto_move_sends_plain_left_click_without_shift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+                is_menu_open=False,
+                is_hover_interactive=False,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Analógico esquerdo inclinado (auto_move): move e clica SEM Shift
+            state_move = ControllerState(connected=True, lx=0.8, ly=0.0)
+            engine._process_active(hub, state_move, rect, cfg, 0.0, 0.05)
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn(("key", "SHIFT", True), injector.events)
+            self.assertIn(("mouse", "left", True), injector.events)
+
+    def test_a_button_in_menu_does_not_hold_shift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+                is_menu_open=True,
+                open_menus=["Inventário"],
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            state_a = ControllerState(connected=True, buttons=frozenset({"a"}))
+            engine._process_active(hub, state_a, rect, cfg, 0.0, 0.05)
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn(("key", "SHIFT", True), injector.events)
+
+    def test_release_all_cleans_up_held_shift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            engine._a_shift_held = True
+            engine._held_keys.add("SHIFT")
+            engine._release_all()
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn("SHIFT", engine._held_keys)
+            self.assertIn(("key", "SHIFT", False), injector.events)
+
+

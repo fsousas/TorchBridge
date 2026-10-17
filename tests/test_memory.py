@@ -23,6 +23,8 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertEqual(state.open_menus, [])
         self.assertEqual(state.recommended_mode, "direct")
         self.assertEqual(state.char_name_len, 0)
+        self.assertFalse(state.is_hover_interactive)
+        self.assertEqual(state.hover_flag, 0)
 
     def test_main_menu_states_mapping(self):
         self.assertEqual(MAIN_MENU_STATES[0], "Tela Inicial")
@@ -204,6 +206,78 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertFalse(state_ingame.is_loading)
         self.assertTrue(state_ingame.is_in_game)
         self.assertEqual(state_ingame.state_desc, "Em Jogo")
+
+    def test_hover_interactive_detection(self):
+        """Valida detecção de entidades interativas (NPC=2, Baú=1) vs chão vazio (0)."""
+        from torchbridge.memory import (
+            OFFSET_GAMECLIENT,
+            OFFSET_GAMEUI,
+            OFFSET_MENU_MGR,
+            OFFSET_MAIN_STATE,
+            OFFSET_UI_STATE,
+            OFFSET_PLAYER,
+            OFFSET_HOVER_ENTITY,
+            OFFSET_HOVER_FLAG,
+        )
+        reader = TorchlightMemoryReader()
+        reader.pid = 9999
+        reader._handle = 1234
+        reader._ensure_handle = MagicMock(return_value=True)
+
+        p_game = 0x1000
+        p_client = 0x2000
+        p_ui = 0x3000
+        p_menu_mgr = 0x4000
+        p_player = 0x5000
+
+        hover_entity = 0x054E24B8
+        current_hover_flag = 2  # NPC
+        current_hover_ptr = hover_entity
+
+        def fake_read(addr):
+            if addr == ADDR_CGAME_GLOBAL:
+                return p_game
+            if addr == p_game + OFFSET_GAMECLIENT:
+                return p_client
+            if addr == p_client + OFFSET_GAMEUI:
+                return p_ui
+            if addr == p_client + OFFSET_PLAYER:
+                return p_player
+            if addr == p_ui + OFFSET_MENU_MGR:
+                return p_menu_mgr
+            if addr == p_menu_mgr + OFFSET_MAIN_STATE:
+                return 6
+            if addr == p_ui + OFFSET_UI_STATE:
+                return 6
+            if addr == p_client + OFFSET_HOVER_ENTITY:
+                return current_hover_ptr
+            if addr == p_client + OFFSET_HOVER_FLAG:
+                return current_hover_flag
+            return 0
+
+        reader.read_u32 = MagicMock(side_effect=fake_read)
+        reader.read_u8 = MagicMock(return_value=0)
+
+        # 1. Hover em NPC (flag 2, ptr válido)
+        current_hover_ptr = hover_entity
+        current_hover_flag = 2
+        st = reader.update()
+        self.assertTrue(st.is_hover_interactive)
+        self.assertEqual(st.hover_flag, 2)
+
+        # 2. Hover em Baú (flag 1, ptr válido)
+        current_hover_ptr = hover_entity
+        current_hover_flag = 1
+        st = reader.update()
+        self.assertTrue(st.is_hover_interactive)
+        self.assertEqual(st.hover_flag, 1)
+
+        # 3. Chão vazio (flag 0, ptr 0)
+        current_hover_ptr = 0
+        current_hover_flag = 0
+        st = reader.update()
+        self.assertFalse(st.is_hover_interactive)
+        self.assertEqual(st.hover_flag, 0)
 
 
 if __name__ == "__main__":

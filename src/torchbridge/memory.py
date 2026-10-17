@@ -42,6 +42,8 @@ OFFSET_NEW_GAME_MENU = 0x0D78
 OFFSET_CHAR_EDITBOX  = 0x70
 OFFSET_CHAR_NAME_LEN = 0x88
 OFFSET_UI_STATE      = 0x169C  # CGameUI -> Estado ativo do gameplay / transição de nível (6: em jogo, != 6: transição/carregando)
+OFFSET_HOVER_ENTITY  = 0x01BC  # CGameClient -> ponteiro para a entidade sob o cursor (0 = chão)
+OFFSET_HOVER_FLAG    = 0x01C0  # CGameClient -> tipo do hover (0 = chão, 1 = Baú/Item, 2 = NPC)
 
 MAIN_MENU_STATES: dict[int, str] = {
     0: "Tela Inicial",
@@ -193,6 +195,9 @@ class GameMemoryState:
     quest_visible_rows: int = 0
     quest_can_abandon: bool = False
     quest_has_item_reward: bool = False
+    # Hover / Interação no Overworld
+    is_hover_interactive: bool = False
+    hover_flag: int = 0
 
 
 class TorchlightMemoryReader:
@@ -822,6 +827,12 @@ class TorchlightMemoryReader:
                         break
                 quest_has_item_reward = has_item_reward
 
+        # Entidade e flag sob o cursor (CGameClient: +0x1BC e +0x1C0)
+        # hover_flag: 0 = chão, 1 = Baú/Item, 2 = NPC.
+        hover_ptr = self.read_u32(p_client + OFFSET_HOVER_ENTITY) or 0
+        hover_flag = self.read_u32(p_client + OFFSET_HOVER_FLAG) or 0
+        is_hover_interactive = bool(hover_ptr > 0x00400000 and hover_flag in (1, 2))
+
         is_menu_open = len(open_menus) > 0
         return GameMemoryState(
             is_connected=True,
@@ -853,4 +864,6 @@ class TorchlightMemoryReader:
             quest_visible_rows=quest_visible_rows,
             quest_can_abandon=quest_can_abandon,
             quest_has_item_reward=quest_has_item_reward,
+            is_hover_interactive=is_hover_interactive,
+            hover_flag=hover_flag,
         )
