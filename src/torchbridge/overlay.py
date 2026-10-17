@@ -32,6 +32,17 @@ from .models import (
     bottom_hud_asset_path,
     bottom_hud_target_rect,
     BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
+    virtual_keyboard_bg_asset_path,
+    virtual_keyboard_target_rect,
+    virtual_keyboard_asset_path,
+    virtual_keyboard_key_filename,
+    virtual_keyboard_highlight_filename,
+    virtual_keyboard_info_label_filename,
+    virtual_keyboard_grid_to_key,
+    virtual_keyboard_key_rect,
+    KEYBOARD_LAYOUT,
+    KEYBOARD_GRID_ROWS,
+    KEYBOARD_GRID_COLS,
     controller_type_from_name,
     hud_asset_path,
     hud_purple_button_point,
@@ -144,6 +155,10 @@ class GameOverlay(QWidget):
         self._radial_cache: dict[tuple[str, str], QPixmap] = {}
         # Cache dos pixmaps do HUD inferior dos controles (Xbox, PlayStation, Nintendo).
         self._bottom_hud_cache: dict[str, QPixmap] = {}
+        # Cache do pixmap de fundo do teclado virtual (assets/keyboard/background.png).
+        self._keyboard_bg_pixmap: QPixmap | None = None
+        # Cache de pixmaps das teclas do teclado virtual.
+        self._keyboard_keys_cache: dict[str, QPixmap] = {}
         # Silhueta verde da HUD (modo de calibração): renderizada uma vez do SVG, se existir.
         # None = asset ausente (nada a desenhar).
         self._hud_pixmap = self._load_hud_pixmap()
@@ -402,6 +417,32 @@ class GameOverlay(QWidget):
         if pixmap.isNull():
             return None
         self._bottom_hud_cache[controller_type] = pixmap
+        return pixmap
+
+    # Carrega o background do teclado virtual e guarda em cache.
+    def _get_keyboard_bg_pixmap(self) -> QPixmap | None:
+        if self._keyboard_bg_pixmap is not None:
+            return self._keyboard_bg_pixmap
+        path = virtual_keyboard_bg_asset_path()
+        if path is None or not path.exists():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._keyboard_bg_pixmap = pixmap
+        return pixmap
+
+    # Carrega uma tecla/asset do teclado virtual e guarda em cache.
+    def _get_keyboard_key_pixmap(self, filename: str) -> QPixmap | None:
+        if filename in self._keyboard_keys_cache:
+            return self._keyboard_keys_cache[filename]
+        path = virtual_keyboard_asset_path(filename)
+        if path is None or not path.exists():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._keyboard_keys_cache[filename] = pixmap
         return pixmap
 
     def _should_show_bottom_hud(self, snapshot: OverlaySnapshot) -> bool:
@@ -1851,6 +1892,164 @@ class GameOverlay(QWidget):
         painter.setPen(QColor(235, 248, 251))
         painter.drawText(box, Qt.AlignmentFlag.AlignCenter, snapshot.toast_text)
 
+    def _draw_virtual_keyboard(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
+        """Desenha o teclado virtual completo (background, teclas, highlights, label e cursor)."""
+        if not snapshot.virtual_keyboard_open:
+            return
+
+        rect = snapshot.game_rect
+        if not rect.valid:
+            return
+
+        target = snapshot.virtual_keyboard_target or "character_name"
+        kx, ky, kw, kh = virtual_keyboard_target_rect(rect, target)
+        local_x = float(kx - rect.left)
+        local_y = float(ky - rect.top)
+        scale_k = kh / 290.0
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+        # 1. Background do teclado [Camada Fundo]
+        bg_pix = self._get_keyboard_bg_pixmap()
+        if bg_pix and not bg_pix.isNull():
+            painter.drawPixmap(
+                int(round(local_x)),
+                int(round(local_y)),
+                int(round(kw)),
+                int(round(kh)),
+                bg_pix,
+            )
+        else:
+            painter.setPen(QPen(QColor(180, 160, 120, 240), 2.0 * scale))
+            painter.setBrush(QColor(22, 19, 18, 245))
+            painter.drawRoundedRect(QRectF(local_x, local_y, kw, kh), 8.0 * scale, 8.0 * scale)
+
+        # 2. Barra informativa superior (info-label-*.png conforme o controle)
+        ctrl_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+        label_file = virtual_keyboard_info_label_filename(ctrl_type)
+        label_pix = self._get_keyboard_key_pixmap(label_file)
+        if label_pix and not label_pix.isNull():
+            lbl_w = 513.0 * scale_k
+            lbl_h = 29.0 * scale_k
+            lbl_x = local_x + (kw - lbl_w) / 2.0
+            lbl_y = local_y - 25.0 * scale_k
+            painter.drawPixmap(
+                int(round(lbl_x)),
+                int(round(lbl_y)),
+                int(round(lbl_w)),
+                int(round(lbl_h)),
+                label_pix,
+            )
+
+        # 3. Teclas [Camada Tecla]
+        caps_state = snapshot.virtual_keyboard_caps_state or "default"
+        pressed_key = snapshot.virtual_keyboard_pressed_key
+
+        focus = snapshot.virtual_keyboard_focus or (3, 1)
+        focused_key_id, focused_key_type = virtual_keyboard_grid_to_key(focus[0], focus[1])
+
+        for key_id, r, c, span, k_type in KEYBOARD_LAYOUT:
+            key_x, key_y, key_w, key_h = virtual_keyboard_key_rect(local_x, local_y, kw, kh, key_id)
+            key_file = virtual_keyboard_key_filename(key_id, caps_state)
+            key_pix = self._get_keyboard_key_pixmap(key_file)
+            if key_pix and not key_pix.isNull():
+                is_pressed = (pressed_key == key_id)
+                if is_pressed:
+                    # Efeito de clique afundar: escala 0.97
+                    painter.save()
+                    cx = key_x + key_w / 2.0
+                    cy = key_y + key_h / 2.0
+                    painter.translate(cx, cy)
+                    painter.scale(0.97, 0.97)
+                    painter.translate(-cx, -cy)
+                    painter.drawPixmap(
+                        int(round(key_x)),
+                        int(round(key_y)),
+                        int(round(key_w)),
+                        int(round(key_h)),
+                        key_pix,
+                    )
+                    painter.restore()
+                else:
+                    painter.drawPixmap(
+                        int(round(key_x)),
+                        int(round(key_y)),
+                        int(round(key_w)),
+                        int(round(key_h)),
+                        key_pix,
+                    )
+
+        # 4. Highlight da tecla sob foco [Camada Highlight]
+        f_kx, f_ky, f_kw, f_kh = virtual_keyboard_key_rect(local_x, local_y, kw, kh, focused_key_id)
+        hl_file = virtual_keyboard_highlight_filename(focused_key_type)
+        hl_pix = self._get_keyboard_key_pixmap(hl_file)
+        if hl_pix and not hl_pix.isNull():
+            hl_w = hl_pix.width() * scale_k
+            hl_h = hl_pix.height() * scale_k
+            hl_x = f_kx + (f_kw - hl_w) / 2.0
+            hl_y = f_ky + (f_kh - hl_h) / 2.0
+            painter.drawPixmap(
+                int(round(hl_x)),
+                int(round(hl_y)),
+                int(round(hl_w)),
+                int(round(hl_h)),
+                hl_pix,
+            )
+
+        # 5. Cursor / Nós de calibração [Camada Topo]
+        show_cal = bool(self.config.get().get("overlay", {}).get("show_calibration", False))
+        if show_cal:
+            # Em modo calibração, exibe os nós verdes em todas as teclas
+            for key_id, r, c, span, k_type in KEYBOARD_LAYOUT:
+                kx_i, ky_i, kw_i, kh_i = virtual_keyboard_key_rect(local_x, local_y, kw, kh, key_id)
+                cx = kx_i + kw_i / 2.0
+                cy = ky_i + kh_i / 2.0
+                sz = 14.0 * scale_k
+                if key_id == "3x1":
+                    # Nó inicial amarelo #F4DC2A
+                    painter.setPen(QPen(QColor(244, 220, 42, 240), 1.5))
+                    painter.setBrush(QColor(244, 220, 42, 220))
+                else:
+                    # Nó de navegação verde #09B200
+                    painter.setPen(QPen(QColor(9, 178, 0, 240), 1.5))
+                    painter.setBrush(QColor(9, 178, 0, 220))
+                painter.drawRect(QRectF(cx - sz / 2.0, cy - sz / 2.0, sz, sz))
+        else:
+            # Em uso normal, exibe o nó do cursor na tecla ativa
+            f_cx = f_kx + f_kw / 2.0
+            f_cy = f_ky + f_kh / 2.0
+            sz = 14.0 * scale_k
+            if focused_key_id == "3x1":
+                # Nó inicial Amarelo (#F4DC2A)
+                painter.setPen(QPen(QColor(244, 220, 42, 240), 1.5))
+                painter.setBrush(QColor(244, 220, 42, 220))
+            else:
+                # Nó de navegação Verde (#09B200)
+                painter.setPen(QPen(QColor(9, 178, 0, 240), 1.5))
+                painter.setBrush(QColor(9, 178, 0, 220))
+            painter.drawRect(QRectF(f_cx - sz / 2.0, f_cy - sz / 2.0, sz, sz))
+
+        # 6. Nó de Retorno Rosa (#B2007C) sobre o campo de texto ativo
+        if target in ("character_name", "pet_name"):
+            tx, ty = char_create_button_point(rect, target)
+            pink_lx = tx - rect.left
+            pink_ly = ty - rect.top
+            pink_w = 46.0 * scale_k
+            pink_h = 24.0 * scale_k
+            painter.setPen(QPen(QColor(178, 0, 124, 240), 2.0))
+            painter.setBrush(QColor(178, 0, 124, 180))  # Rosa #B2007C
+            painter.drawRect(
+                QRectF(
+                    pink_lx - pink_w * 0.5,
+                    pink_ly - pink_h * 0.5,
+                    pink_w,
+                    pink_h,
+                )
+            )
+
+        painter.restore()
+
     # Redesenho completo: lê o snapshot e pinta os quatro elementos na escala do perfil.
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         del event
@@ -1869,6 +2068,7 @@ class GameOverlay(QWidget):
         self._draw_bottom_hud(painter, snapshot)
         self._draw_aim(painter, snapshot, scale)
         self._draw_calibration(painter, snapshot, scale)
+        self._draw_virtual_keyboard(painter, snapshot, scale)
         self._draw_radial(painter, snapshot, scale)
         self._draw_mode_badge(painter, snapshot, scale)
         # Desenhado antes do toast para o aviso temporário cobrir o indicador quando sobreposto.

@@ -702,6 +702,195 @@ def char_create_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# Coordenadas e layout do Teclado Virtual (Tela de Criação de Personagem - state_id == 1)
+KEYBOARD_REF_WIDTH = 568.0
+KEYBOARD_REF_HEIGHT = 290.0
+KEYBOARD_REF_BASE_HEIGHT = 1080.0
+KEYBOARD_GRID_ROWS = 5
+KEYBOARD_GRID_COLS = 13
+KEYBOARD_PET_RIGHT_MARGIN_PX = 259.0  # Desconto fixo lateral em pixels para manter painel do pet visível
+
+# Layout de teclas do Teclado Virtual (5 linhas x 13 colunas)
+# Cada entrada é (key_id, row, col, span_cols, key_type)
+KEYBOARD_LAYOUT: list[tuple[str, int, int, int, str]] = []
+for _r in (1, 2, 3):
+    for _c in range(1, 14):
+        KEYBOARD_LAYOUT.append((f"{_r}x{_c}", _r, _c, 1, "simple"))
+
+KEYBOARD_LAYOUT.append(("caps", 4, 1, 2, "caps"))
+for _c in range(3, 12):
+    KEYBOARD_LAYOUT.append((f"4x{_c}", 4, _c, 1, "simple"))
+KEYBOARD_LAYOUT.append(("backspace", 4, 12, 2, "backspace"))
+
+KEYBOARD_LAYOUT.append(("space", 5, 1, 10, "space"))
+KEYBOARD_LAYOUT.append(("ok", 5, 11, 3, "ok"))
+
+
+def virtual_keyboard_asset_path(filename: str = "background.png") -> Path | None:
+    """Retorna o caminho de um asset PNG da pasta do teclado virtual."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "keyboard" / filename
+    return path if path.is_file() else None
+
+
+def virtual_keyboard_bg_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG do background do teclado virtual."""
+    return virtual_keyboard_asset_path("background.png")
+
+
+def virtual_keyboard_grid_to_key(row: int, col: int) -> tuple[str, str]:
+    """Mapeia (row, col) do grid 5x13 para (key_id, key_type)."""
+    if row in (1, 2, 3):
+        return (f"{row}x{col}", "simple")
+    elif row == 4:
+        if col in (1, 2):
+            return ("caps", "caps")
+        elif col in (12, 13):
+            return ("backspace", "backspace")
+        else:
+            return (f"4x{col}", "simple")
+    elif row == 5:
+        if col <= 10:
+            return ("space", "space")
+        else:
+            return ("ok", "ok")
+    return ("1x1", "simple")
+
+
+def virtual_keyboard_key_filename(key_id: str, caps_state: str = "default") -> str:
+    """Retorna o nome do arquivo PNG para a tecla especificada considerando o estado do Caps Lock."""
+    if key_id == "caps":
+        if caps_state == "next_letter":
+            return "Caps-lock-on-only-next-letter-4x1-e-4x2.png"
+        elif caps_state == "all_letters":
+            return "Caps-lock-on-4x1-e-4x2.png"
+        else:
+            return "Caps-lock-default-4x1-e-4x2.png"
+    elif key_id == "backspace":
+        return "Backspace-4x12-e-4x13.png"
+    elif key_id == "space":
+        return "tecla-espaço-5x1-a-5x10.png"
+    elif key_id == "ok":
+        return "OK-5x11-a-5x13.png"
+    else:
+        prefix = "mai-" if caps_state in ("next_letter", "all_letters") else "min-"
+        return f"{prefix}{key_id}.png"
+
+
+def virtual_keyboard_highlight_filename(key_type: str) -> str:
+    """Retorna o nome do asset PNG de highlight correspondente ao tipo de tecla."""
+    if key_type in ("caps", "backspace"):
+        return "highlight-tecla-dupla.png"
+    elif key_type == "ok":
+        return "highlight-tecla-tripla.png"
+    elif key_type == "space":
+        return "highlight-tecla-grande.png"
+    else:
+        return "highlight-tecla-simples.png"
+
+
+def virtual_keyboard_info_label_filename(controller_type: str) -> str:
+    """Retorna o asset da barra informativa superior conforme o controle detectado."""
+    ctrl = controller_type.lower()
+    if "nintendo" in ctrl or "switch" in ctrl:
+        return "info-label-nintendo.png"
+    elif "playstation" in ctrl or "ps" in ctrl or "sony" in ctrl:
+        return "info-label-ps.png"
+    else:
+        return "info-label-xbox.png"
+
+
+def virtual_keyboard_key_rect(
+    kb_x: float,
+    kb_y: float,
+    kb_w: float,
+    kb_h: float,
+    key_id: str,
+) -> tuple[float, float, float, float]:
+    """Calcula as coordenadas absolutas (x, y, w, h) de uma tecla no teclado."""
+    scale_k = kb_h / KEYBOARD_REF_HEIGHT
+    margin_x = 18.5 * scale_k
+    margin_y = 6.0 * scale_k
+    step_x = 41.0 * scale_k
+    step_y = 56.0 * scale_k
+
+    if key_id == "caps":
+        return (
+            kb_x + margin_x,
+            kb_y + margin_y + 3 * step_y,
+            80.0 * scale_k,
+            54.0 * scale_k,
+        )
+    elif key_id == "backspace":
+        return (
+            kb_x + margin_x + 11 * step_x,
+            kb_y + margin_y + 3 * step_y,
+            80.0 * scale_k,
+            54.0 * scale_k,
+        )
+    elif key_id == "space":
+        return (
+            kb_x + margin_x,
+            kb_y + margin_y + 4 * step_y,
+            399.0 * scale_k,
+            55.0 * scale_k,
+        )
+    elif key_id == "ok":
+        return (
+            kb_x + margin_x + 399.0 * scale_k + 5.0 * scale_k,
+            kb_y + margin_y + 4 * step_y,
+            120.0 * scale_k,
+            56.0 * scale_k,
+        )
+    else:
+        parts = key_id.split("x")
+        r = int(parts[0])
+        c = int(parts[1])
+        return (
+            kb_x + margin_x + (c - 1) * step_x,
+            kb_y + margin_y + (r - 1) * step_y,
+            39.0 * scale_k,
+            54.0 * scale_k,
+        )
+
+
+def virtual_keyboard_target_rect(
+    rect: Rect,
+    target_field: str = "character_name",
+) -> tuple[int, int, int, int]:
+    """Calcula (left, top, width, height) absolutos do teclado virtual.
+
+    - Target 'character_name': centralizado horizontalmente e acima do campo,
+      descontando 10% da altura da tela na parte inferior.
+    - Target 'pet_name': ao lado do painel do pet (desconto lateral fixo em pixels)
+      e descontando 20% da altura da tela na parte inferior.
+    """
+    if not rect.valid:
+        return (0, 0, 0, 0)
+
+    scale_k = rect.height / KEYBOARD_REF_BASE_HEIGHT
+    w = int(round(KEYBOARD_REF_WIDTH * scale_k))
+    h = int(round(KEYBOARD_REF_HEIGHT * scale_k))
+
+    if target_field == "pet_name":
+        # Desconto fixo lateral para manter o painel do pet visível
+        x = int(rect.right - KEYBOARD_PET_RIGHT_MARGIN_PX - w)
+        # Desconto de 20% da altura da tela na parte inferior
+        bottom = rect.top + int(round(rect.height * 0.80))
+        y = bottom - h
+    else:
+        # Centralizado horizontalmente
+        x = rect.left + (rect.width - w) // 2
+        # Desconto de 10% da altura da tela na parte inferior (logo acima do campo)
+        bottom = rect.top + int(round(rect.height * 0.90))
+        y = bottom - h
+
+    return (x, y, w, h)
+
+
 # Coordenadas dos botões da Tela de Seleção de Dificuldade (state_id == 2)
 DIFFICULTY_OPTIONS_X_FRACTION = 0.239  # Âncora na borda esquerda: rect.left + height * 0.239
 DIFFICULTY_EASY_Y_FRACTION = 0.378
@@ -1909,6 +2098,11 @@ class OverlaySnapshot:
     char_name_len: int = 0
     title_menu_focus: str | None = None
     char_create_focus: str | None = None
+    virtual_keyboard_open: bool = False
+    virtual_keyboard_target: str = ""
+    virtual_keyboard_focus: tuple[int, int] = (3, 1)
+    virtual_keyboard_caps_state: str = "default"
+    virtual_keyboard_pressed_key: str | None = None
     difficulty_focus: str | None = None
     dialog_focus: str | None = None
     dialog_type: str = ""

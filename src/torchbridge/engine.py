@@ -18,6 +18,9 @@ from .models import (
     SharedOverlayState,
     both_panels_open,
     char_create_button_point,
+    virtual_keyboard_target_rect,
+    virtual_keyboard_grid_to_key,
+    virtual_keyboard_key_rect,
     click_zone,
     dialog_button_point,
     difficulty_menu_button_point,
@@ -200,6 +203,11 @@ class BridgeEngine(threading.Thread):
         # Navegação na Criação de Personagem (state_id == 1) via D-pad
         self._char_create_initialized = False
         self._char_create_focus = "destroyer"
+        self._virtual_keyboard_open = False
+        self._virtual_keyboard_target = ""
+        self._virtual_keyboard_focus = (3, 1)
+        self._virtual_keyboard_caps_state = "default"
+        self._virtual_keyboard_pressed_key: str | None = None
         # Navegação na Seleção de Dificuldade (state_id == 2) via D-pad
         self._difficulty_initialized = False
         self._difficulty_focus = "hardcore"
@@ -734,6 +742,25 @@ class BridgeEngine(threading.Thread):
         current = self._char_create_focus
         has_name = (self._memory_state.char_name_len > 0)
 
+        # Se o teclado virtual estiver aberto, delega para o controlador de navegação do teclado:
+        if self._virtual_keyboard_open:
+            self._handle_virtual_keyboard_navigation(state, rect, hub)
+            return
+
+        # Abrir teclado virtual ao pressionar 'a' quando focado em character_name ou pet_name
+        if current in ("character_name", "pet_name"):
+            if state.pressed("a") and not self._previous.pressed("a"):
+                self._virtual_keyboard_open = True
+                self._virtual_keyboard_target = current
+                self._virtual_keyboard_focus = (3, 1)  # Nó amarelo inicial (linha 3, coluna 1 - tecla 'A')
+                self.shared.update(
+                    virtual_keyboard_open=True,
+                    virtual_keyboard_target=current,
+                    virtual_keyboard_focus=(3, 1),
+                )
+                hub.rumble(0.04, 0.10, 40)
+                return
+
         # Se o foco estava no 'ok' mas o nome foi apagado, recua para 'character_name'
         if current == "ok" and not has_name:
             current = "character_name"
@@ -823,6 +850,137 @@ class BridgeEngine(threading.Thread):
             self.injector.move(target_x, target_y)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(char_create_focus=new_focus)
+
+    def _cycle_caps_lock(self, hub: ControllerHub) -> None:
+        """Alterna ciclicamente os 3 estados do Caps Lock: default -> next_letter -> all_letters -> default."""
+        cur = getattr(self, "_virtual_keyboard_caps_state", "default")
+        if cur == "default":
+            next_state = "next_letter"
+        elif cur == "next_letter":
+            next_state = "all_letters"
+        else:
+            next_state = "default"
+        self._virtual_keyboard_caps_state = next_state
+        self.shared.update(virtual_keyboard_caps_state=next_state)
+        hub.rumble(0.03, 0.08, 30)
+
+    def _close_virtual_keyboard(self, rect: Rect, hub: ControllerHub) -> None:
+        """Fecha o teclado virtual e retorna o cursor ao nó rosa do campo de texto ativo."""
+        self._virtual_keyboard_open = False
+        target = self._virtual_keyboard_target
+        self._virtual_keyboard_target = ""
+        self._virtual_keyboard_pressed_key = None
+        self.shared.update(
+            virtual_keyboard_open=False,
+            virtual_keyboard_target="",
+            virtual_keyboard_pressed_key=None,
+        )
+        hub.rumble(0.04, 0.10, 35)
+        if target:
+            tx, ty = char_create_button_point(rect, target)
+            self.injector.move(tx, ty)
+
+    def _handle_virtual_keyboard_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação no grid 5x13 e as ações do teclado virtual."""
+        # 1. Fechar pelo botão START (mesma ação do botão OK do teclado virtual)
+        if state.pressed("start") and not self._previous.pressed("start"):
+            self._close_virtual_keyboard(rect, hub)
+            return
+
+        # 2. Alternar Caps Lock pelo gatilho (LT / L2 / ZL)
+        lt_now = state.lt >= self.TRIGGER_ACTIVE_THRESHOLD
+        lt_prev = self._previous.lt >= self.TRIGGER_ACTIVE_THRESHOLD
+        if lt_now and not lt_prev:
+            self._cycle_caps_lock(hub)
+
+        # 3. Navegação via D-pad pelo grid 5x13
+        cur_row, cur_col = self._virtual_keyboard_focus or (3, 1)
+        new_row, new_col = cur_row, cur_col
+
+        dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+        dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_right:
+            if cur_row == 4 and cur_col in (1, 2):
+                new_col = 3
+            elif cur_row == 4 and cur_col == 11:
+                new_col = 12
+            elif cur_row == 5 and cur_col <= 10:
+                new_col = 11
+            else:
+                new_col = min(13, cur_col + 1)
+        elif dpad_left:
+            if cur_row == 4 and cur_col == 3:
+                new_col = 1
+            elif cur_row == 4 and cur_col in (12, 13):
+                new_col = 11
+            elif cur_row == 5 and cur_col >= 11:
+                new_col = 10
+            else:
+                new_col = max(1, cur_col - 1)
+        elif dpad_down:
+            new_row = min(5, cur_row + 1)
+        elif dpad_up:
+            new_row = max(1, cur_row - 1)
+
+        if (new_row, new_col) != (cur_row, cur_col):
+            self._virtual_keyboard_focus = (new_row, new_col)
+            hub.rumble(0.02, 0.06, 25)
+            self.shared.update(virtual_keyboard_focus=(new_row, new_col))
+            kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
+            key_id, _ = virtual_keyboard_grid_to_key(new_row, new_col)
+            key_rx, key_ry, key_rw, key_rh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
+            self.injector.move(int(round(key_rx + key_rw / 2.0)), int(round(key_ry + key_rh / 2.0)))
+
+        # 4. Seleção da tecla pelo botão A (Sul no Xbox/PS, Leste no Nintendo)
+        if state.pressed("a") and not self._previous.pressed("a"):
+            key_id, key_type = virtual_keyboard_grid_to_key(new_row, new_col)
+            hub.rumble(0.03, 0.08, 35)
+            self.shared.update(virtual_keyboard_pressed_key=key_id)
+
+            if key_id == "caps":
+                self._cycle_caps_lock(hub)
+            elif key_id == "ok":
+                self._close_virtual_keyboard(rect, hub)
+                return
+            elif key_id == "backspace":
+                self.injector.key("BACKSPACE", True)
+                self.injector.key("BACKSPACE", False)
+            elif key_id == "space":
+                self.injector.key("SPACE", True)
+                self.injector.key("SPACE", False)
+            else:
+                # Disparo de caractere simples (será integrado à injeção no próximo passo)
+                if getattr(self, "_virtual_keyboard_caps_state", "default") == "next_letter":
+                    self._virtual_keyboard_caps_state = "default"
+                    self.shared.update(virtual_keyboard_caps_state="default")
+
+        # Ao soltar o botão A, desfaz o efeito de clique afundado
+        if not state.pressed("a") and self._previous.pressed("a"):
+            self.shared.update(virtual_keyboard_pressed_key=None)
+
+        # 5. Botão B (Leste no Xbox/PS, Sul no Nintendo) funciona como Backspace
+        if state.pressed("b") and not self._previous.pressed("b"):
+            hub.rumble(0.03, 0.08, 30)
+            self.injector.key("BACKSPACE", True)
+            self.injector.key("BACKSPACE", False)
+
+        # 6. Botões de ombro (LB/RB, L1/R1, L/R): movem o cursor do texto (setas esquerda e direita)
+        if state.pressed("lb") and not self._previous.pressed("lb"):
+            self.injector.key("LEFT", True)
+            self.injector.key("LEFT", False)
+            hub.rumble(0.02, 0.05, 20)
+        elif state.pressed("rb") and not self._previous.pressed("rb"):
+            self.injector.key("RIGHT", True)
+            self.injector.key("RIGHT", False)
+            hub.rumble(0.02, 0.05, 20)
 
     # Navegação por D-pad na Tela de Seleção de Dificuldade (state_id == 2)
     def _handle_difficulty_navigation(
@@ -4783,7 +4941,9 @@ class BridgeEngine(threading.Thread):
                 self._handle_char_create_navigation(state, rect, hub)
             elif self._char_create_initialized:
                 self._char_create_initialized = False
-                self.shared.update(char_create_focus=None)
+                self._virtual_keyboard_open = False
+                self._virtual_keyboard_target = ""
+                self.shared.update(char_create_focus=None, virtual_keyboard_open=False, virtual_keyboard_target="")
 
             if state_id in (2, 4):
                 self._handle_difficulty_navigation(state, rect, hub)
@@ -5259,6 +5419,7 @@ class BridgeEngine(threading.Thread):
             or self._fishing_initialized
             or self._modal_confirm_initialized
             or in_quest_side
+            or self._virtual_keyboard_open
         )
         a_pressed = (
             state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
@@ -5363,6 +5524,46 @@ class BridgeEngine(threading.Thread):
             # cuja âncora ainda cai na zona central.
             elif zone == "center" and both_panels_open(self._active_panels):
                 self._reset_active_panels()
+
+            # Clique com mouse na Tela de Criação de Personagem (state_id == 1)
+            if getattr(self, "_memory_state", None) and self._memory_state.state_id == 1:
+                if not self._virtual_keyboard_open:
+                    for field in ("character_name", "pet_name"):
+                        bx, by = char_create_button_point(rect, field)
+                        if abs(cursor_x - bx) <= 80 and abs(cursor_y - by) <= 30:
+                            self._virtual_keyboard_open = True
+                            self._virtual_keyboard_target = field
+                            self._virtual_keyboard_focus = (3, 1)
+                            self._char_create_focus = field
+                            self.shared.update(
+                                char_create_focus=field,
+                                virtual_keyboard_open=True,
+                                virtual_keyboard_target=field,
+                                virtual_keyboard_focus=(3, 1),
+                            )
+                            break
+                else:
+                    kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
+                    kb_rect = Rect(kx, ky, kw, kh)
+                    if not kb_rect.contains(cursor_x, cursor_y):
+                        # Clicou fora do teclado virtual: verifica se clicou no outro campo de texto ou se fecha
+                        clicked_other = False
+                        for field in ("character_name", "pet_name"):
+                            bx, by = char_create_button_point(rect, field)
+                            if abs(cursor_x - bx) <= 80 and abs(cursor_y - by) <= 30:
+                                if field != self._virtual_keyboard_target:
+                                    self._virtual_keyboard_target = field
+                                    self._char_create_focus = field
+                                    self.shared.update(
+                                        char_create_focus=field,
+                                        virtual_keyboard_target=field,
+                                    )
+                                    clicked_other = True
+                                    break
+                        if not clicked_other:
+                            self._virtual_keyboard_open = False
+                            self._virtual_keyboard_target = ""
+                            self.shared.update(virtual_keyboard_open=False, virtual_keyboard_target="")
         self._previous_left_pressed = left_pressed
         # Snapshot do estado de painéis para o tick seguinte: o remap contextual de
         # B/Y decide com o estado ESTÁVEL do tick anterior (ver docstring do handler).
