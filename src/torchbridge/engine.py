@@ -277,6 +277,8 @@ class BridgeEngine(threading.Thread):
         self._last_quest_slot: int = 0
         self._quest_b_consumed: bool = False
         self._a_shift_held: bool = False
+        self._auto_move_resume_times: list[float] = []
+        self._auto_move_suppress_left_once: bool = False
 
 
     # Esquece os painéis que a roda acompanhava (ESC fechou os menus do jogo ou sessão nova).
@@ -383,6 +385,8 @@ class BridgeEngine(threading.Thread):
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
         self._a_shift_held = False
+        self._auto_move_resume_times = []
+        self._auto_move_suppress_left_once = False
 
     # Pede a parada; a thread encerra no próximo ciclo.
     def stop(self) -> None:
@@ -437,6 +441,9 @@ class BridgeEngine(threading.Thread):
             self._set_key("SHIFT", False)
             self._ensure_modifier_released("SHIFT")
             self._a_shift_held = False
+        if getattr(self, "_auto_move_resume_times", None):
+            self._auto_move_resume_times.clear()
+        self._auto_move_suppress_left_once = False
         for key in tuple(self._held_keys):
             self.injector.key(key, False)
         for button in tuple(self._held_mouse):
@@ -5281,7 +5288,55 @@ class BridgeEngine(threading.Thread):
                 self._ensure_modifier_released("SHIFT")
                 self._a_shift_held = False
 
-        left_pressed = auto_move or a_pressed
+        # Detecção de liberação de botão de habilidade durante auto_move no overworld:
+        # Quando o jogador usa uma magia/ataque (Quadrado/X, Triângulo/Y, Círculo/B, R1/RB, R2/RT, LT combos)
+        # enquanto caminha com o analógico esquerdo, o motor do Torchlight cancela internamente a caminhada.
+        # Ao soltar a habilidade, se o analógico continuar inclinado, forçamos um pulso no clique esquerdo
+        # (1 frame solto e reapertado) para o herói retomar a corrida imediatamente na direção apontada.
+        skill_released = False
+        any_skill_held = False
+        if is_overworld:
+            rt_cur = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
+            rt_prev = getattr(self, "_previous_rt_active", False)
+            rt_rel = (not rt_cur and rt_prev)
+
+            for btn in ("x", "y", "b", "rb"):
+                if not state.pressed(btn) and self._previous.pressed(btn):
+                    skill_released = True
+                if state.pressed(btn):
+                    any_skill_held = True
+
+            if rt_rel:
+                skill_released = True
+            if rt_cur:
+                any_skill_held = True
+
+            # LT + A (combo da skill 5)
+            if lt_held and state.pressed("a"):
+                any_skill_held = True
+            if not state.pressed("a") and self._previous.pressed("a") and getattr(self, "_previous_lt_active", False):
+                skill_released = True
+
+        if is_overworld and auto_move and not a_pressed:
+            if skill_released and not any_skill_held:
+                self._auto_move_suppress_left_once = True
+                self._auto_move_resume_times = [now + 0.150, now + 0.300]
+            elif self._auto_move_resume_times:
+                if any_skill_held:
+                    self._auto_move_resume_times.clear()
+                elif now >= self._auto_move_resume_times[0]:
+                    self._auto_move_resume_times.pop(0)
+                    self._auto_move_suppress_left_once = True
+        else:
+            if getattr(self, "_auto_move_resume_times", None):
+                self._auto_move_resume_times.clear()
+            self._auto_move_suppress_left_once = False
+
+        if self._auto_move_suppress_left_once:
+            left_pressed = False
+            self._auto_move_suppress_left_once = False
+        else:
+            left_pressed = auto_move or a_pressed
         right_pressed = (
             state.pressed("x") and not radial_held and not lt_held and not suppress_mouse
         )

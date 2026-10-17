@@ -2304,4 +2304,85 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             self.assertNotIn("SHIFT", engine._held_keys)
             self.assertIn(("key", "SHIFT", False), injector.events)
 
+    def test_skill_release_during_auto_move_pulses_left_click(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+                is_menu_open=False,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # 1. Herói caminhando com analógico esquerdo (lx=0.8)
+            state_walk = ControllerState(connected=True, lx=0.8, ly=0.0)
+            engine._process_active(hub, state_walk, rect, cfg, 0.0, 0.05)
+            self.assertIn("left", engine._held_mouse)
+            self.assertIn(("mouse", "left", True), injector.events)
+
+            # 2. Mantém analógico inclinado e aperta Triângulo (Y / magia 1)
+            state_skill = ControllerState(connected=True, lx=0.8, ly=0.0, buttons=frozenset({"y"}))
+            engine._previous = state_walk
+            engine._process_active(hub, state_skill, rect, cfg, 0.05, 0.05)
+
+            # 3. Solta Triângulo (Y) ainda mantendo o analógico inclinado
+            state_release = ControllerState(connected=True, lx=0.8, ly=0.0)
+            engine._previous = state_skill
+            injector.events.clear()
+            engine._process_active(hub, state_release, rect, cfg, 0.10, 0.05)
+
+            # No tick da soltura, deve soltar o clique esquerdo (pulso de reset)
+            self.assertNotIn("left", engine._held_mouse)
+            self.assertIn(("mouse", "left", False), injector.events)
+            self.assertTrue(len(engine._auto_move_resume_times) > 0)
+
+            # 4. No tick seguinte, ainda com analógico inclinado, deve reapertar o clique esquerdo
+            engine._previous = state_release
+            injector.events.clear()
+            engine._process_active(hub, state_release, rect, cfg, 0.15, 0.05)
+            self.assertIn("left", engine._held_mouse)
+            self.assertIn(("mouse", "left", True), injector.events)
+
+    def test_square_release_during_auto_move_pulses_left_click(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+                is_menu_open=False,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # 1. Caminhando e segurando Quadrado (X / Right Click)
+            state_sq = ControllerState(connected=True, lx=0.8, ly=0.0, buttons=frozenset({"x"}))
+            engine._process_active(hub, state_sq, rect, cfg, 0.0, 0.05)
+            self.assertIn("right", engine._held_mouse)
+
+            # 2. Solta Quadrado (X) mantendo analógico inclinado
+            state_rel = ControllerState(connected=True, lx=0.8, ly=0.0)
+            engine._previous = state_sq
+            injector.events.clear()
+            engine._process_active(hub, state_rel, rect, cfg, 0.10, 0.05)
+
+            # Deve soltar o botão direito e também dar o pulso no botão esquerdo
+            self.assertNotIn("right", engine._held_mouse)
+            self.assertNotIn("left", engine._held_mouse)
+            self.assertIn(("mouse", "right", False), injector.events)
+            self.assertIn(("mouse", "left", False), injector.events)
+
+            # 3. No tick seguinte, reaperta o clique esquerdo
+            engine._previous = state_rel
+            injector.events.clear()
+            engine._process_active(hub, state_rel, rect, cfg, 0.15, 0.05)
+            self.assertIn("left", engine._held_mouse)
+            self.assertIn(("mouse", "left", True), injector.events)
+
 
