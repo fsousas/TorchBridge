@@ -32,6 +32,8 @@ from torchbridge.models import (
     virtual_keyboard_key_rect,
     virtual_keyboard_character,
     virtual_keyboard_target_rect,
+    char_create_pet_panel_rect,
+    char_create_text_field_rect,
 )
 from torchbridge.overlay import GameOverlay
 
@@ -44,21 +46,79 @@ class VirtualKeyboardModelTests(unittest.TestCase):
         self.assertTrue(path.is_file())
         self.assertEqual(path.name, "background.png")
 
-    def test_target_rect_character_name_centered_and_discount(self):
-        rect = Rect(0, 0, 1920, 1080)
+    def test_target_rect_character_name_matches_reference(self):
+        rect = Rect(0, 0, 1919, 1007)
         x, y, w, h = virtual_keyboard_target_rect(rect, "character_name")
-        self.assertEqual(w, 568)
-        self.assertEqual(h, 290)
-        self.assertEqual(x, (1920 - 568) // 2)
-        self.assertEqual(y + h, int(round(1080 * 0.90)))
+        self.assertEqual((w, h), (568, 290))
+        self.assertAlmostEqual(x + w / 2, rect.width / 2, delta=0.5)
+        self.assertEqual(y + h, 900)
 
-    def test_target_rect_pet_name_fixed_margin_and_discount(self):
-        rect = Rect(0, 0, 1920, 1080)
+    def test_target_rect_pet_name_matches_reference(self):
+        rect = Rect(0, 0, 1919, 1007)
         x, y, w, h = virtual_keyboard_target_rect(rect, "pet_name")
-        self.assertEqual(w, 568)
-        self.assertEqual(h, 290)
-        self.assertEqual(x, 1920 - 259 - 568)
-        self.assertEqual(y + h, int(round(1080 * 0.80)))
+        self.assertEqual((w, h), (568, 290))
+        self.assertAlmostEqual(x + w, char_create_pet_panel_rect(rect).left - 4 * 1007 / 768, delta=0.5)
+        self.assertEqual(y + h, char_create_pet_panel_rect(rect).bottom)
+
+    def test_positions_scale_with_height_and_ignore_aspect_ratio_for_pet_margin(self):
+        for width, height in ((1024, 768), (1280, 720), (1920, 1080),
+                              (2560, 1440), (3440, 1440), (3840, 2160)):
+            with self.subTest(size=(width, height)):
+                rect = Rect(-300, 120, width, height)
+                cx, cy, cw, ch = virtual_keyboard_target_rect(rect, "character_name")
+                px, py, pw, ph = virtual_keyboard_target_rect(rect, "pet_name")
+                self.assertLessEqual(abs(cx + cw / 2 - (rect.left + width / 2)), 0.5)
+                panel = char_create_pet_panel_rect(rect)
+                field = char_create_text_field_rect(rect, "character_name")
+                self.assertAlmostEqual(panel.left - (px + pw), 4 * height / 768, delta=0.5)
+                self.assertEqual((cw, ch), (pw, ph))
+                self.assertAlmostEqual(field.top - (cy + ch), 16 * height / 768, delta=0.5)
+                self.assertEqual(py + ph, panel.bottom)
+                self.assertLess(px + pw, panel.left)
+                for x, y, w, h in ((cx, cy, cw, ch), (px, py, pw, ph)):
+                    self.assertGreaterEqual(x, rect.left)
+                    self.assertLessEqual(x + w, rect.right)
+                    self.assertGreaterEqual(y - 25 * h / 290, rect.top)
+                    self.assertLess(y + h, rect.bottom)
+
+    def test_user_window_captures_anchor_next_to_actual_boxes(self):
+        # Measured client bounds and box edges in the two user screenshots.
+        rect = Rect(2, 33, 830, 620)
+        x, y, w, h = virtual_keyboard_target_rect(rect, "pet_name")
+        self.assertAlmostEqual(x + w, 674, delta=2)
+        self.assertAlmostEqual(y + h, 511, delta=2)
+        panel = char_create_pet_panel_rect(rect)
+        self.assertAlmostEqual(panel.left, 676, delta=2)
+        self.assertLessEqual(panel.left - (x + w), 4)
+        self.assertGreater(x, 300)  # Previous screenshot incorrectly started around 235px.
+        rect = Rect(4, 30, 830, 620)
+        x, y, w, h = virtual_keyboard_target_rect(rect, "character_name")
+        self.assertAlmostEqual(x + w / 2, 419, delta=1)
+        self.assertAlmostEqual(y + h, 584, delta=2)
+        self.assertLess(y + h, 588)  # Character Name label stays unobstructed.
+
+    def test_resizing_only_width_keeps_pet_attached_and_centers_player(self):
+        for height in (480, 620, 768, 1080, 1440):
+            narrow = Rect(120, 80, round(height * 4 / 3), height)
+            wide = Rect(120, 80, round(height * 21 / 9), height)
+            dx = wide.width - narrow.width
+            a = virtual_keyboard_target_rect(narrow, "pet_name")
+            b = virtual_keyboard_target_rect(wide, "pet_name")
+            self.assertEqual(b[0] - a[0], dx)
+            self.assertEqual(a[1:], b[1:])
+            a = virtual_keyboard_target_rect(narrow, "character_name")
+            b = virtual_keyboard_target_rect(wide, "character_name")
+            self.assertAlmostEqual(b[0] - a[0], dx / 2, delta=1)
+            self.assertEqual(a[1:], b[1:])
+
+    def test_keyboard_fits_narrow_windows_including_instruction_label(self):
+        for target in ("character_name", "pet_name"):
+            rect = Rect(150, 80, 400, 1080)
+            x, y, w, h = virtual_keyboard_target_rect(rect, target)
+            self.assertGreaterEqual(x, rect.left)
+            self.assertLessEqual(x + w, rect.right)
+            self.assertGreaterEqual(y - 25 * h / 290, rect.top)
+            self.assertLessEqual(y + h, rect.bottom)
 
     def test_target_rect_invalid_rect(self):
         invalid_rect = Rect(0, 0, 0, 0)

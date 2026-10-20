@@ -702,13 +702,45 @@ def char_create_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+def char_create_pet_panel_rect(rect: Rect) -> Rect:
+    """Pet panel in physical client pixels; its size follows height, not width."""
+    if not rect.valid:
+        return Rect()
+    left = round(rect.right - rect.height * 0.250)
+    right = round(rect.right - rect.height * 0.014)
+    top = round(rect.top + rect.height * 0.460)
+    bottom = round(rect.top + rect.height * 0.770)
+    return Rect(left, top, right - left, bottom - top)
+
+
+def char_create_text_field_rect(rect: Rect, target_field: str) -> Rect:
+    """Bounds of the name edit boxes, excluding their labels/calibration nodes."""
+    if not rect.valid:
+        return Rect()
+    if target_field == "pet_name":
+        panel = char_create_pet_panel_rect(rect)
+        left = round(panel.left + rect.height * 0.004)
+        right = round(panel.right - rect.height * 0.004)
+        center_y = rect.top + rect.height * CHAR_CREATE_PET_NAME_Y_FRACTION
+    else:
+        center_x = rect.left + rect.width / 2
+        left = round(center_x - rect.height * 0.1185)
+        right = round(center_x + rect.height * 0.1185)
+        center_y = rect.top + rect.height * CHAR_CREATE_BOTTOM_Y_FRACTION
+    top = round(center_y - rect.height * 0.033)
+    bottom = round(center_y + rect.height * 0.033)
+    return Rect(left, top, right - left, bottom - top)
+
+
 # Coordenadas e layout do Teclado Virtual (Tela de Criação de Personagem - state_id == 1)
 KEYBOARD_REF_WIDTH = 568.0
 KEYBOARD_REF_HEIGHT = 290.0
-KEYBOARD_REF_BASE_HEIGHT = 1080.0
+KEYBOARD_REF_BASE_HEIGHT = 1007.0  # Altura das capturas de referência do teclado.
 KEYBOARD_GRID_ROWS = 5
 KEYBOARD_GRID_COLS = 13
-KEYBOARD_PET_RIGHT_MARGIN_PX = 259.0  # Desconto fixo lateral em pixels para manter painel do pet visível
+KEYBOARD_ANCHOR_GAP_768 = 4.0  # Espaço entre o teclado e o painel/campo em 768p.
+KEYBOARD_NAME_LABEL_HEIGHT_768 = 12.0  # Reserva o rótulo acima do campo do personagem.
+
 
 # Layout de teclas do Teclado Virtual (5 linhas x 13 colunas)
 # Cada entrada é (key_id, row, col, span_cols, key_type)
@@ -876,33 +908,39 @@ def virtual_keyboard_target_rect(
     rect: Rect,
     target_field: str = "character_name",
 ) -> tuple[int, int, int, int]:
-    """Calcula (left, top, width, height) absolutos do teclado virtual.
+    """Posiciona o teclado acima do nome ou à esquerda do painel do pet.
 
-    - Target 'character_name': centralizado horizontalmente e acima do campo,
-      descontando 10% da altura da tela na parte inferior.
-    - Target 'pet_name': ao lado do painel do pet (desconto lateral fixo em pixels)
-      e descontando 20% da altura da tela na parte inferior.
+    A UI do jogo escala pela altura, inclusive a largura do painel lateral.
+    As âncoras usam os campos existentes e as capturas de referência de 1007p.
+    Reserva também espaço para a barra de instruções acima do background.
     """
     if not rect.valid:
         return (0, 0, 0, 0)
 
-    scale_k = rect.height / KEYBOARD_REF_BASE_HEIGHT
-    w = int(round(KEYBOARD_REF_WIDTH * scale_k))
-    h = int(round(KEYBOARD_REF_HEIGHT * scale_k))
-
+    ui_scale = rect.height / KEYBOARD_REF_BASE_HEIGHT
+    gap = KEYBOARD_ANCHOR_GAP_768 * rect.height / 768.0
+    padding = min(gap, max(0.0, (rect.width - 1) / 2.0))
+    field = char_create_text_field_rect(rect, target_field)
     if target_field == "pet_name":
-        # Desconto fixo lateral para manter o painel do pet visível
-        x = int(rect.right - KEYBOARD_PET_RIGHT_MARGIN_PX - w)
-        # Desconto de 20% da altura da tela na parte inferior
-        bottom = rect.top + int(round(rect.height * 0.80))
-        y = bottom - h
+        panel = char_create_pet_panel_rect(rect)
+        right = max(rect.left + padding + 1, panel.left - gap)
+        bottom = panel.bottom
+        available_width = right - rect.left - padding
     else:
-        # Centralizado horizontalmente
-        x = rect.left + (rect.width - w) // 2
-        # Desconto de 10% da altura da tela na parte inferior (logo acima do campo)
-        bottom = rect.top + int(round(rect.height * 0.90))
-        y = bottom - h
+        label_height = KEYBOARD_NAME_LABEL_HEIGHT_768 * rect.height / 768.0
+        bottom = field.top - label_height - gap
+        available_width = rect.width - 2 * padding
 
+    # Fit the complete keyboard and its 25px instruction overhang inside the client.
+    scale_k = min(ui_scale, available_width / KEYBOARD_REF_WIDTH,
+                  (bottom - rect.top) / (KEYBOARD_REF_HEIGHT + 25.0))
+    w = max(1, round(KEYBOARD_REF_WIDTH * scale_k))
+    h = max(1, round(KEYBOARD_REF_HEIGHT * scale_k))
+    if target_field == "pet_name":
+        x = round(right) - w
+    else:
+        x = round(field.left + field.width / 2 - w / 2)
+    y = round(bottom) - h
     return (x, y, w, h)
 
 

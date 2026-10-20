@@ -29,12 +29,12 @@
 - Ao clicar em um campo de texto nome do personagem  o teclado deve aparecer logo a cima do campo de nome conforme o exemplo:
     assets\keyboard\teclado-nome-personagem.png
     - Centralizado horizontalmente
-    - E descontando um valor de 10% da altura da tela para ficar acima do campo de texto
+    - Fundo do teclado ancorado ao topo da caixa de nome, reservando o rótulo Character Name e um vão de 4 pixels na base de 768p.
 - Ao clicar no campo de texto de nome do pet o teclado deve aparecer ao lado do campo conforme exemplo:
     assets\keyboard\teclado-nome-pet.png
     - Dando o desconto da lateral da tela em que o campo de nome do pet fique visivel
-    - o desconto da lateral deverá ser um valor fixo em pixels pois ele nao muda conforme a tela redimesiona na largura e sim na altura
-    - o desconto da parte inferior deve ser de 20% da altura da tela
+    - Borda direita do teclado ancorada à borda esquerda do painel do pet, com vão de 4 pixels na base de 768p. A largura do painel e o vão escalam pela altura útil da janela, independentemente da largura.
+    - Fundo do teclado alinhado ao fundo do painel do pet, preservando o campo à direita.
 
 ## Mapeamento do cursor nas teclas
 assets\keyboard\exemplo-calibration.jpeg
@@ -99,8 +99,10 @@ assets\keyboard\info-label-xbox.png
 
 ### O que já foi feito
 - **Estrutura e Posicionamento Dinâmico:**
-  - Posicionamento para `Nome do Personagem`: centralizado horizontalmente e 10% da altura da tela acima do campo de texto.
-  - Posicionamento para `Nome do Pet`: ao lado do painel com desconto fixo lateral em pixels e 20% de desconto inferior da tela.
+  - Posicionamento para `Nome do Personagem`: centralizado sobre a caixa de nome, com espaço para o rótulo e um pequeno vão proporcional.
+  - Posicionamento para `Nome do Pet`: junto à esquerda do painel, com fundos alinhados. A distância entre teclado e painel permanece proporcional ao redimensionar.
+  - Dimensões calibradas pelas capturas de 1919×1007: background de 568×290 nessa referência. Em janelas estreitas, o conjunto diminui para caber, incluindo a barra de instruções.
+  - Renderização, superfície de mouse, navegação e cursor usam a mesma geometria absoluta, incluindo janelas deslocadas e monitores com coordenadas negativas.
 - **Abertura e Fechamento:**
   - Abertura ao selecionar o campo e apertar o botão A (Sul no Xbox/PS) ou via clique com o mouse no campo.
   - Fechamento pelo botão Start ou ao clicar com o mouse fora da área do teclado.
@@ -136,3 +138,9 @@ assets\keyboard\info-label-xbox.png
 - Testes automatizados de mapeamento dos assets, injeção Unicode, flags das setas, navegação, modos de maiúsculas, mouse, Nintendo, foco, fechamento e consumo dos comandos.
 - No ambiente Linux, a execução dos testes exige simular as DLLs e os construtores dependentes de Windows. Isso valida a lógica e os eventos Qt, mas não confirma a recepção de `SendInput` pelo jogo.
 - A validação final no Torchlight em Windows continua necessária, incluindo os dois campos, edição no meio do texto, DPI diferente de 100% e fullscreen exclusivo (cuja renderização usa o backend Direct3D 9).
+
+### Âncoras e proporção
+- `char_create_pet_panel_rect` e `char_create_text_field_rect` definem os limites da UI em pixels físicos da área cliente. A barra de título não entra na altura usada nos cálculos.
+- O painel do pet acompanha a borda direita; a caixa do personagem acompanha o centro. A altura útil determina todos os tamanhos e espaçamentos, conforme `docs/proporcao/solution.md`.
+- O hit test dos campos usa esses mesmos retângulos, substituindo a tolerância fixa de 80×30 pixels.
+- Testes reproduzem a área cliente de 830×620 das capturas fornecidas, além de redimensionamentos de 4:3 para ultrawide, resoluções de 480p a 2160p e origens deslocadas.

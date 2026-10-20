@@ -18,6 +18,7 @@ from .models import (
     SharedOverlayState,
     both_panels_open,
     char_create_button_point,
+    char_create_text_field_rect,
     virtual_keyboard_target_rect,
     virtual_keyboard_character,
     KEYBOARD_LAYOUT,
@@ -878,8 +879,7 @@ class BridgeEngine(threading.Thread):
             kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
             if not self._virtual_keyboard_open or not Rect(kx, ky, kw, kh).contains(x, y):
                 for field in ("character_name", "pet_name"):
-                    bx, by = char_create_button_point(rect, field)
-                    if abs(x - bx) <= 80 and abs(y - by) <= 30:
+                    if char_create_text_field_rect(rect, field).contains(x, y):
                         self._open_virtual_keyboard(field, rect, hub)
                         break
                 else:
