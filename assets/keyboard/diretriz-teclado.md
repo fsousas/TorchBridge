@@ -29,7 +29,7 @@
 - Ao clicar em um campo de texto nome do personagem  o teclado deve aparecer logo a cima do campo de nome conforme o exemplo:
     assets\keyboard\teclado-nome-personagem.png
     - Centralizado horizontalmente
-    - Fundo do teclado ancorado ao topo da caixa de nome, reservando o rótulo Character Name e um vão de 4 pixels na base de 768p.
+    - Fundo do teclado ancorado ao topo da caixa de nome, reservando o rótulo Character Name e um vão de 8 pixels na base de 768p.
 - Ao clicar no campo de texto de nome do pet o teclado deve aparecer ao lado do campo conforme exemplo:
     assets\keyboard\teclado-nome-pet.png
     - Dando o desconto da lateral da tela em que o campo de nome do pet fique visivel
@@ -144,3 +144,5 @@ assets\keyboard\info-label-xbox.png
 - O painel do pet acompanha a borda direita; a caixa do personagem acompanha o centro. A altura útil determina todos os tamanhos e espaçamentos, conforme `docs/proporcao/solution.md`.
 - O hit test dos campos usa esses mesmos retângulos, substituindo a tolerância fixa de 80×30 pixels.
 - Testes reproduzem a área cliente de 830×620 das capturas fornecidas, além de redimensionamentos de 4:3 para ultrawide, resoluções de 480p a 2160p e origens deslocadas.
+
+- Os nós de calibração amarelo/verde nas teclas e rosa no campo aparecem somente com `overlay.show_calibration` ativado. No uso normal, o foco da tecla é indicado pelo highlight.

@@ -51,7 +51,7 @@ class VirtualKeyboardModelTests(unittest.TestCase):
         x, y, w, h = virtual_keyboard_target_rect(rect, "character_name")
         self.assertEqual((w, h), (568, 290))
         self.assertAlmostEqual(x + w / 2, rect.width / 2, delta=0.5)
-        self.assertEqual(y + h, 900)
+        self.assertEqual(y + h, 895)
 
     def test_target_rect_pet_name_matches_reference(self):
         rect = Rect(0, 0, 1919, 1007)
@@ -72,7 +72,7 @@ class VirtualKeyboardModelTests(unittest.TestCase):
                 field = char_create_text_field_rect(rect, "character_name")
                 self.assertAlmostEqual(panel.left - (px + pw), 4 * height / 768, delta=0.5)
                 self.assertEqual((cw, ch), (pw, ph))
-                self.assertAlmostEqual(field.top - (cy + ch), 16 * height / 768, delta=0.5)
+                self.assertAlmostEqual(field.top - (cy + ch), 20 * height / 768, delta=0.5)
                 self.assertEqual(py + ph, panel.bottom)
                 self.assertLess(px + pw, panel.left)
                 for x, y, w, h in ((cx, cy, cw, ch), (px, py, pw, ph)):
@@ -94,8 +94,8 @@ class VirtualKeyboardModelTests(unittest.TestCase):
         rect = Rect(4, 30, 830, 620)
         x, y, w, h = virtual_keyboard_target_rect(rect, "character_name")
         self.assertAlmostEqual(x + w / 2, 419, delta=1)
-        self.assertAlmostEqual(y + h, 584, delta=2)
-        self.assertLess(y + h, 588)  # Character Name label stays unobstructed.
+        self.assertAlmostEqual(y + h, 581, delta=2)
+        self.assertGreaterEqual(588 - (y + h), 6)  # Visible breathing room above the label.
 
     def test_resizing_only_width_keeps_pet_attached_and_centers_player(self):
         for height in (480, 620, 768, 1080, 1440):
@@ -473,6 +473,27 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
         shared = SharedOverlayState()
         overlay = GameOverlay(shared, config)
         return overlay, shared
+
+    def test_calibration_nodes_only_render_when_mapping_is_enabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            for target in ("character_name", "pet_name"):
+                for enabled in (False, True, False):
+                    with self.subTest(target=target, calibration=enabled):
+                        overlay.config.set_show_calibration(enabled)
+                        snapshot = OverlaySnapshot(
+                            game_rect=Rect(0, 0, 1920, 1080),
+                            virtual_keyboard_open=True, virtual_keyboard_target=target,
+                            virtual_keyboard_focus=(3, 2))
+                        painter = MagicMock()
+                        overlay._draw_virtual_keyboard(painter, snapshot, 1.0)
+                        if enabled:
+                            self.assertEqual(painter.drawRect.call_count, len(KEYBOARD_LAYOUT) + 1)
+                        else:
+                            painter.drawRect.assert_not_called()
+                        # Background, key faces and focus highlight remain visible.
+                        self.assertEqual(painter.drawPixmap.call_count, len(KEYBOARD_LAYOUT) + 3)
+            overlay.shutdown()
 
     def test_mouse_surface_queues_click_in_physical_pixels(self):
         from PySide6.QtCore import QPoint, Qt

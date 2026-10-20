@@ -739,6 +739,7 @@ KEYBOARD_REF_BASE_HEIGHT = 1007.0  # Altura das capturas de referência do tecla
 KEYBOARD_GRID_ROWS = 5
 KEYBOARD_GRID_COLS = 13
 KEYBOARD_ANCHOR_GAP_768 = 4.0  # Espaço entre o teclado e o painel/campo em 768p.
+KEYBOARD_NAME_ANCHOR_GAP_768 = 8.0  # Respiro visual acima do rótulo do personagem.
 KEYBOARD_NAME_LABEL_HEIGHT_768 = 12.0  # Reserva o rótulo acima do campo do personagem.
 
 
@@ -928,7 +929,8 @@ def virtual_keyboard_target_rect(
         available_width = right - rect.left - padding
     else:
         label_height = KEYBOARD_NAME_LABEL_HEIGHT_768 * rect.height / 768.0
-        bottom = field.top - label_height - gap
+        name_gap = KEYBOARD_NAME_ANCHOR_GAP_768 * rect.height / 768.0
+        bottom = field.top - label_height - name_gap
         available_width = rect.width - 2 * padding
 
     # Fit the complete keyboard and its 25px instruction overhang inside the client.

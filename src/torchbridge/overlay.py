@@ -2074,23 +2074,8 @@ class GameOverlay(QWidget):
                     painter.setPen(QPen(QColor(9, 178, 0, 240), 1.5))
                     painter.setBrush(QColor(9, 178, 0, 220))
                 painter.drawRect(QRectF(cx - sz / 2.0, cy - sz / 2.0, sz, sz))
-        else:
-            # Em uso normal, exibe o nó do cursor na tecla ativa
-            f_cx = f_kx + f_kw / 2.0
-            f_cy = f_ky + f_kh / 2.0
-            sz = 14.0 * scale_k
-            if focused_key_id == "3x1":
-                # Nó inicial Amarelo (#F4DC2A)
-                painter.setPen(QPen(QColor(244, 220, 42, 240), 1.5))
-                painter.setBrush(QColor(244, 220, 42, 220))
-            else:
-                # Nó de navegação Verde (#09B200)
-                painter.setPen(QPen(QColor(9, 178, 0, 240), 1.5))
-                painter.setBrush(QColor(9, 178, 0, 220))
-            painter.drawRect(QRectF(f_cx - sz / 2.0, f_cy - sz / 2.0, sz, sz))
-
         # 6. Nó de Retorno Rosa (#B2007C) sobre o campo de texto ativo
-        if target in ("character_name", "pet_name"):
+        if show_cal and target in ("character_name", "pet_name"):
             tx, ty = char_create_button_point(rect, target)
             pink_lx = tx - rect.left
             pink_ly = ty - rect.top
