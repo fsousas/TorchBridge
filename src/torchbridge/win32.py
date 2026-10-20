@@ -146,6 +146,9 @@ VK_NAMES = {
     "ENTER": 0x0D,
     "RETURN": 0x0D,
     "BACKSPACE": 0x08,
+    "LEFT": 0x25,
+    "RIGHT": 0x27,
+    "MOUSE_LEFT": 0x01,
 }
 
 
@@ -314,6 +317,8 @@ class InputInjector:
     INPUT_KEYBOARD = 1
     KEYEVENTF_KEYUP = 0x0002
     KEYEVENTF_SCANCODE = 0x0008
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_EXTENDEDKEY = 0x0001
     MOUSEEVENTF_MOVE = 0x0001
     MOUSEEVENTF_LEFTDOWN = 0x0002
     MOUSEEVENTF_LEFTUP = 0x0004
@@ -341,8 +346,22 @@ class InputInjector:
         scan = user32.MapVirtualKeyW(vk, 0)
         # DOWN sem KEYUP; UP adiciona KEYUP (soltar).
         flags = self.KEYEVENTF_SCANCODE | (0 if down else self.KEYEVENTF_KEYUP)
+        if vk in (0x25, 0x27):
+            flags |= self.KEYEVENTF_EXTENDEDKEY
         item = INPUT(type=self.INPUT_KEYBOARD, ki=KEYBDINPUT(0, scan, flags, 0, 0))
         return self._send(item)
+
+    def text(self, text: str) -> bool:
+        """Send exact UTF-16 characters, independently of keyboard layout/Caps Lock."""
+        encoded = text.encode("utf-16-le")
+        for offset in range(0, len(encoded), 2):
+            unit = int.from_bytes(encoded[offset:offset + 2], "little")
+            for release in (False, True):
+                flags = self.KEYEVENTF_UNICODE | (self.KEYEVENTF_KEYUP if release else 0)
+                if not self._send(INPUT(type=self.INPUT_KEYBOARD,
+                                        ki=KEYBDINPUT(0, unit, flags, 0, 0))):
+                    return False
+        return True
 
     # Estado FÍSICO real da tecla (GetAsyncKeyState, bit alto = pressionada) — a mesma
     # leitura que o jogo faz, então é a referência de verdade: um KEYUP perdido na fila

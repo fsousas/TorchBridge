@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QWidget
 from .config import ConfigManager
 from .models import (
     OverlaySnapshot,
+    Rect,
     SharedOverlayState,
     CREATE_CHAR_BUTTONS,
     DIFFICULTY_BUTTONS,
@@ -32,6 +33,18 @@ from .models import (
     bottom_hud_asset_path,
     bottom_hud_target_rect,
     BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
+    virtual_keyboard_bg_asset_path,
+    virtual_keyboard_target_rect,
+    virtual_keyboard_asset_path,
+    virtual_keyboard_key_filename,
+    virtual_keyboard_highlight_filename,
+    virtual_keyboard_info_label_filename,
+    virtual_keyboard_grid_to_key,
+    virtual_keyboard_key_rect,
+    virtual_keyboard_key_cursor_point,
+    KEYBOARD_LAYOUT,
+    KEYBOARD_GRID_ROWS,
+    KEYBOARD_GRID_COLS,
     controller_type_from_name,
     hud_asset_path,
     hud_purple_button_point,
@@ -111,6 +124,58 @@ def _radial_icons_dir() -> Path:
 
 
 # Janela de sobreposição alinhada à área do jogo, redesenhada a ~60 FPS.
+class KeyboardInputSurface(QWidget):
+    """Intercept virtual-key clicks without activating a window or clicking the game."""
+
+    def __init__(self, shared: SharedOverlayState, parent: QWidget) -> None:
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowStaysOnTopHint
+                         | Qt.WindowType.WindowTransparentForInput
+                         | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.shared = shared
+        self.physical_rect = Rect()
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setMouseTracking(True)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if IS_WINDOWS:
+            make_overlay_clickthrough(int(self.winId()))
+
+    def nativeEvent(self, event_type, message):
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+            msg = wintypes.MSG.from_address(int(message))
+            if msg.message == 0x0021:  # WM_MOUSEACTIVATE: retain the game's keyboard focus.
+                return True, 3  # MA_NOACTIVATE
+        return super().nativeEvent(event_type, message)
+
+    def paintEvent(self, event) -> None:
+        # Nonzero alpha makes the entire surface hit-testable on Windows layered windows.
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.end()
+
+    def _physical_point(self, event) -> tuple[int, int]:
+        rect = self.physical_rect
+        point = event.position()
+        return (round(rect.left + point.x() * rect.width / max(1, self.width())),
+                round(rect.top + point.y() * rect.height / max(1, self.height())))
+
+    def mouseMoveEvent(self, event) -> None:
+        x, y = self._physical_point(event)
+        self.shared.keyboard_event("hover", x, y)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            x, y = self._physical_point(event)
+            self.shared.keyboard_event("click", x, y)
+        event.accept()
+
+
 class GameOverlay(QWidget):
     def __init__(self, shared: SharedOverlayState, config: ConfigManager) -> None:
         super().__init__()
@@ -144,6 +209,10 @@ class GameOverlay(QWidget):
         self._radial_cache: dict[tuple[str, str], QPixmap] = {}
         # Cache dos pixmaps do HUD inferior dos controles (Xbox, PlayStation, Nintendo).
         self._bottom_hud_cache: dict[str, QPixmap] = {}
+        # Cache do pixmap de fundo do teclado virtual (assets/keyboard/background.png).
+        self._keyboard_bg_pixmap: QPixmap | None = None
+        # Cache de pixmaps das teclas do teclado virtual.
+        self._keyboard_keys_cache: dict[str, QPixmap] = {}
         # Silhueta verde da HUD (modo de calibração): renderizada uma vez do SVG, se existir.
         # None = asset ausente (nada a desenhar).
         self._hud_pixmap = self._load_hud_pixmap()
@@ -166,6 +235,12 @@ class GameOverlay(QWidget):
         # a seleção, então sem esses backups a saída não teria onde partir.
         self._last_pet_point: QPointF | None = None
         self._last_pet_selection: int | None = None
+        # Progresso da animação do teclado virtual (0 = fechado, 1 = aberto).
+        self._virtual_keyboard_progress = 0.0
+        self._virtual_keyboard_last_time = time.monotonic()
+        self._virtual_keyboard_anim_seconds = 0.25
+        self._last_virtual_keyboard_target = "character_name"
+        self._keyboard_input = KeyboardInputSurface(self.shared, self)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
         # Redesenho a cada 16 ms (~60 FPS); o motor publica o estado a 120 Hz.
@@ -187,6 +262,7 @@ class GameOverlay(QWidget):
 
     def shutdown(self) -> None:
         self._timer.stop()
+        self._keyboard_input.hide()
         self.hide()
         if self._channel is not None:
             self._channel.close()
@@ -257,6 +333,23 @@ class GameOverlay(QWidget):
         else:
             self._pet_submenu_progress = max(target, self._pet_submenu_progress - step)
 
+    # Avança o progresso da animação do teclado virtual (1 aberto / 0 fechado).
+    def _tick_virtual_keyboard_anim(self, snapshot: OverlaySnapshot) -> None:
+        if snapshot.virtual_keyboard_target:
+            self._last_virtual_keyboard_target = snapshot.virtual_keyboard_target
+        target = 1.0 if snapshot.virtual_keyboard_open else 0.0
+        now = time.monotonic()
+        dt = now - self._virtual_keyboard_last_time
+        self._virtual_keyboard_last_time = now
+        if abs(self._virtual_keyboard_progress - target) < 1e-3:
+            self._virtual_keyboard_progress = target
+            return
+        step = dt / self._virtual_keyboard_anim_seconds
+        if target > self._virtual_keyboard_progress:
+            self._virtual_keyboard_progress = min(target, self._virtual_keyboard_progress + step)
+        else:
+            self._virtual_keyboard_progress = max(target, self._virtual_keyboard_progress - step)
+
     # Acompanha o retângulo do jogo e mostra/esconde conforme o estado.
     def _refresh(self) -> None:
         snapshot = self.shared.get()
@@ -265,12 +358,27 @@ class GameOverlay(QWidget):
         # "chegou ao alvo" do radial faz return cedo e congelaria a da sublinha.
         self._tick_radial_anim(snapshot)
         self._tick_pet_submenu_anim(snapshot)
+        self._tick_virtual_keyboard_anim(snapshot)
         rect = snapshot.game_rect
         # Só desenha com overlay habilitado, jogo presente e janela válida.
         should_show = snapshot.enabled and snapshot.game_found and snapshot.game_active and rect.valid
         # Revalida o foco na UI: um snapshot atrasado não pode cobrir outro aplicativo.
         if should_show and self._native_windows and snapshot.game_hwnd:
             should_show = WindowLocator.is_foreground(snapshot.game_hwnd)
+        kb_active = snapshot.virtual_keyboard_open or self._virtual_keyboard_progress > 0.0
+        if should_show and kb_active:
+            target = snapshot.virtual_keyboard_target or self._last_virtual_keyboard_target or "character_name"
+            geometry = virtual_keyboard_target_rect(rect, target)
+            self._keyboard_input.physical_rect = Rect(*geometry)
+            if not self._native_windows:
+                self._keyboard_input.setGeometry(*geometry)
+            self._keyboard_input.show()
+            if self._native_windows:
+                position_overlay(int(self._keyboard_input.winId()), Rect(*geometry))
+                make_overlay_clickthrough(int(self._keyboard_input.winId()))
+            self._keyboard_input.raise_()
+        else:
+            self._keyboard_input.hide()
         self._sync_channel(snapshot)
         if self._channel is not None:
             try:
@@ -402,6 +510,32 @@ class GameOverlay(QWidget):
         if pixmap.isNull():
             return None
         self._bottom_hud_cache[controller_type] = pixmap
+        return pixmap
+
+    # Carrega o background do teclado virtual e guarda em cache.
+    def _get_keyboard_bg_pixmap(self) -> QPixmap | None:
+        if self._keyboard_bg_pixmap is not None:
+            return self._keyboard_bg_pixmap
+        path = virtual_keyboard_bg_asset_path()
+        if path is None or not path.exists():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._keyboard_bg_pixmap = pixmap
+        return pixmap
+
+    # Carrega uma tecla/asset do teclado virtual e guarda em cache.
+    def _get_keyboard_key_pixmap(self, filename: str) -> QPixmap | None:
+        if filename in self._keyboard_keys_cache:
+            return self._keyboard_keys_cache[filename]
+        path = virtual_keyboard_asset_path(filename)
+        if path is None or not path.exists():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._keyboard_keys_cache[filename] = pixmap
         return pixmap
 
     def _should_show_bottom_hud(self, snapshot: OverlaySnapshot) -> bool:
@@ -1851,6 +1985,174 @@ class GameOverlay(QWidget):
         painter.setPen(QColor(235, 248, 251))
         painter.drawText(box, Qt.AlignmentFlag.AlignCenter, snapshot.toast_text)
 
+    def _draw_virtual_keyboard(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
+        """Desenha o teclado virtual completo (background, teclas, highlights, label e cursor)."""
+        if not snapshot.virtual_keyboard_open and self._virtual_keyboard_progress <= 0.0:
+            return
+
+        progress = self._virtual_keyboard_progress if self._virtual_keyboard_progress > 0.0 else (1.0 if snapshot.virtual_keyboard_open else 0.0)
+
+        rect = snapshot.game_rect
+        if not rect.valid:
+            return
+
+        target = snapshot.virtual_keyboard_target or self._last_virtual_keyboard_target or "character_name"
+        kx, ky, kw, kh = virtual_keyboard_target_rect(rect, target)
+        local_x = float(kx - rect.left)
+        local_y = float(ky - rect.top)
+        scale_k = kh / 290.0
+
+        if snapshot.virtual_keyboard_open:
+            # Entrada: slide com leve bounce (overshoot suave de ~2.5% a 3%)
+            t1 = progress - 1.0
+            eased = 1.0 + 1.8 * (t1 ** 3) + 0.8 * (t1 ** 2)
+        else:
+            # Saída: slide suave de retorno
+            eased = progress * progress * (3.0 - 2.0 * progress)
+
+        if target == "pet_name":
+            # SlideLeft com bounce: vem de fora da tela (direita) até a posição final
+            slide_dist = max(rect.width - local_x + 20.0, 100.0)
+            offset_x = slide_dist * (1.0 - eased)
+            offset_y = 0.0
+        else:
+            # SlideUP com bounce: vem de fora da tela (baixo) até a posição final
+            slide_dist = max(rect.height - local_y + 20.0, 100.0)
+            offset_x = 0.0
+            offset_y = slide_dist * (1.0 - eased)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.translate(offset_x, offset_y)
+
+        # 1. Background do teclado [Camada Fundo]
+        bg_pix = self._get_keyboard_bg_pixmap()
+        if bg_pix and not bg_pix.isNull():
+            painter.drawPixmap(
+                int(round(local_x)),
+                int(round(local_y)),
+                int(round(kw)),
+                int(round(kh)),
+                bg_pix,
+            )
+        else:
+            painter.setPen(QPen(QColor(180, 160, 120, 240), 2.0 * scale))
+            painter.setBrush(QColor(22, 19, 18, 245))
+            painter.drawRoundedRect(QRectF(local_x, local_y, kw, kh), 8.0 * scale, 8.0 * scale)
+
+        # 2. Barra informativa superior (info-label-*.png conforme o controle)
+        ctrl_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+        label_file = virtual_keyboard_info_label_filename(ctrl_type)
+        label_pix = self._get_keyboard_key_pixmap(label_file)
+        if label_pix and not label_pix.isNull():
+            lbl_w = 513.0 * scale_k
+            lbl_h = 29.0 * scale_k
+            lbl_x = local_x + (kw - lbl_w) / 2.0
+            lbl_y = local_y - 25.0 * scale_k
+            painter.drawPixmap(
+                int(round(lbl_x)),
+                int(round(lbl_y)),
+                int(round(lbl_w)),
+                int(round(lbl_h)),
+                label_pix,
+            )
+
+        # 3. Teclas [Camada Tecla]
+        caps_state = snapshot.virtual_keyboard_caps_state or "default"
+        pressed_key = snapshot.virtual_keyboard_pressed_key
+
+        focus = snapshot.virtual_keyboard_focus or (3, 1)
+        focused_key_id, focused_key_type = virtual_keyboard_grid_to_key(focus[0], focus[1])
+
+        for key_id, r, c, span, k_type in KEYBOARD_LAYOUT:
+            key_x, key_y, key_w, key_h = virtual_keyboard_key_rect(local_x, local_y, kw, kh, key_id)
+            key_file = virtual_keyboard_key_filename(key_id, caps_state)
+            key_pix = self._get_keyboard_key_pixmap(key_file)
+            if key_pix and not key_pix.isNull():
+                is_pressed = (pressed_key == key_id)
+                if is_pressed:
+                    # Efeito de clique afundar: escala 0.97
+                    painter.save()
+                    cx = key_x + key_w / 2.0
+                    cy = key_y + key_h / 2.0
+                    painter.translate(cx, cy)
+                    painter.scale(0.97, 0.97)
+                    painter.translate(-cx, -cy)
+                    painter.drawPixmap(
+                        int(round(key_x)),
+                        int(round(key_y)),
+                        int(round(key_w)),
+                        int(round(key_h)),
+                        key_pix,
+                    )
+                    painter.restore()
+                else:
+                    painter.drawPixmap(
+                        int(round(key_x)),
+                        int(round(key_y)),
+                        int(round(key_w)),
+                        int(round(key_h)),
+                        key_pix,
+                    )
+
+        # 4. Highlight da tecla sob foco [Camada Highlight]
+        f_kx, f_ky, f_kw, f_kh = virtual_keyboard_key_rect(local_x, local_y, kw, kh, focused_key_id)
+        hl_file = virtual_keyboard_highlight_filename(focused_key_type)
+        hl_pix = self._get_keyboard_key_pixmap(hl_file)
+        if hl_pix and not hl_pix.isNull():
+            hl_w = hl_pix.width() * scale_k
+            hl_h = hl_pix.height() * scale_k
+            hl_x = f_kx + (f_kw - hl_w) / 2.0
+            hl_y = f_ky + (f_kh - hl_h) / 2.0
+            painter.drawPixmap(
+                int(round(hl_x)),
+                int(round(hl_y)),
+                int(round(hl_w)),
+                int(round(hl_h)),
+                hl_pix,
+            )
+
+        # 5. Cursor / Nós de calibração [Camada Topo]
+        show_cal = bool(self.config.get().get("overlay", {}).get("show_calibration", False))
+        if show_cal:
+            # Em modo calibração, exibe os nós verdes em todas as teclas
+            for key_id, r, c, span, k_type in KEYBOARD_LAYOUT:
+                kx_i, ky_i, kw_i, kh_i = virtual_keyboard_key_rect(local_x, local_y, kw, kh, key_id)
+                cx, cy = virtual_keyboard_key_cursor_point(kx_i, ky_i, kw_i, kh_i)
+                sz = 14.0 * scale_k
+                if key_id == "3x1":
+                    # Nó inicial amarelo #F4DC2A
+                    painter.setPen(QPen(QColor(244, 220, 42, 240), 1.5))
+                    painter.setBrush(QColor(244, 220, 42, 220))
+                else:
+                    # Nó de navegação verde #09B200
+                    painter.setPen(QPen(QColor(9, 178, 0, 240), 1.5))
+                    painter.setBrush(QColor(9, 178, 0, 220))
+                painter.drawRect(QRectF(cx - sz / 2.0, cy - sz / 2.0, sz, sz))
+
+        # 6. Nó de Retorno Rosa (#B2007C) sobre o campo de texto ativo
+        if show_cal and target in ("character_name", "pet_name"):
+            painter.save()
+            painter.translate(-offset_x, -offset_y)
+            tx, ty = char_create_button_point(rect, target)
+            pink_lx = tx - rect.left
+            pink_ly = ty - rect.top
+            pink_w = 46.0 * scale_k
+            pink_h = 24.0 * scale_k
+            painter.setPen(QPen(QColor(178, 0, 124, 240), 2.0))
+            painter.setBrush(QColor(178, 0, 124, 180))  # Rosa #B2007C
+            painter.drawRect(
+                QRectF(
+                    pink_lx - pink_w * 0.5,
+                    pink_ly - pink_h * 0.5,
+                    pink_w,
+                    pink_h,
+                )
+            )
+            painter.restore()
+
+        painter.restore()
+
     # Redesenho completo: lê o snapshot e pinta os quatro elementos na escala do perfil.
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         del event
@@ -1869,6 +2171,7 @@ class GameOverlay(QWidget):
         self._draw_bottom_hud(painter, snapshot)
         self._draw_aim(painter, snapshot, scale)
         self._draw_calibration(painter, snapshot, scale)
+        self._draw_virtual_keyboard(painter, snapshot, scale)
         self._draw_radial(painter, snapshot, scale)
         self._draw_mode_badge(painter, snapshot, scale)
         # Desenhado antes do toast para o aviso temporário cobrir o indicador quando sobreposto.
