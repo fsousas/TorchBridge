@@ -2011,21 +2011,18 @@ class GameOverlay(QWidget):
             eased = progress * progress * (3.0 - 2.0 * progress)
 
         if target == "pet_name":
-            # SlideLeft com bounce: desliza da direita (painel do pet) para a esquerda
-            slide_dist = 90.0 * scale_k
+            # SlideLeft com bounce: vem de fora da tela (direita) até a posição final
+            slide_dist = max(rect.width - local_x + 20.0, 100.0)
             offset_x = slide_dist * (1.0 - eased)
             offset_y = 0.0
         else:
-            # SlideUP com bounce: desliza de baixo (caixa de texto) para cima
-            slide_dist = 75.0 * scale_k
+            # SlideUP com bounce: vem de fora da tela (baixo) até a posição final
+            slide_dist = max(rect.height - local_y + 20.0, 100.0)
             offset_x = 0.0
             offset_y = slide_dist * (1.0 - eased)
 
-        opacity = max(0.0, min(1.0, progress * 1.3))
-
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.setOpacity(opacity)
         painter.translate(offset_x, offset_y)
 
         # 1. Background do teclado [Camada Fundo]
