@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch, call
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QPainter, QPixmap
@@ -30,6 +30,7 @@ from torchbridge.models import (
     virtual_keyboard_info_label_filename,
     virtual_keyboard_key_filename,
     virtual_keyboard_key_rect,
+    virtual_keyboard_character,
     virtual_keyboard_target_rect,
 )
 from torchbridge.overlay import GameOverlay
@@ -220,6 +221,185 @@ class VirtualKeyboardEngineTests(unittest.TestCase):
             self.assertEqual(engine._virtual_keyboard_caps_state, "default")
             self.assertEqual(shared.get().virtual_keyboard_caps_state, "default")
 
+    def test_every_printed_character_can_be_inserted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._virtual_keyboard_open = True
+            for key_id, row, col, span, kind in KEYBOARD_LAYOUT:
+                if kind != "simple":
+                    continue
+                for caps in ("default", "next_letter", "all_letters"):
+                    engine._virtual_keyboard_caps_state = caps
+                    engine._activate_virtual_key(key_id, rect, hub)
+                    character = virtual_keyboard_character(key_id, caps)
+                    injector.text.assert_called_with(character)
+                    expected = "default" if caps == "next_letter" and character.isalpha() else caps
+                    self.assertEqual(engine._virtual_keyboard_caps_state, expected)
+
+    def test_printed_symbols_match_assets(self):
+        self.assertEqual(virtual_keyboard_character("1x2", "default"), "1")
+        self.assertEqual(virtual_keyboard_character("1x2", "all_letters"), "!")
+        self.assertEqual(virtual_keyboard_character("2x13", "default"), "\\")
+        self.assertEqual(virtual_keyboard_character("2x13", "all_letters"), "|")
+        self.assertEqual(virtual_keyboard_character("3x11", "all_letters"), '"')
+        self.assertEqual(virtual_keyboard_character("3x12", "all_letters"), "/")
+        self.assertEqual(virtual_keyboard_character("4x11", "all_letters"), ">")
+
+    def test_reopen_resets_caps_and_focuses_game_before_moving_to_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            engine._virtual_keyboard_caps_state = "all_letters"
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._open_virtual_keyboard("pet_name", rect, hub)
+            self.assertEqual(shared.get().virtual_keyboard_caps_state, "default")
+            self.assertEqual(shared.get().virtual_keyboard_focus, (3, 1))
+            events = injector.mock_calls
+            down = events.index(call.mouse_button("left", True))
+            up = events.index(call.mouse_button("left", False))
+            self.assertLess(down, up)
+            self.assertEqual(events[-1][0], "move")
+
+    def test_ok_consumes_controller_tick_without_gameplay_or_mouse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1)
+            engine._char_create_initialized = True
+            engine._last_state_id = 1
+            engine._virtual_keyboard_open = True
+            engine._virtual_keyboard_target = "pet_name"
+            engine._virtual_keyboard_focus = (5, 13)
+            with patch.object(engine, "_handle_discrete_bindings") as bindings:
+                engine._process_active(hub, ControllerState(buttons={"a"}), rect,
+                                       engine.config.get(), 1.0, 0.01)
+            self.assertFalse(shared.get().virtual_keyboard_open)
+            injector.mouse_button.assert_not_called()
+            bindings.assert_not_called()
+
+    def test_mouse_key_click_and_ok_do_not_click_game_or_reopen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._virtual_keyboard_open = True
+            engine._virtual_keyboard_target = "character_name"
+            for key_id, expected in (("3x1", "a"), ("ok", None)):
+                kx, ky, kw, kh = virtual_keyboard_target_rect(rect, "character_name")
+                x, y, w, h = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
+                shared.keyboard_event("click", round(x + w / 2), round(y + h / 2))
+                injector.key_pressed.return_value = True
+                engine._handle_keyboard_mouse(rect, hub)
+                if expected:
+                    injector.text.assert_called_with(expected)
+            self.assertFalse(engine._virtual_keyboard_open)
+            injector.mouse_button.assert_not_called()
+
+    def test_nintendo_east_confirms_south_deletes_and_shoulders_move_caret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._virtual_keyboard_open = True
+            engine._virtual_keyboard_target = "character_name"
+            engine._handle_virtual_keyboard_navigation(
+                ControllerState(buttons={"b"}, controller_type="nintendo"), rect, hub)
+            injector.text.assert_called_once_with("a")
+            engine._handle_virtual_keyboard_navigation(
+                ControllerState(buttons={"a", "lb"}, controller_type="nintendo"), rect, hub)
+            injector.key.assert_any_call("BACKSPACE", True)
+            injector.key.assert_any_call("LEFT", True)
+            engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"rb"}), rect, hub)
+            injector.key.assert_any_call("RIGHT", True)
+
+    def test_shift_once_survives_space_and_failed_injection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            engine._virtual_keyboard_caps_state = "next_letter"
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._activate_virtual_key("space", rect, hub)
+            self.assertEqual(engine._virtual_keyboard_caps_state, "next_letter")
+            injector.text.return_value = False
+            engine._activate_virtual_key("3x1", rect, hub)
+            self.assertEqual(engine._virtual_keyboard_caps_state, "next_letter")
+            injector.text.return_value = True
+            engine._activate_virtual_key("3x1", rect, hub)
+            self.assertEqual(engine._virtual_keyboard_caps_state, "default")
+
+
+    def test_physical_mouse_opens_switches_fields_and_closes_outside(self):
+        from torchbridge.models import char_create_button_point
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect, hub = Rect(100, 50, 1920, 1080), MagicMock()
+            for field in ("character_name", "pet_name"):
+                injector.key_pressed.return_value = False
+                engine._handle_keyboard_mouse(rect, hub)
+                injector.cursor_position.return_value = char_create_button_point(rect, field)
+                injector.key_pressed.return_value = True
+                engine._handle_keyboard_mouse(rect, hub)
+                self.assertEqual(shared.get().virtual_keyboard_target, field)
+                self.assertTrue(engine._virtual_keyboard_open)
+            injector.key_pressed.return_value = False
+            engine._handle_keyboard_mouse(rect, hub)
+            injector.cursor_position.return_value = (101, 51)
+            injector.key_pressed.return_value = True
+            engine._handle_keyboard_mouse(rect, hub)
+            self.assertFalse(shared.get().virtual_keyboard_open)
+
+    def test_holding_confirm_after_ok_never_clicks_creation_button(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect, hub = Rect(0, 0, 1920, 1080), MagicMock()
+            engine._memory_state = GameMemoryState(is_connected=True, state_id=1)
+            engine._char_create_initialized = True
+            engine._last_state_id = 1
+            engine._virtual_keyboard_open = True
+            engine._virtual_keyboard_target = "character_name"
+            engine._virtual_keyboard_focus = (5, 11)
+            held = ControllerState(buttons={"a"})
+            for tick in range(3):
+                engine._process_active(hub, held, rect, engine.config.get(), tick, 0.01)
+                engine._previous = held
+            self.assertFalse(engine._virtual_keyboard_open)
+            injector.mouse_button.assert_not_called()
+
+
+class VirtualKeyboardInjectionTests(unittest.TestCase):
+    def test_arrows_are_supported_extended_scancodes(self):
+        from types import SimpleNamespace
+        from torchbridge import win32
+        injector = object.__new__(win32.InputInjector)
+        user32 = MagicMock()
+        user32.MapVirtualKeyW.return_value = 75
+        def keyboard(vk, scan, flags, timestamp, extra):
+            return SimpleNamespace(vk=vk, scan=scan, flags=flags)
+        with patch.object(win32, "user32", user32, create=True), \
+             patch.object(win32, "KEYBDINPUT", keyboard, create=True), \
+             patch.object(win32, "INPUT", lambda **kw: SimpleNamespace(**kw), create=True), \
+             patch.object(injector, "_send", return_value=True) as send:
+            for name, vk in (("LEFT", 0x25), ("RIGHT", 0x27)):
+                injector.tap(name)
+                user32.MapVirtualKeyW.assert_called_with(vk, 0)
+                self.assertEqual(send.call_args_list[-2].args[0].ki.flags, 0x09)
+                self.assertEqual(send.call_args_list[-1].args[0].ki.flags, 0x0B)
+
+    def test_text_sends_exact_utf16_down_and_up_without_modifiers(self):
+        from types import SimpleNamespace
+        from torchbridge import win32
+        injector = object.__new__(win32.InputInjector)
+        def keyboard(vk, scan, flags, timestamp, extra):
+            return SimpleNamespace(vk=vk, scan=scan, flags=flags)
+        with patch.object(win32, "KEYBDINPUT", keyboard, create=True), \
+             patch.object(win32, "INPUT", lambda **kw: SimpleNamespace(**kw), create=True), \
+             patch.object(injector, "_send", return_value=True) as send:
+            self.assertTrue(injector.text('aA!ç'))
+            events = [c.args[0].ki for c in send.call_args_list]
+            self.assertEqual([e.scan for e in events], [97, 97, 65, 65, 33, 33, 231, 231])
+            self.assertEqual([e.flags for e in events], [4, 6] * 4)
+            self.assertTrue(all(e.vk == 0 for e in events))
+            send.return_value = False
+            self.assertFalse(injector.text("a"))
+
+
 
 class VirtualKeyboardOverlayTests(unittest.TestCase):
     @classmethod
@@ -233,6 +413,19 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
         shared = SharedOverlayState()
         overlay = GameOverlay(shared, config)
         return overlay, shared
+
+    def test_mouse_surface_queues_click_in_physical_pixels(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            surface = overlay._keyboard_input
+            surface.physical_rect = Rect(200, 300, 568, 290)
+            # Simulate 200% display scaling: Qt logical size is half the physical size.
+            surface.resize(284, 145)
+            QTest.mouseClick(surface, Qt.MouseButton.LeftButton, pos=QPoint(100, 50))
+            self.assertIn(("click", 400, 400), shared.take_keyboard_events())
+            overlay.shutdown()
 
     def test_draw_virtual_keyboard_overlay_with_keys_and_highlights(self):
         with tempfile.TemporaryDirectory() as directory:

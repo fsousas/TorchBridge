@@ -741,6 +741,21 @@ def virtual_keyboard_bg_asset_path() -> Path | None:
     return virtual_keyboard_asset_path("background.png")
 
 
+# Characters printed on the supplied min-/mai- assets (US QWERTY).
+KEYBOARD_CHARACTERS = (
+    ("`1234567890-=", "~!@#$%^&*()_+"),
+    ("qwertyuiop[]\\", "QWERTYUIOP{}|"),
+    ("asdfghjkl;'/?", 'ASDFGHJKL:"/?'),
+    ("zxcvbnm,.", "ZXCVBNM<>"),
+)
+
+
+def virtual_keyboard_character(key_id: str, caps_state: str = "default") -> str:
+    row, col = map(int, key_id.split("x"))
+    index = col - (3 if row == 4 else 1)
+    return KEYBOARD_CHARACTERS[row - 1][caps_state != "default"][index]
+
+
 def virtual_keyboard_grid_to_key(row: int, col: int) -> tuple[str, str]:
     """Mapeia (row, col) do grid 5x13 para (key_id, key_type)."""
     if row in (1, 2, 3):
@@ -2166,6 +2181,16 @@ class SharedOverlayState:
     def __init__(self) -> None:
         self._lock = Lock()
         self._snapshot = OverlaySnapshot()
+        self._keyboard_events: list[tuple[str, int, int]] = []
+
+    def keyboard_event(self, kind: str, x: int, y: int) -> None:
+        with self._lock:
+            self._keyboard_events.append((kind, x, y))
+
+    def take_keyboard_events(self) -> list[tuple[str, int, int]]:
+        with self._lock:
+            events, self._keyboard_events = self._keyboard_events, []
+            return events
 
     # Leitura atômica do último snapshot publicado.
     def get(self) -> OverlaySnapshot:

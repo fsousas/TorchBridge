@@ -19,6 +19,8 @@ from .models import (
     both_panels_open,
     char_create_button_point,
     virtual_keyboard_target_rect,
+    virtual_keyboard_character,
+    KEYBOARD_LAYOUT,
     virtual_keyboard_grid_to_key,
     virtual_keyboard_key_rect,
     click_zone,
@@ -203,6 +205,9 @@ class BridgeEngine(threading.Thread):
         # Navegação na Criação de Personagem (state_id == 1) via D-pad
         self._char_create_initialized = False
         self._char_create_focus = "destroyer"
+        self._keyboard_confirm_latched = False
+        self._keyboard_mouse_down = False
+        self._keyboard_pressed_until = 0.0
         self._virtual_keyboard_open = False
         self._virtual_keyboard_target = ""
         self._virtual_keyboard_focus = (3, 1)
@@ -747,18 +752,12 @@ class BridgeEngine(threading.Thread):
             self._handle_virtual_keyboard_navigation(state, rect, hub)
             return
 
+        confirm, cancel = self._keyboard_buttons(state)
+
         # Abrir teclado virtual ao pressionar 'a' quando focado em character_name ou pet_name
         if current in ("character_name", "pet_name"):
-            if state.pressed("a") and not self._previous.pressed("a"):
-                self._virtual_keyboard_open = True
-                self._virtual_keyboard_target = current
-                self._virtual_keyboard_focus = (3, 1)  # Nó amarelo inicial (linha 3, coluna 1 - tecla 'A')
-                self.shared.update(
-                    virtual_keyboard_open=True,
-                    virtual_keyboard_target=current,
-                    virtual_keyboard_focus=(3, 1),
-                )
-                hub.rumble(0.04, 0.10, 40)
+            if state.pressed(confirm) and not self._previous.pressed(confirm):
+                self._open_virtual_keyboard(current, rect, hub)
                 return
 
         # Se o foco estava no 'ok' mas o nome foi apagado, recua para 'character_name'
@@ -772,7 +771,7 @@ class BridgeEngine(threading.Thread):
         new_focus = current
 
         # Botão B (Bolinha no PlayStation / B no Xbox): atalho direto para Cancelar / Voltar
-        if state.pressed("b") and not self._previous.pressed("b"):
+        if state.pressed(cancel) and not self._previous.pressed(cancel):
             self._char_create_focus = "back"
             target_x, target_y = char_create_button_point(rect, "back")
             self.injector.move(target_x, target_y)
@@ -851,6 +850,80 @@ class BridgeEngine(threading.Thread):
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(char_create_focus=new_focus)
 
+    @staticmethod
+    def _keyboard_buttons(state: ControllerState) -> tuple[str, str]:
+        nintendo = any(name in state.controller_type.lower() for name in ("nintendo", "switch"))
+        return ("b", "a") if nintendo else ("a", "b")
+
+    def _handle_keyboard_mouse(self, rect: Rect, hub: ControllerHub) -> None:
+        # Qt consumes clicks on keys so the game edit control retains its caret/focus.
+        down = self.injector.key_pressed("MOUSE_LEFT") is True
+        events = self.shared.take_keyboard_events()
+        intercepted = any(kind == "click" for kind, _, _ in events)
+        for kind, x, y in events:
+            if not self._virtual_keyboard_open:
+                continue
+            kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
+            for key_id, row, col, _span, _key_type in KEYBOARD_LAYOUT:
+                bx, by, bw, bh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
+                if bx <= x < bx + bw and by <= y < by + bh:
+                    self._virtual_keyboard_focus = (row, col)
+                    self.shared.update(virtual_keyboard_focus=(row, col))
+                    if kind == "click":
+                        self._activate_virtual_key(key_id, rect, hub)
+                    break
+        # The main overlay remains click-through outside the keyboard.
+        if down and not self._keyboard_mouse_down and not intercepted:
+            x, y = self.injector.cursor_position()
+            kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
+            if not self._virtual_keyboard_open or not Rect(kx, ky, kw, kh).contains(x, y):
+                for field in ("character_name", "pet_name"):
+                    bx, by = char_create_button_point(rect, field)
+                    if abs(x - bx) <= 80 and abs(y - by) <= 30:
+                        self._open_virtual_keyboard(field, rect, hub)
+                        break
+                else:
+                    if self._virtual_keyboard_open:
+                        self._close_virtual_keyboard(rect, hub)
+        self._keyboard_mouse_down = down
+
+    def _open_virtual_keyboard(self, target: str, rect: Rect, hub: ControllerHub) -> None:
+        # Focus the actual game edit control before moving onto the virtual keys.
+        self._set_mouse("left", False)
+        self.injector.move(*char_create_button_point(rect, target))
+        self.injector.mouse_button("left", True)
+        self.injector.mouse_button("left", False)
+        self._virtual_keyboard_open = True
+        self._virtual_keyboard_target = target
+        self._virtual_keyboard_focus = (3, 1)
+        self._virtual_keyboard_caps_state = "default"
+        self._char_create_focus = target
+        self.shared.update(virtual_keyboard_open=True, virtual_keyboard_target=target,
+                           virtual_keyboard_focus=(3, 1), virtual_keyboard_caps_state="default",
+                           virtual_keyboard_pressed_key=None, char_create_focus=target)
+        kx, ky, kw, kh = virtual_keyboard_target_rect(rect, target)
+        x, y, w, h = virtual_keyboard_key_rect(kx, ky, kw, kh, "3x1")
+        self.injector.move(round(x + w / 2), round(y + h / 2))
+        hub.rumble(0.04, 0.10, 40)
+
+    def _activate_virtual_key(self, key_id: str, rect: Rect, hub: ControllerHub) -> None:
+        self._keyboard_pressed_until = time.monotonic() + 0.12
+        self.shared.update(virtual_keyboard_pressed_key=key_id)
+        hub.rumble(0.03, 0.08, 35)
+        if key_id == "ok":
+            self._close_virtual_keyboard(rect, hub)
+        elif key_id == "caps":
+            self._cycle_caps_lock(hub)
+        elif key_id == "backspace":
+            self.injector.tap("BACKSPACE")
+        else:
+            char = " " if key_id == "space" else virtual_keyboard_character(
+                key_id, self._virtual_keyboard_caps_state)
+            sent = self.injector.text(char)
+            if sent and char.isalpha() and self._virtual_keyboard_caps_state == "next_letter":
+                self._virtual_keyboard_caps_state = "default"
+                self.shared.update(virtual_keyboard_caps_state="default")
+
     def _cycle_caps_lock(self, hub: ControllerHub) -> None:
         """Alterna ciclicamente os 3 estados do Caps Lock: default -> next_letter -> all_letters -> default."""
         cur = getattr(self, "_virtual_keyboard_caps_state", "default")
@@ -867,6 +940,7 @@ class BridgeEngine(threading.Thread):
     def _close_virtual_keyboard(self, rect: Rect, hub: ControllerHub) -> None:
         """Fecha o teclado virtual e retorna o cursor ao nó rosa do campo de texto ativo."""
         self._virtual_keyboard_open = False
+        self._keyboard_confirm_latched = True
         target = self._virtual_keyboard_target
         self._virtual_keyboard_target = ""
         self._virtual_keyboard_pressed_key = None
@@ -887,6 +961,7 @@ class BridgeEngine(threading.Thread):
         hub: ControllerHub,
     ) -> None:
         """Gerencia a navegação no grid 5x13 e as ações do teclado virtual."""
+        confirm, cancel = self._keyboard_buttons(state)
         # 1. Fechar pelo botão START (mesma ação do botão OK do teclado virtual)
         if state.pressed("start") and not self._previous.pressed("start"):
             self._close_virtual_keyboard(rect, hub)
@@ -914,6 +989,8 @@ class BridgeEngine(threading.Thread):
                 new_col = 12
             elif cur_row == 5 and cur_col <= 10:
                 new_col = 11
+            elif (cur_row == 4 and cur_col >= 12) or (cur_row == 5 and cur_col >= 11):
+                pass
             else:
                 new_col = min(13, cur_col + 1)
         elif dpad_left:
@@ -923,6 +1000,8 @@ class BridgeEngine(threading.Thread):
                 new_col = 11
             elif cur_row == 5 and cur_col >= 11:
                 new_col = 10
+            elif (cur_row == 4 and cur_col <= 2) or cur_row == 5:
+                pass
             else:
                 new_col = max(1, cur_col - 1)
         elif dpad_down:
@@ -939,35 +1018,16 @@ class BridgeEngine(threading.Thread):
             key_rx, key_ry, key_rw, key_rh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
             self.injector.move(int(round(key_rx + key_rw / 2.0)), int(round(key_ry + key_rh / 2.0)))
 
-        # 4. Seleção da tecla pelo botão A (Sul no Xbox/PS, Leste no Nintendo)
-        if state.pressed("a") and not self._previous.pressed("a"):
-            key_id, key_type = virtual_keyboard_grid_to_key(new_row, new_col)
-            hub.rumble(0.03, 0.08, 35)
-            self.shared.update(virtual_keyboard_pressed_key=key_id)
-
-            if key_id == "caps":
-                self._cycle_caps_lock(hub)
-            elif key_id == "ok":
-                self._close_virtual_keyboard(rect, hub)
+        if state.pressed(confirm) and not self._previous.pressed(confirm):
+            key_id, _ = virtual_keyboard_grid_to_key(new_row, new_col)
+            self._activate_virtual_key(key_id, rect, hub)
+            if not self._virtual_keyboard_open:
                 return
-            elif key_id == "backspace":
-                self.injector.key("BACKSPACE", True)
-                self.injector.key("BACKSPACE", False)
-            elif key_id == "space":
-                self.injector.key("SPACE", True)
-                self.injector.key("SPACE", False)
-            else:
-                # Disparo de caractere simples (será integrado à injeção no próximo passo)
-                if getattr(self, "_virtual_keyboard_caps_state", "default") == "next_letter":
-                    self._virtual_keyboard_caps_state = "default"
-                    self.shared.update(virtual_keyboard_caps_state="default")
-
-        # Ao soltar o botão A, desfaz o efeito de clique afundado
-        if not state.pressed("a") and self._previous.pressed("a"):
+        if time.monotonic() >= self._keyboard_pressed_until:
             self.shared.update(virtual_keyboard_pressed_key=None)
 
         # 5. Botão B (Leste no Xbox/PS, Sul no Nintendo) funciona como Backspace
-        if state.pressed("b") and not self._previous.pressed("b"):
+        if state.pressed(cancel) and not self._previous.pressed(cancel):
             hub.rumble(0.03, 0.08, 30)
             self.injector.key("BACKSPACE", True)
             self.injector.key("BACKSPACE", False)
@@ -4901,6 +4961,17 @@ class BridgeEngine(threading.Thread):
         now: float,
         dt: float,
     ) -> None:
+        if self._memory_state.is_connected and self._memory_state.state_id == 1:
+            was_open = self._virtual_keyboard_open
+            self._handle_char_create_navigation(state, rect, hub)
+            self._handle_keyboard_mouse(rect, hub)
+            if was_open or self._virtual_keyboard_open:
+                return
+            confirm, _ = self._keyboard_buttons(state)
+            if self._keyboard_confirm_latched:
+                if state.pressed(confirm) or state.pressed("start"):
+                    return
+                self._keyboard_confirm_latched = False
         # BORDAS DOS GATILHOS PRIMEIRO: os handlers de combo/remap leem _lt_current e
         # _rt_edge_up calculados aqui contra o estado do tick.
         self._update_trigger_edges(state)
@@ -4937,9 +5008,7 @@ class BridgeEngine(threading.Thread):
                 self._title_screen_initialized = False
                 self.shared.update(title_menu_focus=None)
 
-            if state_id == 1:
-                self._handle_char_create_navigation(state, rect, hub)
-            elif self._char_create_initialized:
+            if state_id != 1 and self._char_create_initialized:
                 self._char_create_initialized = False
                 self._virtual_keyboard_open = False
                 self._virtual_keyboard_target = ""
@@ -5525,45 +5594,6 @@ class BridgeEngine(threading.Thread):
             elif zone == "center" and both_panels_open(self._active_panels):
                 self._reset_active_panels()
 
-            # Clique com mouse na Tela de Criação de Personagem (state_id == 1)
-            if getattr(self, "_memory_state", None) and self._memory_state.state_id == 1:
-                if not self._virtual_keyboard_open:
-                    for field in ("character_name", "pet_name"):
-                        bx, by = char_create_button_point(rect, field)
-                        if abs(cursor_x - bx) <= 80 and abs(cursor_y - by) <= 30:
-                            self._virtual_keyboard_open = True
-                            self._virtual_keyboard_target = field
-                            self._virtual_keyboard_focus = (3, 1)
-                            self._char_create_focus = field
-                            self.shared.update(
-                                char_create_focus=field,
-                                virtual_keyboard_open=True,
-                                virtual_keyboard_target=field,
-                                virtual_keyboard_focus=(3, 1),
-                            )
-                            break
-                else:
-                    kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
-                    kb_rect = Rect(kx, ky, kw, kh)
-                    if not kb_rect.contains(cursor_x, cursor_y):
-                        # Clicou fora do teclado virtual: verifica se clicou no outro campo de texto ou se fecha
-                        clicked_other = False
-                        for field in ("character_name", "pet_name"):
-                            bx, by = char_create_button_point(rect, field)
-                            if abs(cursor_x - bx) <= 80 and abs(cursor_y - by) <= 30:
-                                if field != self._virtual_keyboard_target:
-                                    self._virtual_keyboard_target = field
-                                    self._char_create_focus = field
-                                    self.shared.update(
-                                        char_create_focus=field,
-                                        virtual_keyboard_target=field,
-                                    )
-                                    clicked_other = True
-                                    break
-                        if not clicked_other:
-                            self._virtual_keyboard_open = False
-                            self._virtual_keyboard_target = ""
-                            self.shared.update(virtual_keyboard_open=False, virtual_keyboard_target="")
         self._previous_left_pressed = left_pressed
         # Snapshot do estado de painéis para o tick seguinte: o remap contextual de
         # B/Y decide com o estado ESTÁVEL do tick anterior (ver docstring do handler).

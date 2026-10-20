@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QWidget
 from .config import ConfigManager
 from .models import (
     OverlaySnapshot,
+    Rect,
     SharedOverlayState,
     CREATE_CHAR_BUTTONS,
     DIFFICULTY_BUTTONS,
@@ -122,6 +123,51 @@ def _radial_icons_dir() -> Path:
 
 
 # Janela de sobreposição alinhada à área do jogo, redesenhada a ~60 FPS.
+class KeyboardInputSurface(QWidget):
+    """Intercept virtual-key clicks without activating a window or clicking the game."""
+
+    def __init__(self, shared: SharedOverlayState, parent: QWidget) -> None:
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowStaysOnTopHint
+                         | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.shared = shared
+        self.physical_rect = Rect()
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
+
+    def nativeEvent(self, event_type, message):
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+            msg = wintypes.MSG.from_address(int(message))
+            if msg.message == 0x0021:  # WM_MOUSEACTIVATE: retain the game's keyboard focus.
+                return True, 3  # MA_NOACTIVATE
+        return super().nativeEvent(event_type, message)
+
+    def paintEvent(self, event) -> None:
+        # Nonzero alpha makes the entire surface hit-testable on Windows layered windows.
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.end()
+
+    def _physical_point(self, event) -> tuple[int, int]:
+        rect = self.physical_rect
+        point = event.position()
+        return (round(rect.left + point.x() * rect.width / max(1, self.width())),
+                round(rect.top + point.y() * rect.height / max(1, self.height())))
+
+    def mouseMoveEvent(self, event) -> None:
+        x, y = self._physical_point(event)
+        self.shared.keyboard_event("hover", x, y)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            x, y = self._physical_point(event)
+            self.shared.keyboard_event("click", x, y)
+        event.accept()
+
+
 class GameOverlay(QWidget):
     def __init__(self, shared: SharedOverlayState, config: ConfigManager) -> None:
         super().__init__()
@@ -181,6 +227,7 @@ class GameOverlay(QWidget):
         # a seleção, então sem esses backups a saída não teria onde partir.
         self._last_pet_point: QPointF | None = None
         self._last_pet_selection: int | None = None
+        self._keyboard_input = KeyboardInputSurface(self.shared, self)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
         # Redesenho a cada 16 ms (~60 FPS); o motor publica o estado a 120 Hz.
@@ -202,6 +249,7 @@ class GameOverlay(QWidget):
 
     def shutdown(self) -> None:
         self._timer.stop()
+        self._keyboard_input.hide()
         self.hide()
         if self._channel is not None:
             self._channel.close()
@@ -286,6 +334,17 @@ class GameOverlay(QWidget):
         # Revalida o foco na UI: um snapshot atrasado não pode cobrir outro aplicativo.
         if should_show and self._native_windows and snapshot.game_hwnd:
             should_show = WindowLocator.is_foreground(snapshot.game_hwnd)
+        if should_show and snapshot.virtual_keyboard_open:
+            geometry = virtual_keyboard_target_rect(rect, snapshot.virtual_keyboard_target)
+            self._keyboard_input.physical_rect = Rect(*geometry)
+            if not self._native_windows:
+                self._keyboard_input.setGeometry(*geometry)
+            self._keyboard_input.show()
+            if self._native_windows:
+                position_overlay(int(self._keyboard_input.winId()), Rect(*geometry))
+            self._keyboard_input.raise_()
+        else:
+            self._keyboard_input.hide()
         self._sync_channel(snapshot)
         if self._channel is not None:
             try:

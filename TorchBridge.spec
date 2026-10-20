@@ -12,6 +12,7 @@ analysis = Analysis(
         ("assets/images/radial-menu-icons", "assets/images/radial-menu-icons"),
         ("assets/images/app", "assets/images/app"),
         ("assets/hud", "assets/hud"),
+        ("assets/keyboard", "assets/keyboard"),
     ] + native_datas,
     hiddenimports=["pygame._sdl2.controller"],
     hookspath=[],

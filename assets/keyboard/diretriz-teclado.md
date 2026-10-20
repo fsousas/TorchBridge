@@ -10,7 +10,7 @@
 ## Elementos
 - background - O background nada mais é do que o fundo do teclado e também é o limitador de largura e altura onde as teclas serão dispostas
 - as teclas estao separadas por maiúsculas e minúsculas
-- cada tecla tem no seu nome a posição que deve ficar no grid ex: 
+- cada tecla tem no seu nome a posição que deve ficar no grid ex:
     1x1 significa que essa tecla fica na posicao linha 1 coluna 1
     3x1 significa que a tecla fica na linha 3 coluna 1
     quando a tecla tem 4x1-e-4x2 significa que ela ocupa na linha 4 a coluna 1 e a coluna 2
@@ -92,7 +92,7 @@ assets\keyboard\info-label-xbox.png
 - botao sul(xbox/ps) | botao leste(nintendo) = seleção da tecla
 - botao leste (xbox/ps) | botao sul(nintendo) = funciona como backspace
 - botao start = fechar teclado(mesma ação do botao OK do teclado virtual)
-- botao de gatilho = (ps[L2],xbox[LT],nintendo[ZL]) = alterna o clico entre os 3 estados do teclado no modo capslock 
+- botao de gatilho = (ps[L2],xbox[LT],nintendo[ZL]) = alterna o clico entre os 3 estados do teclado no modo capslock
 - botoes de ombro (ps[L1,R1],xbox[LB,RB],nintendo[L,R]) = movendo das setas esquerda e direita respectivamente para cada tipo de controle
 
 ## Progresso da Implementação
@@ -119,10 +119,20 @@ assets\keyboard\info-label-xbox.png
   - Botão B (ou Leste) funcionando diretamente como Backspace.
   - Suíte de testes unitários automatizados validando o modelo, cálculo de coordenadas e overlay.
 
-### O que falta ajustar (Pendências / Bugs Reportados)
-1. **Crash ao usar os botões de ombro (R1 e L1 / RB e LB):**
-   - Ao pressionar L1 ou R1 para mover o cursor de texto, o overlay/motor sofre crash e para de responder. Necessário corrigir o tratamento do envio das teclas de seta esquerda/direita.
-2. **Digitação de caracteres no campo de texto:**
-   - Clicar/selecionar uma tecla de letra ou caractere especial não está inserindo o caractere no campo selecionado dentro do jogo. É necessário implementar a injeção do caractere correspondente à tecla ativa (`RxC`) no campo de texto do Torchlight.
-3. **Botão OK do teclado virtual não fecha o teclado:**
-   - Clicar na tecla OK (`5x11-a-5x13`) não está executando a ação de fechar o teclado virtual e retornar o foco ao jogo (atualmente apenas o botão Start do controle está fechando com sucesso).
+### Pendências corrigidas nesta implementação
+- Injeção das letras, números e símbolos conforme as imagens `min-` e `mai-`, usando eventos Unicode UTF-16 do Windows, sem depender do layout físico ou do Caps Lock do sistema.
+- Setas `LEFT`/`RIGHT` reconhecidas pelo injetor e enviadas como scancodes estendidos, corrigindo a exceção dos botões de ombro.
+- OK pelo controle e pelo mouse fecha o teclado e retorna o cursor ao campo ativo; Start segue a mesma ação, sem enviar Escape ao jogo.
+- Abertura foca o campo real antes de mover o cursor ao nó amarelo e reinicia o modo minúsculo.
+- Cliques e hover nas teclas são recebidos por uma superfície sem ativação; o campo do jogo mantém foco e posição de edição. As coordenadas consideram pixels físicos e escala de DPI.
+- Cliques físicos nos campos abrem/trocam o teclado e cliques externos o fecham.
+- Confirmação pelo botão sul em Xbox/PlayStation e leste em Nintendo; o outro botão apaga.
+- Os comandos do teclado são consumidos antes dos bindings gerais. Segurar a confirmação após OK não dispara clique residual no jogo.
+- Shift de próxima letra só é consumido após enviar uma letra com sucesso; espaço e símbolos preservam esse modo.
+- Efeito de pressionamento com duração de 120 ms, inclusive para cliques do mouse.
+- Assets do teclado incluídos no pacote PyInstaller, para manter a renderização no executável distribuído.
+
+### Validação
+- Testes automatizados de mapeamento dos assets, injeção Unicode, flags das setas, navegação, modos de maiúsculas, mouse, Nintendo, foco, fechamento e consumo dos comandos.
+- No ambiente Linux, a execução dos testes exige simular as DLLs e os construtores dependentes de Windows. Isso valida a lógica e os eventos Qt, mas não confirma a recepção de `SendInput` pelo jogo.
+- A validação final no Torchlight em Windows continua necessária, incluindo os dois campos, edição no meio do texto, DPI diferente de 100% e fullscreen exclusivo (cuja renderização usa o backend Direct3D 9).
