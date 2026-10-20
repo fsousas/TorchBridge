@@ -885,6 +885,14 @@ class BridgeEngine(threading.Thread):
                 else:
                     if self._virtual_keyboard_open:
                         self._close_virtual_keyboard(rect, hub)
+            elif self._virtual_keyboard_open and Rect(kx, ky, kw, kh).contains(x, y):
+                for key_id, row, col, _span, _key_type in KEYBOARD_LAYOUT:
+                    bx, by, bw, bh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
+                    if bx <= x < bx + bw and by <= y < by + bh:
+                        self._virtual_keyboard_focus = (row, col)
+                        self.shared.update(virtual_keyboard_focus=(row, col))
+                        self._activate_virtual_key(key_id, rect, hub)
+                        break
         self._keyboard_mouse_down = down
 
     def _open_virtual_keyboard(self, target: str, rect: Rect, hub: ControllerHub) -> None:

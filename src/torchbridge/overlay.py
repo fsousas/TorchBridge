@@ -129,12 +129,19 @@ class KeyboardInputSurface(QWidget):
     def __init__(self, shared: SharedOverlayState, parent: QWidget) -> None:
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint
+                         | Qt.WindowType.WindowTransparentForInput
                          | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.shared = shared
         self.physical_rect = Rect()
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setMouseTracking(True)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if IS_WINDOWS:
+            make_overlay_clickthrough(int(self.winId()))
 
     def nativeEvent(self, event_type, message):
         if sys.platform == "win32":
@@ -342,6 +349,7 @@ class GameOverlay(QWidget):
             self._keyboard_input.show()
             if self._native_windows:
                 position_overlay(int(self._keyboard_input.winId()), Rect(*geometry))
+                make_overlay_clickthrough(int(self._keyboard_input.winId()))
             self._keyboard_input.raise_()
         else:
             self._keyboard_input.hide()
