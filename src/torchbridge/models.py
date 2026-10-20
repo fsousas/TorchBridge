@@ -905,6 +905,16 @@ def virtual_keyboard_key_rect(
         )
 
 
+def virtual_keyboard_key_cursor_point(
+    key_x: float,
+    key_y: float,
+    key_w: float,
+    key_h: float,
+) -> tuple[int, int]:
+    """Calcula a posição do cursor/nó na tecla: posX = largura - 10px, posY = altura - 10px."""
+    return (int(round(key_x + key_w - 10.0)), int(round(key_y + key_h - 10.0)))
+
+
 def virtual_keyboard_target_rect(
     rect: Rect,
     target_field: str = "character_name",

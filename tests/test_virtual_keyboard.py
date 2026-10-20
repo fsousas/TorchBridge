@@ -30,6 +30,7 @@ from torchbridge.models import (
     virtual_keyboard_info_label_filename,
     virtual_keyboard_key_filename,
     virtual_keyboard_key_rect,
+    virtual_keyboard_key_cursor_point,
     virtual_keyboard_character,
     virtual_keyboard_target_rect,
     char_create_pet_panel_rect,
@@ -529,6 +530,31 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
                 overlay._draw_virtual_keyboard(painter, snap, 1.0)
             finally:
                 painter.end()
+
+    def test_virtual_keyboard_key_cursor_point_matches_formula(self):
+        # posX = largura - 10px e posY = altura - 10px
+        cx, cy = virtual_keyboard_key_cursor_point(100.0, 200.0, 50.0, 40.0)
+        self.assertEqual(cx, 140)
+        self.assertEqual(cy, 230)
+
+    def test_virtual_keyboard_animation_tick_and_direction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            snap_open = OverlaySnapshot(virtual_keyboard_open=True, virtual_keyboard_target="character_name")
+            snap_closed = OverlaySnapshot(virtual_keyboard_open=False, virtual_keyboard_target="")
+
+            # Simula avanço de tempo para o tick
+            overlay._virtual_keyboard_last_time = 0.0
+            with patch("time.monotonic", return_value=0.15):
+                overlay._tick_virtual_keyboard_anim(snap_open)
+                self.assertGreater(overlay._virtual_keyboard_progress, 0.0)
+                self.assertLessEqual(overlay._virtual_keyboard_progress, 1.0)
+                self.assertEqual(overlay._last_virtual_keyboard_target, "character_name")
+
+            # Quando fecha, diminui
+            with patch("time.monotonic", return_value=0.30):
+                overlay._tick_virtual_keyboard_anim(snap_closed)
+                self.assertEqual(overlay._last_virtual_keyboard_target, "character_name")
 
 
 if __name__ == "__main__":

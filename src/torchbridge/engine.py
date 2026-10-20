@@ -24,6 +24,7 @@ from .models import (
     KEYBOARD_LAYOUT,
     virtual_keyboard_grid_to_key,
     virtual_keyboard_key_rect,
+    virtual_keyboard_key_cursor_point,
     click_zone,
     dialog_button_point,
     difficulty_menu_button_point,
@@ -911,7 +912,8 @@ class BridgeEngine(threading.Thread):
                            virtual_keyboard_pressed_key=None, char_create_focus=target)
         kx, ky, kw, kh = virtual_keyboard_target_rect(rect, target)
         x, y, w, h = virtual_keyboard_key_rect(kx, ky, kw, kh, "3x1")
-        self.injector.move(round(x + w / 2), round(y + h / 2))
+        cx, cy = virtual_keyboard_key_cursor_point(x, y, w, h)
+        self.injector.move(cx, cy)
         hub.rumble(0.04, 0.10, 40)
 
     def _activate_virtual_key(self, key_id: str, rect: Rect, hub: ControllerHub) -> None:
@@ -1024,7 +1026,8 @@ class BridgeEngine(threading.Thread):
             kx, ky, kw, kh = virtual_keyboard_target_rect(rect, self._virtual_keyboard_target)
             key_id, _ = virtual_keyboard_grid_to_key(new_row, new_col)
             key_rx, key_ry, key_rw, key_rh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
-            self.injector.move(int(round(key_rx + key_rw / 2.0)), int(round(key_ry + key_rh / 2.0)))
+            cx, cy = virtual_keyboard_key_cursor_point(key_rx, key_ry, key_rw, key_rh)
+            self.injector.move(cx, cy)
 
         if state.pressed(confirm) and not self._previous.pressed(confirm):
             key_id, _ = virtual_keyboard_grid_to_key(new_row, new_col)
