@@ -424,6 +424,85 @@ class VirtualKeyboardEngineTests(unittest.TestCase):
             injector.mouse_button.assert_not_called()
 
 
+    def test_hold_cancel_button_repeats_backspace_continuously(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect = Rect(0, 0, 1920, 1080)
+            hub = MagicMock()
+            engine._virtual_keyboard_open = True
+            engine._virtual_keyboard_target = "character_name"
+            engine._virtual_keyboard_focus = (3, 1)
+
+            # 1. Primeiro toque em B (cancel) em t=10.0 -> primeiro backspace
+            engine._previous = ControllerState()
+            with patch("time.monotonic", return_value=10.0):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"b"}), rect, hub)
+            self.assertEqual(injector.key.call_count, 2)  # True e False
+            self.assertEqual(injector.key.call_args_list, [unittest.mock.call("BACKSPACE", True), unittest.mock.call("BACKSPACE", False)])
+            self.assertAlmostEqual(engine._keyboard_cancel_repeat_at, 10.0 + engine.KEYBOARD_REPEAT_DELAY)
+
+            # 2. Segurando em t=10.2 (antes do delay de repetição) -> nenhum novo backspace
+            engine._previous = ControllerState(buttons={"b"})
+            with patch("time.monotonic", return_value=10.2):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"b"}), rect, hub)
+            self.assertEqual(injector.key.call_count, 2)
+
+            # 3. Segurando em t=10.4 (após o delay de 0.38s) -> segundo backspace disparado
+            with patch("time.monotonic", return_value=10.4):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"b"}), rect, hub)
+            self.assertEqual(injector.key.call_count, 4)
+            self.assertAlmostEqual(engine._keyboard_cancel_repeat_at, 10.4 + engine.KEYBOARD_REPEAT_INTERVAL)
+
+            # 4. Segurando em t=10.47 (após o intervalo de 0.065s) -> terceiro backspace disparado
+            with patch("time.monotonic", return_value=10.47):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"b"}), rect, hub)
+            self.assertEqual(injector.key.call_count, 6)
+
+            # 5. Soltando B em t=10.5 -> reseta o temporizador de repetição
+            with patch("time.monotonic", return_value=10.5):
+                engine._handle_virtual_keyboard_navigation(ControllerState(), rect, hub)
+            self.assertEqual(engine._keyboard_cancel_repeat_at, 0.0)
+
+    def test_hold_confirm_button_on_backspace_key_repeats_continuously(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            rect = Rect(0, 0, 1920, 1080)
+            hub = MagicMock()
+            engine._virtual_keyboard_open = True
+            engine._virtual_keyboard_target = "character_name"
+            # Foco na tecla backspace (linha 4, col 12)
+            engine._virtual_keyboard_focus = (4, 12)
+
+            # 1. Primeiro toque em A (confirm) em t=20.0 -> primeiro tap("BACKSPACE")
+            engine._previous = ControllerState()
+            with patch("time.monotonic", return_value=20.0):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"a"}), rect, hub)
+            injector.tap.assert_called_once_with("BACKSPACE")
+            self.assertAlmostEqual(engine._keyboard_confirm_repeat_at, 20.0 + engine.KEYBOARD_REPEAT_DELAY)
+
+            # 2. Segurando em t=20.2 (antes do delay de repetição) -> nenhum novo tap
+            engine._previous = ControllerState(buttons={"a"})
+            with patch("time.monotonic", return_value=20.2):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"a"}), rect, hub)
+            self.assertEqual(injector.tap.call_count, 1)
+
+            # 3. Segurando em t=20.4 (após o delay) -> segundo tap("BACKSPACE")
+            with patch("time.monotonic", return_value=20.4):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"a"}), rect, hub)
+            self.assertEqual(injector.tap.call_count, 2)
+            self.assertAlmostEqual(engine._keyboard_confirm_repeat_at, 20.4 + engine.KEYBOARD_REPEAT_INTERVAL)
+
+            # 4. Segurando em t=20.47 (após intervalo) -> terceiro tap("BACKSPACE")
+            with patch("time.monotonic", return_value=20.47):
+                engine._handle_virtual_keyboard_navigation(ControllerState(buttons={"a"}), rect, hub)
+            self.assertEqual(injector.tap.call_count, 3)
+
+            # 5. Soltando A -> reseta o temporizador
+            with patch("time.monotonic", return_value=20.5):
+                engine._handle_virtual_keyboard_navigation(ControllerState(), rect, hub)
+            self.assertEqual(engine._keyboard_confirm_repeat_at, 0.0)
+
+
 class VirtualKeyboardInjectionTests(unittest.TestCase):
     def test_arrows_are_supported_extended_scancodes(self):
         from types import SimpleNamespace

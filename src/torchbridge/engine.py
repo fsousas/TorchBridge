@@ -224,6 +224,8 @@ class BridgeEngine(threading.Thread):
         self._virtual_keyboard_focus = (3, 1)
         self._virtual_keyboard_caps_state = "default"
         self._virtual_keyboard_pressed_key: str | None = None
+        self._keyboard_cancel_repeat_at = 0.0
+        self._keyboard_confirm_repeat_at = 0.0
         # Navegação na Seleção de Dificuldade (state_id == 2) via D-pad
         self._difficulty_initialized = False
         self._difficulty_focus = "hardcore"
@@ -583,6 +585,8 @@ class BridgeEngine(threading.Thread):
         self._virtual_keyboard_focus = (3, 1)
         self._virtual_keyboard_caps_state = "default"
         self._keyboard_pressed_until = 0.0
+        self._keyboard_cancel_repeat_at = 0.0
+        self._keyboard_confirm_repeat_at = 0.0
         self._keyboard_confirm_latched = False
         self._keyboard_mouse_down = False
         self._title_screen_initialized = False
@@ -1033,6 +1037,8 @@ class BridgeEngine(threading.Thread):
     def _close_virtual_keyboard(self, rect: Rect, hub: ControllerHub) -> None:
         """Fecha o teclado virtual e retorna o cursor ao nó rosa do campo de texto ativo."""
         self._virtual_keyboard_open = False
+        self._keyboard_cancel_repeat_at = 0.0
+        self._keyboard_confirm_repeat_at = 0.0
         self._keyboard_confirm_latched = True
         target = self._virtual_keyboard_target
         self._virtual_keyboard_target = ""
@@ -1111,20 +1117,43 @@ class BridgeEngine(threading.Thread):
             key_rx, key_ry, key_rw, key_rh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
             cx, cy = virtual_keyboard_key_cursor_point(key_rx, key_ry, key_rw, key_rh)
             self.injector.move(cx, cy)
+            self._keyboard_confirm_repeat_at = 0.0
 
-        if state.pressed(confirm) and not self._previous.pressed(confirm):
-            key_id, _ = virtual_keyboard_grid_to_key(new_row, new_col)
-            self._activate_virtual_key(key_id, rect, hub)
-            if not self._virtual_keyboard_open:
-                return
-        if time.monotonic() >= self._keyboard_pressed_until:
+        now = time.monotonic()
+        key_id, _ = virtual_keyboard_grid_to_key(new_row, new_col)
+
+        # 4. Ativação de tecla com botão de confirmação (A no Xbox/PS, B no Nintendo)
+        if state.pressed(confirm):
+            if not self._previous.pressed(confirm):
+                self._activate_virtual_key(key_id, rect, hub)
+                if not self._virtual_keyboard_open:
+                    return
+                if key_id == "backspace":
+                    self._keyboard_confirm_repeat_at = now + self.KEYBOARD_REPEAT_DELAY
+            elif key_id == "backspace" and self._keyboard_confirm_repeat_at > 0.0 and now >= self._keyboard_confirm_repeat_at:
+                self.injector.tap("BACKSPACE")
+                self._keyboard_pressed_until = now + 0.05
+                self.shared.update(virtual_keyboard_pressed_key="backspace")
+                self._keyboard_confirm_repeat_at = now + self.KEYBOARD_REPEAT_INTERVAL
+        else:
+            self._keyboard_confirm_repeat_at = 0.0
+
+        if now >= self._keyboard_pressed_until:
             self.shared.update(virtual_keyboard_pressed_key=None)
 
-        # 5. Botão B (Leste no Xbox/PS, Sul no Nintendo) funciona como Backspace
-        if state.pressed(cancel) and not self._previous.pressed(cancel):
-            hub.rumble(0.03, 0.08, 30)
-            self.injector.key("BACKSPACE", True)
-            self.injector.key("BACKSPACE", False)
+        # 5. Botão B (Leste no Xbox/PS, Sul no Nintendo) funciona como Backspace com repetição contínua
+        if state.pressed(cancel):
+            if not self._previous.pressed(cancel):
+                hub.rumble(0.03, 0.08, 30)
+                self.injector.key("BACKSPACE", True)
+                self.injector.key("BACKSPACE", False)
+                self._keyboard_cancel_repeat_at = now + self.KEYBOARD_REPEAT_DELAY
+            elif self._keyboard_cancel_repeat_at > 0.0 and now >= self._keyboard_cancel_repeat_at:
+                self.injector.key("BACKSPACE", True)
+                self.injector.key("BACKSPACE", False)
+                self._keyboard_cancel_repeat_at = now + self.KEYBOARD_REPEAT_INTERVAL
+        else:
+            self._keyboard_cancel_repeat_at = 0.0
 
         # 6. Botões de ombro (LB/RB, L1/R1, L/R): movem o cursor do texto (setas esquerda e direita)
         if state.pressed("lb") and not self._previous.pressed("lb"):
@@ -4286,6 +4315,8 @@ class BridgeEngine(threading.Thread):
     # LT+RT=0, e LT como modificador dos combos). O SDL normaliza gatilhos analógicos
     # para 0..1; o mesmo limiar vale no caminho raw (trigger_value devolve 0..1).
     TRIGGER_ACTIVE_THRESHOLD = 0.50
+    KEYBOARD_REPEAT_DELAY = 0.38
+    KEYBOARD_REPEAT_INTERVAL = 0.065
 
     # Sincroniza as bordas dos gatilhos com o estado do tick (chamado no COMEÇO do
     # _process_active e na ramada inativa do run — os flags precisam acompanhar o
