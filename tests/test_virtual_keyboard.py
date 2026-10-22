@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
@@ -634,6 +635,107 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
             with patch("time.monotonic", return_value=0.30):
                 overlay._tick_virtual_keyboard_anim(snap_closed)
                 self.assertEqual(overlay._last_virtual_keyboard_target, "character_name")
+
+    def test_virtual_keyboard_pressed_key_and_highlight_both_scale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(0, 0, 1920, 1080)
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                virtual_keyboard_open=True,
+                virtual_keyboard_target="character_name",
+                virtual_keyboard_focus=(3, 1),
+                virtual_keyboard_pressed_key="3x1",
+                virtual_keyboard_press_id=1,
+            )
+            painter = MagicMock()
+            overlay._draw_virtual_keyboard(painter, snap, 1.0)
+            # Verifica que o painter.scale foi chamado tanto para a tecla quanto para o highlight
+            scale_calls = painter.scale.call_args_list
+            self.assertGreaterEqual(len(scale_calls), 2)
+            # Ambas as chamadas usam o mesmo fator de escala < 1.0
+            sx1, sy1 = scale_calls[-2].args
+            sx2, sy2 = scale_calls[-1].args
+            self.assertAlmostEqual(sx1, 0.94, places=2)
+            self.assertAlmostEqual(sx2, 0.94, places=2)
+            self.assertEqual(sx1, sx2)
+            self.assertEqual(sy1, sy2)
+
+    def test_virtual_keyboard_press_animation_smooth_easing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            snap = OverlaySnapshot(
+                game_rect=Rect(0, 0, 1920, 1080),
+                virtual_keyboard_open=True,
+                virtual_keyboard_target="character_name",
+                virtual_keyboard_focus=(3, 1),
+                virtual_keyboard_pressed_key="3x1",
+                virtual_keyboard_press_id=1,
+            )
+            # Inicia animação em t=10.0
+            with patch("time.monotonic", return_value=10.0):
+                overlay._tick_virtual_keyboard_anim(snap)
+            self.assertEqual(overlay._kb_press_anim_key, "3x1")
+            self.assertEqual(overlay._kb_press_anim_start, 10.0)
+
+            # Em t=10.03 (meio da descida): escala diminuindo entre 0.94 e 1.0
+            painter = MagicMock()
+            with patch("time.monotonic", return_value=10.03):
+                overlay._draw_virtual_keyboard(painter, snap, 1.0)
+            scale_down = painter.scale.call_args_list[-1].args[0]
+            self.assertLess(scale_down, 1.0)
+            self.assertGreater(scale_down, 0.94)
+
+            # Em t=10.06 (pico do encolhimento): escala mínima ~0.94
+            painter = MagicMock()
+            with patch("time.monotonic", return_value=10.06):
+                overlay._draw_virtual_keyboard(painter, snap, 1.0)
+            scale_min = painter.scale.call_args_list[-1].args[0]
+            self.assertAlmostEqual(scale_min, 0.94, places=2)
+
+            # Em t=10.12 (retorno): escala subindo suavemente
+            painter = MagicMock()
+            with patch("time.monotonic", return_value=10.12):
+                overlay._draw_virtual_keyboard(painter, snap, 1.0)
+            scale_up = painter.scale.call_args_list[-1].args[0]
+            self.assertGreater(scale_up, scale_min)
+            self.assertLess(scale_up, 1.0)
+
+            # Em t=10.20 (concluído): volta à escala normal 1.0 (sem scale transform)
+            painter = MagicMock()
+            with patch("time.monotonic", return_value=10.20):
+                overlay._draw_virtual_keyboard(painter, snap, 1.0)
+            painter.scale.assert_not_called()
+
+    def test_keyboard_input_surface_cursor_and_wm_setcursor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            surface = overlay._keyboard_input
+            # Verifica que o cursor do Qt na superfície do teclado é BlankCursor (não o cursor padrão do SO)
+            self.assertEqual(surface.cursor().shape(), Qt.CursorShape.BlankCursor)
+
+            # Simula mensagem WM_SETCURSOR (0x0020) no nativeEvent
+            import ctypes
+            from ctypes import wintypes
+            from types import SimpleNamespace
+            shared.update(game_hwnd=12345)
+
+            msg = wintypes.MSG()
+            msg.message = 0x0020  # WM_SETCURSOR
+            msg_ptr = ctypes.addressof(msg)
+
+            user32 = MagicMock()
+            user32.IsWindow.return_value = True
+            user32.SendMessageTimeoutW.return_value = 1
+
+            with patch("ctypes.windll.user32", user32, create=True):
+                handled, res = surface.nativeEvent(b"windows_generic_MSG", msg_ptr)
+                self.assertTrue(handled)
+                self.assertEqual(res, 1)
+                user32.SendMessageTimeoutW.assert_called_once()
+                args = user32.SendMessageTimeoutW.call_args[0]
+                self.assertEqual(args[0].value, 12345)
+                self.assertEqual(args[1], 0x0020)
 
 
 if __name__ == "__main__":

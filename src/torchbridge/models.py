@@ -2172,6 +2172,7 @@ class OverlaySnapshot:
     virtual_keyboard_focus: tuple[int, int] = (3, 1)
     virtual_keyboard_caps_state: str = "default"
     virtual_keyboard_pressed_key: str | None = None
+    virtual_keyboard_press_id: int = 0
     difficulty_focus: str | None = None
     dialog_focus: str | None = None
     dialog_type: str = ""

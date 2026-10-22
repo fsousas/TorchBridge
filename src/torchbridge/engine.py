@@ -996,7 +996,8 @@ class BridgeEngine(threading.Thread):
         self._char_create_focus = target
         self.shared.update(virtual_keyboard_open=True, virtual_keyboard_target=target,
                            virtual_keyboard_focus=(3, 1), virtual_keyboard_caps_state="default",
-                           virtual_keyboard_pressed_key=None, char_create_focus=target)
+                           virtual_keyboard_pressed_key=None, virtual_keyboard_press_id=0,
+                           char_create_focus=target)
         kx, ky, kw, kh = virtual_keyboard_target_rect(rect, target)
         x, y, w, h = virtual_keyboard_key_rect(kx, ky, kw, kh, "3x1")
         cx, cy = virtual_keyboard_key_cursor_point(x, y, w, h)
@@ -1004,8 +1005,12 @@ class BridgeEngine(threading.Thread):
         hub.rumble(0.04, 0.10, 40)
 
     def _activate_virtual_key(self, key_id: str, rect: Rect, hub: ControllerHub) -> None:
-        self._keyboard_pressed_until = time.monotonic() + 0.12
-        self.shared.update(virtual_keyboard_pressed_key=key_id)
+        self._keyboard_press_counter = getattr(self, "_keyboard_press_counter", 0) + 1
+        self._keyboard_pressed_until = time.monotonic() + 0.18
+        self.shared.update(
+            virtual_keyboard_pressed_key=key_id,
+            virtual_keyboard_press_id=self._keyboard_press_counter,
+        )
         hub.rumble(0.03, 0.08, 35)
         if key_id == "ok":
             self._close_virtual_keyboard(rect, hub)
@@ -1047,6 +1052,7 @@ class BridgeEngine(threading.Thread):
             virtual_keyboard_open=False,
             virtual_keyboard_target="",
             virtual_keyboard_pressed_key=None,
+            virtual_keyboard_press_id=0,
         )
         hub.rumble(0.04, 0.10, 35)
         if target:
@@ -1132,8 +1138,12 @@ class BridgeEngine(threading.Thread):
                     self._keyboard_confirm_repeat_at = now + self.KEYBOARD_REPEAT_DELAY
             elif key_id == "backspace" and self._keyboard_confirm_repeat_at > 0.0 and now >= self._keyboard_confirm_repeat_at:
                 self.injector.tap("BACKSPACE")
-                self._keyboard_pressed_until = now + 0.05
-                self.shared.update(virtual_keyboard_pressed_key="backspace")
+                self._keyboard_press_counter = getattr(self, "_keyboard_press_counter", 0) + 1
+                self._keyboard_pressed_until = now + 0.10
+                self.shared.update(
+                    virtual_keyboard_pressed_key="backspace",
+                    virtual_keyboard_press_id=self._keyboard_press_counter,
+                )
                 self._keyboard_confirm_repeat_at = now + self.KEYBOARD_REPEAT_INTERVAL
         else:
             self._keyboard_confirm_repeat_at = 0.0
