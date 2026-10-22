@@ -88,7 +88,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "lt_b": "8",
         "lt_rb": "9",
         "lt_rt": "0",
-        "radial_slots": ["I", "S", "Q", "J", "P", "C", "A"],
+        "radial_slots": ["I", "S", "Q", "J", "short-cut", "P", "C", "A"],
     },
     # Mapa bruto para controles sem SDL (preenchido pelo assistente de calibração, indexado por GUID).
     "raw_controller": {
@@ -252,6 +252,10 @@ class ConfigManager:
         # Slots da roda precisam ser uma lista de strings.
         radial_slots = data["bindings"].get("radial_slots")
         if not isinstance(radial_slots, list) or not all(isinstance(item, str) for item in radial_slots):
+            data["bindings"]["radial_slots"] = deepcopy(
+                DEFAULT_CONFIG["bindings"]["radial_slots"]
+            )
+        elif radial_slots == ["I", "S", "Q", "J", "P", "C", "A"]:
             data["bindings"]["radial_slots"] = deepcopy(
                 DEFAULT_CONFIG["bindings"]["radial_slots"]
             )

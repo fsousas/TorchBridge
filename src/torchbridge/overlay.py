@@ -33,6 +33,8 @@ from .models import (
     bottom_hud_asset_path,
     bottom_hud_target_rect,
     BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
+    shortcut_mask_asset_path,
+    shortcut_instruction_asset_path,
     virtual_keyboard_bg_asset_path,
     virtual_keyboard_target_rect,
     virtual_keyboard_asset_path,
@@ -237,6 +239,14 @@ class GameOverlay(QWidget):
         self._keyboard_bg_pixmap: QPixmap | None = None
         # Cache de pixmaps das teclas do teclado virtual.
         self._keyboard_keys_cache: dict[str, QPixmap] = {}
+        # Cache do backdrop com efeito spotlight para o modo de configuração de atalhos.
+        self._cached_spotlight_backdrop: QImage | None = None
+        self._cached_spotlight_size: tuple[int, int] | None = None
+        # Cache da imagem de instruções de atalhos e progresso da animação (fade e slide-in).
+        self._shortcut_instruction_cache: dict[str, QPixmap] = {}
+        self._shortcut_anim_progress = 0.0
+        self._shortcut_anim_last_time = time.monotonic()
+        self._shortcut_anim_seconds = 0.35
         # Silhueta verde da HUD (modo de calibração): renderizada uma vez do SVG, se existir.
         # None = asset ausente (nada a desenhar).
         self._hud_pixmap = self._load_hud_pixmap()
@@ -389,6 +399,21 @@ class GameOverlay(QWidget):
             self._kb_press_anim_key = pressed_key
             self._kb_press_anim_start = now
 
+    # Avança o progresso da animação do modo de atalhos (fade do backdrop e descida do banner).
+    def _tick_shortcut_mode_anim(self, snapshot: OverlaySnapshot) -> None:
+        target = 1.0 if snapshot.shortcut_config_active else 0.0
+        now = time.monotonic()
+        dt = now - self._shortcut_anim_last_time
+        self._shortcut_anim_last_time = now
+        if abs(self._shortcut_anim_progress - target) < 1e-3:
+            self._shortcut_anim_progress = target
+            return
+        step = dt / self._shortcut_anim_seconds
+        if target > self._shortcut_anim_progress:
+            self._shortcut_anim_progress = min(target, self._shortcut_anim_progress + step)
+        else:
+            self._shortcut_anim_progress = max(target, self._shortcut_anim_progress - step)
+
     # Acompanha o retângulo do jogo e mostra/esconde conforme o estado.
     def _refresh(self) -> None:
         snapshot = self.shared.get()
@@ -398,6 +423,7 @@ class GameOverlay(QWidget):
         self._tick_radial_anim(snapshot)
         self._tick_pet_submenu_anim(snapshot)
         self._tick_virtual_keyboard_anim(snapshot)
+        self._tick_shortcut_mode_anim(snapshot)
         rect = snapshot.game_rect
         # Só desenha com overlay habilitado, jogo presente e janela válida.
         should_show = snapshot.enabled and snapshot.game_found and snapshot.game_active and rect.valid
@@ -489,7 +515,11 @@ class GameOverlay(QWidget):
         if cached is not None:
             return cached
         filename = f"{name}-ativo.png" if active else f"{name}.png"
-        pixmap = QPixmap(str(_radial_icons_dir() / filename))
+        path = _radial_icons_dir() / filename
+        if not path.is_file():
+            filename = f"{name.lower()}-ativo.png" if active else f"{name.lower()}.png"
+            path = _radial_icons_dir() / filename
+        pixmap = QPixmap(str(path))
         if pixmap.isNull():
             return None
         self._radial_cache[key] = pixmap
@@ -2251,9 +2281,104 @@ class GameOverlay(QWidget):
         finally:
             painter.end()
 
+    def _draw_shortcut_spotlight(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
+        progress = self._shortcut_anim_progress
+        if progress <= 0.0:
+            return
+        rect = snapshot.game_rect
+        w = int(rect.width) if rect.valid and rect.width > 0 else self.width()
+        h = int(rect.height) if rect.valid and rect.height > 0 else self.height()
+        if w <= 0 or h <= 0:
+            return
+
+        if self._cached_spotlight_size != (w, h) or self._cached_spotlight_backdrop is None:
+            path = shortcut_mask_asset_path()
+            if path is None:
+                return
+            mask_img = QImage(str(path))
+            if mask_img.isNull():
+                return
+            canvas = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+            canvas.fill(Qt.GlobalColor.transparent)
+            p = QPainter(canvas)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            p.fillRect(0, 0, w, h, QColor(0, 0, 0, int(255 * 0.70)))
+            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
+            scale = w / 1280.0
+            mw = int(round(948.0 * scale))
+            mh = int(round(171.0 * scale))
+            mx = int(round((w - mw) / 2.0))
+            my = int(round(h - mh))
+            p.drawImage(QRectF(mx, my, mw, mh), mask_img)
+            p.end()
+            self._cached_spotlight_backdrop = canvas
+            self._cached_spotlight_size = (w, h)
+
+        painter.save()
+        painter.setOpacity(progress)
+        painter.drawImage(0, 0, self._cached_spotlight_backdrop)
+        painter.restore()
+
+    def _get_shortcut_instruction_pixmap(self, controller_type: str) -> QPixmap | None:
+        cached = self._shortcut_instruction_cache.get(controller_type)
+        if cached is not None:
+            return cached
+        path = shortcut_instruction_asset_path(controller_type)
+        if path is None or not path.is_file():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._shortcut_instruction_cache[controller_type] = pixmap
+        return pixmap
+
+    def _draw_shortcut_instruction(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
+        progress = self._shortcut_anim_progress
+        if progress <= 0.0:
+            return
+
+        rect = snapshot.game_rect
+        w = int(rect.width) if rect.valid and rect.width > 0 else self.width()
+        h = int(rect.height) if rect.valid and rect.height > 0 else self.height()
+        if w <= 0 or h <= 0:
+            return
+
+        cfg = self.config.get()
+        overlay_cfg = cfg.get("overlay", {})
+        layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
+        if layout_cfg in ("xbox", "playstation", "nintendo"):
+            controller_type = layout_cfg
+        else:
+            controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+
+        pixmap = self._get_shortcut_instruction_pixmap(controller_type)
+        if pixmap is None or pixmap.isNull():
+            return
+
+        # Escala proporcional com base na resolução de referência (1280x960)
+        scale = h / 960.0
+        bw = int(round(571.0 * scale))
+        bh = int(round(806.0 * scale))
+
+        bx = int(round((w - bw) / 2.0))
+        # Sobe ~40% da altura da imagem para que a placa fique bem posicionada e as correntes venham do teto
+        target_y = (h - bh) / 2.0 - bh * 0.40
+        start_y = -bh - 40
+
+        # Animação suave com desaceleração (cubic ease-out na descida, suave na subida)
+        ease = 1.0 - (1.0 - progress) ** 3
+        by = int(round(start_y + (target_y - start_y) * ease))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawPixmap(bx, by, bw, bh, pixmap)
+        painter.restore()
+
     def _paint_overlay(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
         scale = float(self.config.get()["overlay"]["scale"])
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self._draw_shortcut_spotlight(painter, snapshot)
+        self._draw_shortcut_instruction(painter, snapshot)
         self._draw_bottom_hud(painter, snapshot)
         self._draw_aim(painter, snapshot, scale)
         self._draw_calibration(painter, snapshot, scale)

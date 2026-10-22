@@ -156,6 +156,8 @@ class BridgeEngine(threading.Thread):
         # ainda segurando o LB, então a roda precisa ficar fechada mesmo com o LB
         # pressionado. Rearma na borda de subida do LB (próximo aperto reabre).
         self._radial_dismissed: bool = False
+        # Modo de configuração de atalhos inferior (spotlight ativo).
+        self._shortcut_config_active: bool = False
         # Toggle interno da sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad
         # para BAIXO abre, para CIMA fecha. Desmarca o setor 'P' ou fecha a roda: a sublinha
         # some automaticamente (estado interno volta a False).
@@ -4894,12 +4896,17 @@ class BridgeEngine(threading.Thread):
         ):
             if not self._pet_submenu:
                 slot = slots[self._radial_selection - 1]
-                self._tap_binding(slot)
-                # O atalho também alterna o rastreador de painéis mostrado no overlay.
-                next_panels = toggle_panel(self._active_panels, slot)
-                if next_panels != self._active_panels:
-                    self._active_panels = next_panels
-                    self.shared.update(active_panels=list(next_panels))
+                if str(slot).lower() in ("short-cut", "shortcut"):
+                    self._shortcut_config_active = True
+                    self.shared.update(shortcut_config_active=True)
+                    self._release_all()
+                else:
+                    self._tap_binding(slot)
+                    # O atalho também alterna o rastreador de painéis mostrado no overlay.
+                    next_panels = toggle_panel(self._active_panels, slot)
+                    if next_panels != self._active_panels:
+                        self._active_panels = next_panels
+                        self.shared.update(active_panels=list(next_panels))
             else:
                 # Sublinha do pet aberta: arma a sequência de clique do quadrado
                 # marcado (1=agressivo/vermelho, 2=defensivo/azul, 3=passivo/branco,
@@ -5544,6 +5551,15 @@ class BridgeEngine(threading.Thread):
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
+        if self._shortcut_config_active:
+            # Botão Leste (B / Bolinha no PS) ou Start/ESC desativa o modo e remove o spotlight
+            if (state.pressed("b") and not self._previous.pressed("b")) or (
+                state.pressed("start") and not self._previous.pressed("start")
+            ):
+                self._shortcut_config_active = False
+                self.shared.update(shortcut_config_active=False)
+                hub.rumble(0.04, 0.08, 30)
+            return
         self._handle_pet_click(now)
         self._handle_hud_purple_click(now)
         # Remap do overworld e combos de gatilho (mapa docs/REMAP-BOTOES): B/Y

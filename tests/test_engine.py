@@ -430,10 +430,10 @@ class HudClickPanelResetTests(unittest.TestCase):
 class PetSubmenuTests(unittest.TestCase):
     # Sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad BAIXO abre, CIMA fecha,
     # e o d-pad inteiro deixa de disparar toques de tecla enquanto a roda (LB) está aberta.
-    # Slots do perfil: ["I", "S", "Q", "J", "P", "C", "A"] — setor 5 = P, setor 6 = C.
+    # Slots do perfil: ["I", "S", "Q", "J", "short-cut", "P", "C", "A"] — setor 6 = P, setor 7 = C.
     # Vetores que resolvem em cada setor (radial_slot: atan2(rx, -ry) a partir do topo):
-    #   P (centro 205,7°): rx=-0.6, ry=0.8  → 216,9° → setor 5
-    #   C (centro 257,1°): rx=-0.9, ry=0.2  → 257,4° → setor 6
+    #   P (centro 225°): rx=-0.6, ry=0.8  → 216,9° → setor 6
+    #   C (centro 270°): rx=-0.9, ry=0.2  → 257,4° → setor 7
 
     @staticmethod
     def _state(buttons: tuple[str, ...] = (), **kw) -> ControllerState:
@@ -470,7 +470,7 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             snap = shared.get()
-            self.assertEqual(snap.radial_selection, 5)
+            self.assertEqual(snap.radial_selection, 6)
             self.assertTrue(snap.pet_submenu_open)
 
     # Com a sublinha aberta, d-pad BAIXO não dispara o binding de tecla (7): o d-pad é da sublinha.
@@ -495,7 +495,7 @@ class PetSubmenuTests(unittest.TestCase):
             engine, shared = self._engine(directory)
             self._tick(engine, directory, self._state(("lb",), rx=-0.9, ry=0.2))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.9, ry=0.2))
-            self.assertEqual(shared.get().radial_selection, 6)
+            self.assertEqual(shared.get().radial_selection, 7)
             self.assertFalse(shared.get().pet_submenu_open)
             # E o toque de tecla do d-pad continua suprimido com a roda aberta.
             self.assertNotIn("7", engine.injector.tapped)
@@ -529,9 +529,9 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self.assertTrue(shared.get().pet_submenu_open)
-            # Gira para o setor C (índice 6): a sublinha some.
+            # Gira para o setor C (índice 7): a sublinha some.
             self._tick(engine, directory, self._state(("lb",), rx=-0.9, ry=0.2))
-            self.assertEqual(shared.get().radial_selection, 6)
+            self.assertEqual(shared.get().radial_selection, 7)
             self.assertFalse(shared.get().pet_submenu_open)
 
     # Soltar LB fecha a roda SEM disparar nada (confirmação é do A): sublinha aberta,
@@ -656,7 +656,7 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(rx=-0.6, ry=0.8))  # fecha a roda
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))  # reabre no P
-            self.assertEqual(shared.get().radial_selection, 5)
+            self.assertEqual(shared.get().radial_selection, 6)
             self.assertFalse(shared.get().pet_submenu_open)
 
     def test_radial_blocked_outside_game(self):
@@ -735,7 +735,7 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             # Alavanca relaxa para o centro (rx=ry=0): o P segue selecionado.
             self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=0.0))
-            self.assertEqual(shared.get().radial_selection, 5)
+            self.assertEqual(shared.get().radial_selection, 6)
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=0.0, ry=0.0))
             self.assertTrue(shared.get().pet_submenu_open)
 

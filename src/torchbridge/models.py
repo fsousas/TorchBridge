@@ -351,6 +351,34 @@ def bottom_hud_asset_path(controller_type: str) -> Path | None:
     return path if path.is_file() else None
 
 
+def shortcut_mask_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG da máscara do HUD (mask-hud.png)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "hud" / "inferior" / "mask-hud.png"
+    return path if path.is_file() else None
+
+
+SHORTCUT_INSTRUCTION_ASSETS = {
+    "playstation": "shortcut-instruction-ps.png",
+    "nintendo": "shortcut-instruction-nintendo.png",
+    "xbox": "shortcut-instruction-xbox.png",
+}
+
+
+def shortcut_instruction_asset_path(controller_type: str) -> Path | None:
+    """Retorna o caminho do asset PNG com instruções de atalhos conforme o layout do controle."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    filename = SHORTCUT_INSTRUCTION_ASSETS.get(controller_type.lower(), "shortcut-instruction-xbox.png")
+    path = base / "assets" / "images" / "instructions" / filename
+    return path if path.is_file() else None
+
+
 def bottom_hud_target_rect(
     rect: Rect,
     offset_y_fraction: float = BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
@@ -2228,6 +2256,7 @@ class OverlaySnapshot:
     quest_visible_rows: int = 0
     quest_can_abandon: bool = False
     quest_has_item_reward: bool = False
+    shortcut_config_active: bool = False
 
 
 
