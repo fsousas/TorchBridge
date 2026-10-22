@@ -106,10 +106,18 @@ class ControllerHub:
             if self._instance_id not in {item[3] for item in self._devices}:
                 return False
             if self._controller is not None:
-                return bool(self._controller.attached())
+                # No SDL, attached() informa se o controle ainda está presente (get_init() no caminho raw).
+                if not self._controller.attached():
+                    self._drop_device()
+                    return False
+                return True
             if self._joystick is not None:
-                return bool(self._joystick.get_init())
+                if not self._joystick.get_init():
+                    self._drop_device()
+                    return False
+                return True
         except pygame.error:
+            self._drop_device()
             return False
         return False
 
@@ -146,10 +154,30 @@ class ControllerHub:
         if self._device_healthy():
             return
         self._drop_device()
-        wanted = preferred_guid or (raw_guid if force_raw else "")
-        candidates = [item for item in self._devices if not wanted or item[1] == wanted]
-        for mapped in ((True, False) if not force_raw else (False,)):
-            for index, guid, name, instance in candidates:
+        # Possivel solucao caso o try exept nao funcione
+        # wanted = preferred_guid or (raw_guid if force_raw else "")
+        # candidates = [item for item in self._devices if not wanted or item[1] == wanted]
+        # for mapped in ((True, False) if not force_raw else (False,)):
+        #     for index, guid, name, instance in candidates:
+
+        # Quando nenhum dispositivo estiver conectado, reinicializa o subsistema de joystick
+        # para forçar o SDL a re-consultar o Windows (DirectInput/XInput/RawInput/HIDAPI).
+        # Sem isso, por rodar em thread de fundo sem janela própria do pygame, o SDL não
+        # recebe mensagens WM_DEVICECHANGE do Windows e get_count() continua em 0 se o controle
+        # for ligado/plugado após o início do TorchBridge.
+        try:
+            sdl_controller.quit()
+            pygame.joystick.quit()
+            pygame.joystick.init()
+            sdl_controller.init()
+        except pygame.error:
+            pass
+
+        # Quantos dispositivos o SDL enxerga agora.
+        count = pygame.joystick.get_count()
+        # Tentativa 1: caminho SDL — algum dispositivo é reconhecido pelo banco de mapas?
+        if not force_raw:
+            for index in range(count):
                 try:
                     if mapped:
                         if not sdl_controller.is_controller(index):
@@ -294,6 +322,13 @@ class ControllerHub:
     # Chamado a cada tick: processa eventos SDL (obrigatório para o estado atualizar) e devolve o estado.
     def poll(self, raw_config: dict[str, Any], preferred_guid: str = "") -> ControllerState:
         # Processa a fila de eventos do SDL sem bloquear: é o que faz conexões novas aparecerem.
+        pygame.event.pump()
+        try:
+            pygame.event.clear()
+        except pygame.error:
+            pass
+        force_raw = bool(raw_config.get("force_raw", False))
+        self._scan(raw_config)
         try:
             # Drain events: removal invalidates RAW even while get_init is True.
             for event in pygame.event.get():
