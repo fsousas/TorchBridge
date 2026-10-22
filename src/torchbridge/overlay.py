@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
@@ -136,7 +136,27 @@ class KeyboardInputSurface(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
-        self.setCursor(Qt.CursorShape.BlankCursor)
+        self._native_cursor = None
+        self._setup_game_cursor()
+
+    def _setup_game_cursor(self) -> None:
+        p = virtual_keyboard_asset_path("pointer.cur")
+        if not p or not p.exists():
+            for candidate in (
+                Path(r"C:\GOG Games\Torchlight\icons\pointer.cur"),
+                Path(r"C:\Program Files (x86)\Steam\steamapps\common\Torchlight\icons\pointer.cur"),
+            ):
+                if candidate.exists():
+                    p = candidate
+                    break
+        if p and p.exists():
+            pix = QPixmap(str(p))
+            if not pix.isNull():
+                self.setCursor(QCursor(pix, 0, 0))
+            if IS_WINDOWS:
+                import ctypes
+                user32 = ctypes.windll.user32
+                self._native_cursor = user32.LoadCursorFromFileW(str(p))
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -150,26 +170,11 @@ class KeyboardInputSurface(QWidget):
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == 0x0021:  # WM_MOUSEACTIVATE: retain the game's keyboard focus.
                 return True, 3  # MA_NOACTIVATE
-            if msg.message == 0x0020:  # WM_SETCURSOR: delegate to game window to retain game cursor
-                game_hwnd = self.shared.get().game_hwnd
-                if game_hwnd:
+            if msg.message == 0x0020:  # WM_SETCURSOR: exibe a mãozinha do jogo
+                if self._native_cursor:
                     user32 = ctypes.windll.user32
-                    if user32.IsWindow(game_hwnd):
-                        HTCLIENT = 1
-                        WM_MOUSEMOVE = 0x0200
-                        lparam = (WM_MOUSEMOVE << 16) | HTCLIENT
-                        result = wintypes.DWORD()
-                        SMTO_ABORTIFHUNG = 0x0002
-                        user32.SendMessageTimeoutW(
-                            wintypes.HWND(game_hwnd),
-                            0x0020,
-                            wintypes.WPARAM(game_hwnd),
-                            wintypes.LPARAM(lparam),
-                            SMTO_ABORTIFHUNG,
-                            50,
-                            ctypes.byref(result),
-                        )
-                        return True, 1
+                    user32.SetCursor(self._native_cursor)
+                    return True, 1
         return super().nativeEvent(event_type, message)
 
     def paintEvent(self, event) -> None:

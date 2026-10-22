@@ -711,31 +711,25 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             overlay, shared = self._make_overlay(directory)
             surface = overlay._keyboard_input
-            # Verifica que o cursor do Qt na superfície do teclado é BlankCursor (não o cursor padrão do SO)
-            self.assertEqual(surface.cursor().shape(), Qt.CursorShape.BlankCursor)
+            # Verifica que a superfície do teclado usa o cursor do jogo (BitmapCursor / não a seta do SO)
+            self.assertNotEqual(surface.cursor().shape(), Qt.CursorShape.ArrowCursor)
 
             # Simula mensagem WM_SETCURSOR (0x0020) no nativeEvent
             import ctypes
             from ctypes import wintypes
-            from types import SimpleNamespace
-            shared.update(game_hwnd=12345)
+            surface._native_cursor = 99999
 
             msg = wintypes.MSG()
             msg.message = 0x0020  # WM_SETCURSOR
             msg_ptr = ctypes.addressof(msg)
 
             user32 = MagicMock()
-            user32.IsWindow.return_value = True
-            user32.SendMessageTimeoutW.return_value = 1
 
             with patch("ctypes.windll.user32", user32, create=True):
                 handled, res = surface.nativeEvent(b"windows_generic_MSG", msg_ptr)
                 self.assertTrue(handled)
                 self.assertEqual(res, 1)
-                user32.SendMessageTimeoutW.assert_called_once()
-                args = user32.SendMessageTimeoutW.call_args[0]
-                self.assertEqual(args[0].value, 12345)
-                self.assertEqual(args[1], 0x0020)
+                user32.SetCursor.assert_called_once_with(99999)
 
 
 if __name__ == "__main__":
