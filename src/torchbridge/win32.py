@@ -249,15 +249,21 @@ class WindowLocator:
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         process_name = self._process_name(pid.value).casefold()
-        if process_name in self.process_names:
-            return True
+        if self.process_names:
+            # A known foreign process (or an unreadable identity) must never be
+            # accepted just because an Explorer folder has the same title.
+            return process_name in self.process_names
         title = self.title(hwnd).casefold()
         return bool(title) and title in self.title_fragments
 
     # Acha a janela: usa o cache enquanto ela existir; senão re-enumera com EnumWindows.
     def find(self) -> int | None:
+        foreground = user32.GetForegroundWindow()
+        if foreground and foreground != self._cached and self._matches(foreground):
+            self._cached = foreground
+            return foreground
         # Cache ainda válido: evita a varredura cara a cada tick (120 Hz).
-        if self._cached and user32.IsWindow(self._cached) and user32.IsWindowVisible(self._cached):
+        if self._cached and user32.IsWindow(self._cached) and self._matches(self._cached):
             return self._cached
         found: list[int] = []
         callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -426,7 +432,7 @@ def end_high_resolution_timer() -> None:
 
 # Torna a janela do overlay invisível para o mouse: adiciona os estilos WS_EX_.
 # Sem isso, o overlay bloquearia cliques do jogo.
-def make_overlay_clickthrough(hwnd: int) -> None:
+def make_overlay_clickthrough(hwnd: int, *, interactive: bool = False) -> None:
     if not IS_WINDOWS:
         return
     # GWL_EXSTYLE: índice dos estilos estendidos; WS_EX_*: transparente, sem tarefa, layer, sem ativação.
@@ -438,10 +444,12 @@ def make_overlay_clickthrough(hwnd: int) -> None:
     get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
     set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
     style = get_long(hwnd, GWL_EXSTYLE)
+    flags = style | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE
+    flags = flags & ~WS_EX_TRANSPARENT if interactive else flags | WS_EX_TRANSPARENT
     set_long(
         hwnd,
         GWL_EXSTYLE,
-        style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+        flags,
     )
 
 

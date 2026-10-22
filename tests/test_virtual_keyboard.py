@@ -532,10 +532,10 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
                 painter.end()
 
     def test_virtual_keyboard_key_cursor_point_matches_formula(self):
-        # posX = largura - 30px e posY = altura - 30px
+        # posX = largura - 15px e posY = altura - 15px
         cx, cy = virtual_keyboard_key_cursor_point(100.0, 200.0, 50.0, 40.0)
-        self.assertEqual(cx, 120)
-        self.assertEqual(cy, 210)
+        self.assertEqual(cx, 135)
+        self.assertEqual(cy, 225)
 
     def test_virtual_keyboard_animation_tick_and_direction(self):
         with tempfile.TemporaryDirectory() as directory:

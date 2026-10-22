@@ -73,42 +73,39 @@ class ControllerHub:
         self._name = ""
         self._mode = ""
         self._last_scan = 0.0
-        self._last_force_raw: bool | None = None
-        self._last_raw_guid = ""
+        self._selection: tuple[bool, str, str] | None = None
+        self._devices: list[tuple[int, str, str, int]] = []
+        self._device_guid = ""
+        self._instance_id: int | None = None
 
-    # Encerra tudo limpo: libera o dispositivo e desliga os subsistemas SDL.
+    @property
+    def devices(self) -> tuple[tuple[str, str], ...]:
+        return tuple((guid, name) for _, guid, name, _ in self._devices)
+
     def close(self) -> None:
+        self._drop_device()
         try:
-            if self._controller is not None:
-                self._controller.quit()
-            if self._joystick is not None:
-                self._joystick.quit()
-        finally:
-            self._controller = None
-            self._joystick = None
             sdl_controller.quit()
+        finally:
             pygame.joystick.quit()
             pygame.display.quit()
 
-    # Solta o dispositivo atual sem desligar o SDL (para reconectar do zero na troca a quente).
     def _drop_device(self) -> None:
-        try:
-            if self._controller is not None:
-                self._controller.quit()
-            if self._joystick is not None:
-                self._joystick.quit()
-        except pygame.error:
-            pass
-        self._controller = None
-        self._joystick = None
-        self._name = ""
-        self._mode = ""
+        for device in (self._controller, self._joystick):
+            if device is not None:
+                try:
+                    device.quit()
+                except pygame.error:
+                    pass
+        self._controller = self._joystick = None
+        self._name = self._mode = self._device_guid = ""
+        self._instance_id = None
 
-    # O dispositivo ainda está fisicamente conectado?
     def _device_healthy(self) -> bool:
         try:
+            if self._instance_id not in {item[3] for item in self._devices}:
+                return False
             if self._controller is not None:
-                # No SDL, attached() informa se o controle ainda está presente (get_init() no caminho raw).
                 return bool(self._controller.attached())
             if self._joystick is not None:
                 return bool(self._joystick.get_init())
@@ -116,63 +113,68 @@ class ControllerHub:
             return False
         return False
 
-    # Garante um dispositivo atual: reconecta quando necessário, com varredura limitada a cada 0.8 s.
-    def _scan(self, raw_config: dict[str, Any]) -> None:
-        # Lê a configuração atual do perfil (forçar caminho raw? qual GUID calibrado?).
-        now = time.monotonic()
+    def _refresh_devices(self) -> None:
+        devices = []
+        for index in range(pygame.joystick.get_count()):
+            joystick = None
+            try:
+                joystick = pygame.joystick.Joystick(index)
+                devices.append((index, joystick.get_guid(), joystick.get_name(),
+                                joystick.get_instance_id()))
+            except pygame.error:
+                continue  # Removed between enumeration and opening.
+            finally:
+                # pygame may return the very same object used by RAW polling.
+                if joystick is not None and joystick is not self._joystick:
+                    try:
+                        joystick.quit()
+                    except pygame.error:
+                        pass
+        self._devices = devices
+        self._last_scan = time.monotonic()
+
+    def _scan(self, raw_config: dict[str, Any], preferred_guid: str = "") -> None:
         force_raw = bool(raw_config.get("force_raw", False))
         raw_guid = str(raw_config.get("device_guid", ""))
-        # A configuração desejada mudou → reconecta o dispositivo do zero.
-        if force_raw != self._last_force_raw or raw_guid != self._last_raw_guid:
+        selection = (force_raw, raw_guid, preferred_guid)
+        changed = selection != self._selection
+        if changed:
             self._drop_device()
-            self._last_force_raw = force_raw
-            self._last_raw_guid = raw_guid
-        # Já temos dispositivo bom (ou acabamos de procurar): evita trabalho repetido a cada tick.
-        if self._device_healthy() or now - self._last_scan < 0.8:
+            self._selection = selection
+        if changed or time.monotonic() - self._last_scan >= 0.8:
+            self._refresh_devices()
+        if self._device_healthy():
             return
-        # Marca a varredura e recomeça: o dispositivo anterior saiu ou ficou obsoleto.
-        self._last_scan = now
         self._drop_device()
-
-        # Quantos dispositivos o SDL enxerga agora.
-        count = pygame.joystick.get_count()
-        # Tentativa 1: caminho SDL — algum dispositivo é reconhecido pelo banco de mapas?
-        if not force_raw:
-            for index in range(count):
+        wanted = preferred_guid or (raw_guid if force_raw else "")
+        candidates = [item for item in self._devices if not wanted or item[1] == wanted]
+        for mapped in ((True, False) if not force_raw else (False,)):
+            for index, guid, name, instance in candidates:
                 try:
-                    # Este joystick tem mapa SDL → vira um GameController com nomes lógicos.
-                    if sdl_controller.is_controller(index):
+                    if mapped:
+                        if not sdl_controller.is_controller(index):
+                            continue
                         self._controller = sdl_controller.Controller(index)
-                        # O controller SDL também é um Joystick: serve para nome e rumble.
-                        joystick = self._controller.as_joystick()
-                        self._name = joystick.get_name() or sdl_controller.name_forindex(index) or "Controle"
                         self._mode = "SDL"
-                        return
-                except pygame.error:
-                    continue
-
-        # Tentativa 2 (fallback): caminho RAW com o joystick cru.
-        if count:
-            candidates = list(range(count))
-            if raw_guid:
-                # Ordena para colocar o dispositivo calibrado no perfil (device_guid) em primeiro.
-                candidates.sort(
-                    key=lambda index: pygame.joystick.Joystick(index).get_guid() != raw_guid
-                )
-            for index in candidates:
-                try:
-                    candidate = pygame.joystick.Joystick(index)
-                    # Com GUID calibrado, outros dispositivos são ignorados (não tomam o lugar do calibrado).
-                    if raw_guid and candidate.get_guid() != raw_guid:
-                        candidate.quit()
-                        continue
-                    self._joystick = candidate
-                    self._name = self._joystick.get_name() or "Controle genérico"
-                    self._mode = "RAW"
+                    else:
+                        if raw_guid and guid != raw_guid:
+                            continue
+                        self._joystick = pygame.joystick.Joystick(index)
+                        self._mode = "RAW"
+                    opened = self._controller.as_joystick() if mapped else self._joystick
+                    try:
+                        if opened.get_instance_id() != instance or opened.get_guid() != guid:
+                            raise pygame.error("Device changed during enumeration")
+                    finally:
+                        if mapped:
+                            opened.quit()
+                    self._device_guid = guid
+                    self._instance_id = instance
+                    self._name = name or "Controle"
                     return
                 except pygame.error:
-                    continue
-            self._drop_device()
+                    self._drop_device()
+                    self._last_scan = 0.0
 
     @staticmethod
     # Eixos do GameController vêm como int16 (-32768..32767); normaliza para -1..1.
@@ -190,6 +192,8 @@ class ControllerHub:
         )
         return ControllerState(
             connected=True,
+            device_guid=self._device_guid,
+            instance_id=self._instance_id,
             name=self._name,
             mapping="SDL normalizado",
             controller_type=controller_type_from_name(self._name),
@@ -273,6 +277,8 @@ class ControllerHub:
         )
         return ControllerState(
             connected=True,
+            device_guid=self._device_guid,
+            instance_id=self._instance_id,
             name=self._name,
             mapping="genérico calibrado" if raw.get("force_raw") else "genérico padrão",
             controller_type=controller_type_from_name(self._name),
@@ -286,12 +292,18 @@ class ControllerHub:
         )
 
     # Chamado a cada tick: processa eventos SDL (obrigatório para o estado atualizar) e devolve o estado.
-    def poll(self, raw_config: dict[str, Any]) -> ControllerState:
+    def poll(self, raw_config: dict[str, Any], preferred_guid: str = "") -> ControllerState:
         # Processa a fila de eventos do SDL sem bloquear: é o que faz conexões novas aparecerem.
-        pygame.event.pump()
-        force_raw = bool(raw_config.get("force_raw", False))
-        self._scan(raw_config)
         try:
+            # Drain events: removal invalidates RAW even while get_init is True.
+            for event in pygame.event.get():
+                if event.type in (pygame.JOYDEVICEREMOVED, pygame.CONTROLLERDEVICEREMOVED):
+                    if event.instance_id == self._instance_id:
+                        self._drop_device()
+                    self._last_scan = 0.0
+                elif event.type in (pygame.JOYDEVICEADDED, pygame.CONTROLLERDEVICEADDED):
+                    self._last_scan = 0.0
+            self._scan(raw_config, preferred_guid)
             if self._controller is not None:
                 return self._poll_sdl()
             if self._joystick is not None:

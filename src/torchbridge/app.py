@@ -14,6 +14,8 @@ import sys
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Controle para Torchlight PC")
     parser.add_argument("--perfil", type=Path, help="Caminho de um perfil JSON alternativo")
+    parser.add_argument("--fullscreen-setup", choices=("install", "remove"),
+                        help="Instala ou remove o suporte a fullscreen")
     return parser.parse_args()
 
 
@@ -26,6 +28,36 @@ def _configure_logging(directory: Path) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         encoding="utf-8",
     )
+
+
+def _add_fullscreen_actions(menu) -> None:
+    from .fullscreen import configure_dialog
+
+    install_action = menu.addAction("Instalar suporte a fullscreen...")
+    install_action.triggered.connect(lambda _checked=False: configure_dialog())
+    remove_action = menu.addAction("Remover suporte a fullscreen...")
+    remove_action.triggered.connect(lambda _checked=False: configure_dialog(uninstall=True))
+
+
+def _populate_controller_menu(menu, config, devices) -> None:
+    from PySide6.QtGui import QActionGroup
+
+    menu.clear()
+    previous_group = getattr(menu, "_selection_group", None)
+    if previous_group is not None:
+        previous_group.deleteLater()
+    group = QActionGroup(menu)
+    menu._selection_group = group
+    selected = config.get()["input"]["device_guid"]
+    choices = [("", "Selecionar automaticamente"), *dict.fromkeys(devices)]
+    if selected and selected not in {guid for guid, _ in devices}:
+        choices.append((selected, "Controle selecionado (desconectado)"))
+    for guid, name in choices:
+        action = menu.addAction(name)
+        action.setCheckable(True)
+        action.setChecked(guid == selected)
+        group.addAction(action)
+        action.triggered.connect(lambda _checked=False, value=guid: config.select_controller(value))
 
 
 # Orquestra tudo: valida SO, monta Qt, inicia o motor e roda o event loop até Sair.
@@ -51,6 +83,9 @@ def main() -> int:
 
     # Antes de criar janelas: DPI awareness para as coordenadas casarem com o jogo.
     enable_dpi_awareness()
+    if args.fullscreen_setup:
+        from .fullscreen import configure_dialog
+        return configure_dialog(uninstall=args.fullscreen_setup == "remove")
     # Mutex: uma única instância ativa por sessão.
     single_instance = SingleInstance()
     # Outra instância viva: avisa e encerra esta (evita abrir duas vezes).
@@ -172,9 +207,15 @@ def main() -> int:
         sync_menu_state()
         update_tray_icon()
         overlay.update()
-        shared.toast("Perfil recarregado")
+        shared.toast(config.last_error or "Perfil recarregado")
 
     reload_action.triggered.connect(reload_profile)
+    menu.addSeparator()
+    controller_menu = menu.addMenu("Controle")
+    controller_menu.aboutToShow.connect(
+        lambda: _populate_controller_menu(controller_menu, config, shared.get().controller_devices)
+    )
+    _add_fullscreen_actions(menu)
     menu.addSeparator()
     exit_action = menu.addAction("Sair")
     # 'Sair' encerra o event loop → passa pelo cleanup.
@@ -190,11 +231,22 @@ def main() -> int:
     )
 
     tooltip_timer = QTimer()
+    last_engine_error = ""
 
     # Dica do ícone e estado atualizados a cada 500 ms.
     def update_tooltip() -> None:
+        nonlocal last_engine_error
         update_tray_icon()
         state = shared.get()
+        if state.engine_error:
+            tray.setToolTip(f"TorchBridge — {state.engine_error}")
+            if state.engine_error != last_engine_error:
+                tray.showMessage("TorchBridge", state.engine_error, QSystemTrayIcon.MessageIcon.Critical)
+                last_engine_error = state.engine_error
+            return
+        if config.last_error:
+            tray.setToolTip(f"TorchBridge — {config.last_error}")
+            return
         # Caso completo: controle + jogo (mostra se está ativo ou em segundo plano).
         if state.controller_connected and state.game_found:
             suffix = "ativo" if state.game_active else "jogo em segundo plano"

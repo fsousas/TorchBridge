@@ -160,6 +160,41 @@ class MODULEENTRY32(ctypes.Structure):
     ]
 
 
+def _configure_win32_api() -> None:
+    """Keep HANDLE/HMODULE and pointer arguments intact on 64-bit Python."""
+    signatures = {
+        "OpenProcess": ((wintypes.DWORD, wintypes.BOOL, wintypes.DWORD), wintypes.HANDLE),
+        "CloseHandle": ((wintypes.HANDLE,), wintypes.BOOL),
+        "GetExitCodeProcess": ((wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)), wintypes.BOOL),
+        "CreateToolhelp32Snapshot": ((wintypes.DWORD, wintypes.DWORD), wintypes.HANDLE),
+        "Process32First": ((wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32)), wintypes.BOOL),
+        "Process32Next": ((wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32)), wintypes.BOOL),
+        "Module32First": ((wintypes.HANDLE, ctypes.POINTER(MODULEENTRY32)), wintypes.BOOL),
+        "ReadProcessMemory": ((wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
+                               ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)), wintypes.BOOL),
+    }
+    for name, (arguments, result) in signatures.items():
+        function = getattr(kernel32, name)
+        function.argtypes, function.restype = arguments, result
+    psapi.EnumProcessModulesEx.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.HMODULE),
+                                         wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.DWORD)
+    psapi.EnumProcessModulesEx.restype = wintypes.BOOL
+    psapi.GetModuleFileNameExW.argtypes = (wintypes.HANDLE, wintypes.HMODULE,
+                                        wintypes.LPWSTR, wintypes.DWORD)
+    psapi.GetModuleFileNameExW.restype = wintypes.DWORD
+    user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.EnumWindows.argtypes = (ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM),
+                                  wintypes.LPARAM)
+    user32.EnumWindows.restype = wintypes.BOOL
+
+
+if os.name == "nt":
+    _configure_win32_api()
+
+
 @dataclass(frozen=True)
 class GameMemoryState:
     """Estado do jogo obtido diretamente da memória RAM e configurações locais."""
@@ -254,7 +289,7 @@ class TorchlightMemoryReader:
 
         # 2. Fallback: Toolhelp Snapshot (para compatibilidade)
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
-        if snap != -1 and snap != 0:
+        if snap not in (None, 0, -1, ctypes.c_void_p(-1).value):
             try:
                 me = MODULEENTRY32()
                 me.dwSize = ctypes.sizeof(MODULEENTRY32)
@@ -283,7 +318,7 @@ class TorchlightMemoryReader:
 
     def _find_pid(self) -> int | None:
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-        if snap == -1:
+        if snap in (None, 0, -1, ctypes.c_void_p(-1).value):
             return None
         pids: list[int] = []
         try:
@@ -359,41 +394,21 @@ class TorchlightMemoryReader:
             # Invalida o cache se o ponteiro não for mais válido
             self._cgame_address = None
 
-        # Teste 1: Steam RVA (se tiver base dinâmica ou executável Steam)
-        if base != 0x00400000 or "steam" in self._exe_path.lower():
-            addr_steam = base + RVA_CGAME_STEAM
-            p_steam = self.read_u32(addr_steam)
-            if p_steam and p_steam > 0:
-                p_client = self.read_u32(p_steam + OFFSET_GAMECLIENT)
-                if p_client and p_client > 0:
-                    if self.game_version != "Steam":
-                        self.game_version = "Steam"
-                        log.info(
-                            f"[MemoryReader] Versão detectada: Steam (Base 0x{base:08X}, CGame 0x{addr_steam:08X})"
-                        )
-                    self._cgame_address = addr_steam
-                    return addr_steam
-
-        # Teste 2: GOG RVA (ou endereço fixo padrão ADDR_CGAME_GLOBAL)
-        for addr_gog in (ADDR_CGAME_GLOBAL, base + RVA_CGAME_GOG):
-            p_gog = self.read_u32(addr_gog)
-            if p_gog and p_gog > 0:
-                p_client = self.read_u32(p_gog + OFFSET_GAMECLIENT)
-                if p_client and p_client > 0:
-                    if self.game_version != "GOG":
-                        self.game_version = "GOG"
-                        log.info(
-                            f"[MemoryReader] Versão detectada: GOG (Base 0x{base:08X}, CGame 0x{addr_gog:08X})"
-                        )
-                    self._cgame_address = addr_gog
-                    return addr_gog
-
-        # Retorna o endereço candidato sem fixar no cache enquanto CGame não estiver alocado
-        if "steam" in self._exe_path.lower():
-            self.game_version = "Steam"
-            return base + RVA_CGAME_STEAM
-        self.game_version = "GOG"
-        return ADDR_CGAME_GLOBAL
+        # Probe both layouts regardless of installation directory or ASLR.
+        candidates = (("Steam", base + RVA_CGAME_STEAM),
+                      ("GOG", base + RVA_CGAME_GOG),
+                      ("GOG", ADDR_CGAME_GLOBAL))
+        for version, address in dict.fromkeys(candidates):
+            p_game = self.read_u32(address)
+            if p_game and self.read_u32(p_game + OFFSET_GAMECLIENT):
+                self.game_version = version
+                self._cgame_address = address
+                log.info("[MemoryReader] Versão: %s | Base 0x%08X | CGame 0x%08X",
+                         version, base, address)
+                return address
+        # Still starting: do not publish an unverified version/address.
+        self.game_version = ""
+        return None
 
     def read_u32(self, address: int) -> int | None:
         if not self._handle or not address:

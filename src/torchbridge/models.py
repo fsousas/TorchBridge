@@ -61,6 +61,8 @@ class ControllerState:
     name: str = ""
     mapping: str = ""
     controller_type: str = "xbox"
+    device_guid: str = ""
+    instance_id: int | None = None
     lx: float = 0.0
     ly: float = 0.0
     rx: float = 0.0
@@ -2131,6 +2133,8 @@ def quest_abandon_point(rect: Rect) -> tuple[int, int]:
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
+    engine_error: str = ""
+    controller_devices: tuple[tuple[str, str], ...] = ()
     enabled: bool = True
     game_found: bool = False
     game_active: bool = False

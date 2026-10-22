@@ -130,19 +130,17 @@ class KeyboardInputSurface(QWidget):
     def __init__(self, shared: SharedOverlayState, parent: QWidget) -> None:
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint
-                         | Qt.WindowType.WindowTransparentForInput
                          | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.shared = shared
         self.physical_rect = Rect()
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setMouseTracking(True)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if IS_WINDOWS:
-            make_overlay_clickthrough(int(self.winId()))
+        if IS_WINDOWS and QGuiApplication.platformName() == "windows":
+            make_overlay_clickthrough(int(self.winId()), interactive=True)
 
     def nativeEvent(self, event_type, message):
         if sys.platform == "win32":
@@ -365,7 +363,7 @@ class GameOverlay(QWidget):
         # Revalida o foco na UI: um snapshot atrasado não pode cobrir outro aplicativo.
         if should_show and self._native_windows and snapshot.game_hwnd:
             should_show = WindowLocator.is_foreground(snapshot.game_hwnd)
-        kb_active = snapshot.virtual_keyboard_open or self._virtual_keyboard_progress > 0.0
+        kb_active = snapshot.virtual_keyboard_open and self._virtual_keyboard_progress >= 1.0
         if should_show and kb_active:
             target = snapshot.virtual_keyboard_target or self._last_virtual_keyboard_target or "character_name"
             geometry = virtual_keyboard_target_rect(rect, target)
@@ -375,7 +373,7 @@ class GameOverlay(QWidget):
             self._keyboard_input.show()
             if self._native_windows:
                 position_overlay(int(self._keyboard_input.winId()), Rect(*geometry))
-                make_overlay_clickthrough(int(self._keyboard_input.winId()))
+                make_overlay_clickthrough(int(self._keyboard_input.winId()), interactive=True)
             self._keyboard_input.raise_()
         else:
             self._keyboard_input.hide()

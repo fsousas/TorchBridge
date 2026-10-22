@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 from typing import Any
 
 from .config import ConfigManager
 from .controller import ControllerHub
+from .input_session import InputCancelled, InputSession
 from .mathutils import clamp, cursor_delta, radial_deadzone, radial_slot
 from .models import (
     PET_SUBMENU_COUNT,
@@ -119,6 +121,7 @@ class BridgeEngine(threading.Thread):
         self.injector = InputInjector()
         # Parada pedida pela UI; locks protegem estado lido por outra thread.
         self._stop_event = threading.Event()
+        self._input_context: tuple | None = None
         self._enabled_lock = threading.Lock()
         self._enabled = True
         # Modo atual: 'direct' (movimento direto) ou 'cursor' (menus/inventário).
@@ -138,8 +141,14 @@ class BridgeEngine(threading.Thread):
         # Última recarga do perfil (no mínimo 1 s entre tentativas).
         self._last_reload = 0.0
         self._last_controller_name = ""
+        self._last_controller_instance: int | None = None
+        self._needs_rearm = True
+        self._blocked_buttons: set[str] = set()
+        self._blocked_lt = False
+        self._blocked_rt = False
         # Borda da detecção do jogo (aviso único de 'Torchlight detectado').
         self._game_was_found = False
+        self._last_game_pid: int | None = None
         # Estado do combo Back+Start (calibração): visto?, desde quando?, já disparou?
         # Setor da roda selecionado enquanto LB estiver segurado.
         self._radial_selection: int | None = None
@@ -306,6 +315,7 @@ class BridgeEngine(threading.Thread):
     # depois de reabrir o jogo fariam um toggle no estado fantasma (painel 'fechando'
     # em vez de 'abrindo') — o deslocamento do overlay não apareceria.
     def _reset_radial_session(self) -> None:
+        self._reset_transient_navigation()
         self._reset_active_panels()
         self._radial_selection = None
         self._radial_dismissed = False
@@ -435,8 +445,8 @@ class BridgeEngine(threading.Thread):
                     self._held_keys.add(normalized)
             # Borda de descida: tecla retida → libera e esquece.
             elif not desired and normalized in self._held_keys:
-                self.injector.key(normalized, False)
-                self._held_keys.discard(normalized)
+                if self.injector.key(normalized, False):
+                    self._held_keys.discard(normalized)
         # Tecla não suportada no perfil: avisa no log e segue o jogo.
         except ValueError as exc:
             log.warning("Binding de retenção ignorado: %s", exc)
@@ -447,11 +457,15 @@ class BridgeEngine(threading.Thread):
             if self.injector.mouse_button(button, True):
                 self._held_mouse.add(button)
         elif not desired and button in self._held_mouse:
-            self.injector.mouse_button(button, False)
-            self._held_mouse.discard(button)
+            if self.injector.mouse_button(button, False):
+                self._held_mouse.discard(button)
 
     # Segurança: solta todo clique/tecla retidos (perda de foco, pausa, troca de modo ou saída) e limpa o overlay.
     def _release_all(self) -> None:
+        self._needs_rearm = True
+        self._reset_transient_navigation()
+        if isinstance(self.injector, InputSession):
+            self.injector.release_all()
         if getattr(self, "_a_shift_held", False):
             self._set_key("SHIFT", False)
             self._ensure_modifier_released("SHIFT")
@@ -460,11 +474,9 @@ class BridgeEngine(threading.Thread):
             self._auto_move_resume_times.clear()
         self._auto_move_suppress_left_once = False
         for key in tuple(self._held_keys):
-            self.injector.key(key, False)
+            self._set_key(key, False)
         for button in tuple(self._held_mouse):
-            self.injector.mouse_button(button, False)
-        self._held_keys.clear()
-        self._held_mouse.clear()
+            self._set_mouse(button, False)
         # Interrupção no meio da sequência do pet: solta o botão esquerdo se o clique
         # estava no ar e descarta o restante (o cursor não volta ao centro — quem
         # deteve o foco detém o cursor; a sequência não sobrevive à pausa).
@@ -563,6 +575,85 @@ class BridgeEngine(threading.Thread):
         self._quest_focus = "quest_0"
         self._last_quest_slot = 0
         self._quest_b_consumed = False
+
+    def _reset_transient_navigation(self) -> None:
+        self._virtual_keyboard_open = False
+        self._virtual_keyboard_target = ""
+        self._virtual_keyboard_pressed_key = None
+        self._virtual_keyboard_focus = (3, 1)
+        self._virtual_keyboard_caps_state = "default"
+        self._keyboard_pressed_until = 0.0
+        self._keyboard_confirm_latched = False
+        self._keyboard_mouse_down = False
+        self._title_screen_initialized = False
+        self._char_create_initialized = False
+        self._difficulty_initialized = False
+        self._last_state_id = -1
+        self._center_combo_seen = False
+        self._center_combo_started = None
+        self._center_combo_triggered = False
+        self._dialog_initialized = False
+        self._dialog_focus = None
+        self._pause_menu_initialized = False
+        self._load_char_initialized = False
+        self._settings_initialized = False
+        self._settings_focus = None
+        self._settings_dropdown = None
+        self._fishing_initialized = False
+        self._modal_confirm_initialized = False
+        self._previous_left_pressed = False
+        self.shared.take_keyboard_events()
+        self.shared.update(virtual_keyboard_open=False, virtual_keyboard_target="",
+                           virtual_keyboard_pressed_key=None, char_create_focus=None,
+                           title_menu_focus=None, difficulty_focus=None,
+                           dialog_focus=None, dialog_type="", dialog_buttons=[],
+                           settings_focus=None, settings_dropdown=None,
+                           fishing_focus=None, modal_confirm_focus=None)
+
+    def _input_allowed(self) -> bool:
+        context = self._input_context
+        if context is None:
+            return False
+        hub, hwnd, pid, instance, cfg = context
+        if (self._stop_event.is_set() or not self.is_enabled() or
+                not self.locator.is_foreground(hwnd) or
+                self.locator.window_pid(hwnd) != pid):
+            return False
+        state = hub.poll(cfg["raw_controller"], cfg["input"]["device_guid"])
+        return state.connected and state.instance_id == instance
+
+    def _prepare_active_state(self, state: ControllerState) -> ControllerState:
+        rearm = self._needs_rearm
+        if rearm:
+            self._blocked_buttons = set(state.buttons)
+            self._blocked_lt = state.lt >= self.TRIGGER_ACTIVE_THRESHOLD
+            self._blocked_rt = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
+        self._blocked_buttons.intersection_update(state.buttons)
+        self._blocked_lt = self._blocked_lt and state.lt >= self.TRIGGER_ACTIVE_THRESHOLD
+        self._blocked_rt = self._blocked_rt and state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
+        state = replace(state, buttons=frozenset(state.buttons - self._blocked_buttons),
+                        lt=0.0 if self._blocked_lt else state.lt,
+                        rt=0.0 if self._blocked_rt else state.rt)
+        if rearm:
+            self._previous = state
+            self._previous_lt_active = state.lt >= self.TRIGGER_ACTIVE_THRESHOLD
+            self._previous_rt_active = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
+            self._needs_rearm = False
+        return state
+
+    def _wait_for_input(self, duration: float) -> None:
+        """Keep calibrated timings while making every wait interruptible."""
+        if self._input_context is None:
+            time.sleep(duration)
+            return
+        deadline = time.monotonic() + duration
+        while True:
+            if not self._input_allowed():
+                raise InputCancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            self._stop_event.wait(min(remaining, 1 / 120))
 
     # Toque único de tecla (aperta e solta), usado por botões de ação e slots da roda.
     def _tap_binding(self, value: Any) -> None:
@@ -780,7 +871,7 @@ class BridgeEngine(threading.Thread):
             hub.rumble(0.04, 0.10, 35)
             self.shared.update(char_create_focus="back")
             self.injector.mouse_button("left", True)
-            time.sleep(0.04)
+            self._wait_for_input(0.04)
             self.injector.mouse_button("left", False)
             return
 
@@ -886,14 +977,6 @@ class BridgeEngine(threading.Thread):
                 else:
                     if self._virtual_keyboard_open:
                         self._close_virtual_keyboard(rect, hub)
-            elif self._virtual_keyboard_open and Rect(kx, ky, kw, kh).contains(x, y):
-                for key_id, row, col, _span, _key_type in KEYBOARD_LAYOUT:
-                    bx, by, bw, bh = virtual_keyboard_key_rect(kx, ky, kw, kh, key_id)
-                    if bx <= x < bx + bw and by <= y < by + bh:
-                        self._virtual_keyboard_focus = (row, col)
-                        self.shared.update(virtual_keyboard_focus=(row, col))
-                        self._activate_virtual_key(key_id, rect, hub)
-                        break
         self._keyboard_mouse_down = down
 
     def _open_virtual_keyboard(self, target: str, rect: Rect, hub: ControllerHub) -> None:
@@ -1081,7 +1164,7 @@ class BridgeEngine(threading.Thread):
             hub.rumble(0.04, 0.10, 35)
             self.shared.update(difficulty_focus="back")
             self.injector.mouse_button("left", True)
-            time.sleep(0.04)
+            self._wait_for_input(0.04)
             self.injector.mouse_button("left", False)
             return
 
@@ -1168,7 +1251,7 @@ class BridgeEngine(threading.Thread):
                 hub.rumble(0.04, 0.10, 35)
                 self.shared.update(dialog_focus="decline")
                 self.injector.mouse_button("left", True)
-                time.sleep(0.04)
+                self._wait_for_input(0.04)
                 self.injector.mouse_button("left", False)
                 return
 
@@ -1222,7 +1305,7 @@ class BridgeEngine(threading.Thread):
             hub.rumble(0.04, 0.10, 35)
             self.shared.update(pause_menu_focus="return_to_game")
             self.injector.mouse_button("left", True)
-            time.sleep(0.04)
+            self._wait_for_input(0.04)
             self.injector.mouse_button("left", False)
             return
 
@@ -1306,12 +1389,12 @@ class BridgeEngine(threading.Thread):
                 target_x, target_y = load_char_button_point(rect, "delete_cancel")
                 self.injector.move(target_x, target_y)
                 self.injector.mouse_button("left", True)
-                time.sleep(0.05)
+                self._wait_for_input(0.05)
                 self.injector.mouse_button("left", False)
                 hub.rumble(0.04, 0.10, 35)
 
                 # Debounce: aguarda o modal fechar no jogo antes de devolver o cursor
-                time.sleep(0.20)
+                self._wait_for_input(0.20)
 
                 # Cursor volta para o botão de delete pequeno na parte inferior da tela
                 self._load_char_delete_dialog_open = False
@@ -1327,12 +1410,12 @@ class BridgeEngine(threading.Thread):
                 target_x, target_y = load_char_button_point(rect, "delete_confirm")
                 self.injector.move(target_x, target_y)
                 self.injector.mouse_button("left", True)
-                time.sleep(0.05)
+                self._wait_for_input(0.05)
                 self.injector.mouse_button("left", False)
                 hub.rumble(0.06, 0.15, 50)
 
                 # Debounce: aguarda a exclusão assentar antes de devolver o cursor
-                time.sleep(0.20)
+                self._wait_for_input(0.20)
 
                 # Cursor volta para o botão de delete pequeno na parte inferior da tela
                 self._load_char_delete_dialog_open = False
@@ -1358,7 +1441,7 @@ class BridgeEngine(threading.Thread):
             hub.rumble(0.04, 0.10, 35)
             self.shared.update(load_char_focus="back", load_char_delete_open=False)
             self.injector.mouse_button("left", True)
-            time.sleep(0.04)
+            self._wait_for_input(0.04)
             self.injector.mouse_button("left", False)
             return
 
@@ -1375,7 +1458,7 @@ class BridgeEngine(threading.Thread):
                 slot_x, slot_y = load_char_button_point(rect, current)
                 self.injector.move(slot_x, slot_y)
                 self.injector.mouse_button("left", True)
-                time.sleep(0.04)
+                self._wait_for_input(0.04)
                 self.injector.mouse_button("left", False)
 
                 # Move para o Play na barra inferior
@@ -1396,12 +1479,12 @@ class BridgeEngine(threading.Thread):
                 del_x, del_y = load_char_button_point(rect, "delete")
                 self.injector.move(del_x, del_y)
                 self.injector.mouse_button("left", True)
-                time.sleep(0.05)
+                self._wait_for_input(0.05)
                 self.injector.mouse_button("left", False)
 
                 # Debounce crucial: aguarda 200ms com o cursor ainda no botão Delete inferior
                 # para o clique físico assentar e o popup abrir no jogo antes de mover para Cancelar.
-                time.sleep(0.20)
+                self._wait_for_input(0.20)
 
                 self._load_char_delete_dialog_open = True
                 self._load_char_focus = "delete_cancel"
@@ -1417,7 +1500,7 @@ class BridgeEngine(threading.Thread):
                 target_x, target_y = load_char_button_point(rect, current)
                 self.injector.move(target_x, target_y)
                 self.injector.mouse_button("left", True)
-                time.sleep(0.04)
+                self._wait_for_input(0.04)
                 self.injector.mouse_button("left", False)
                 hub.rumble(0.04, 0.10, 35)
                 if current == "scroll_down":
@@ -1457,7 +1540,7 @@ class BridgeEngine(threading.Thread):
                     scroll_x, scroll_y = load_char_button_point(rect, "scroll_down")
                     self.injector.move(scroll_x, scroll_y)
                     self.injector.mouse_button("left", True)
-                    time.sleep(0.04)
+                    self._wait_for_input(0.04)
                     self.injector.mouse_button("left", False)
                     self._load_char_scroll_offset += 1
 
@@ -1486,7 +1569,7 @@ class BridgeEngine(threading.Thread):
                     scroll_x, scroll_y = load_char_button_point(rect, "scroll_up")
                     self.injector.move(scroll_x, scroll_y)
                     self.injector.mouse_button("left", True)
-                    time.sleep(0.04)
+                    self._wait_for_input(0.04)
                     self.injector.mouse_button("left", False)
                     self._load_char_scroll_offset -= 1
 
@@ -1840,21 +1923,21 @@ class BridgeEngine(threading.Thread):
             leave_x = origin_x
             leave_y = origin_y + int(35 * scale)
             self.injector.move(leave_x, leave_y)
-            time.sleep(0.025)
+            self._wait_for_input(0.025)
 
             # 2. Se for travessia de painéis (Pet <-> Inventário), passa pelo centro neutro da tela
             if is_cross_screen:
                 mid_x = (leave_x + target_x) // 2
                 mid_y = (leave_y + target_y) // 2
                 self.injector.move(mid_x, mid_y)
-                time.sleep(0.025)
+                self._wait_for_input(0.025)
 
         elif is_cross_screen:
             # Travessia entre painéis: passa pelo centro neutro da tela (mundo 3D)
             mid_x = (cur_x + target_x) // 2
             mid_y = (cur_y + target_y) // 2
             self.injector.move(mid_x, mid_y)
-            time.sleep(0.025)
+            self._wait_for_input(0.025)
 
         # Movimento final até o slot de destino
         self.injector.move(target_x, target_y)
@@ -1925,7 +2008,7 @@ class BridgeEngine(threading.Thread):
         if state.pressed("a") and not self._previous.pressed("a"):
             if focus.endswith("_pink"):
                 self.injector.mouse_button("left", True)
-                time.sleep(0.04)
+                self._wait_for_input(0.04)
                 self.injector.mouse_button("left", False)
                 hub.rumble(0.04, 0.12, 50)
                 return
@@ -2172,11 +2255,11 @@ class BridgeEngine(threading.Thread):
             # Clica na aba para sincronizar o jogo (timing calibrado como no inventário)
             tab_x, tab_y = skill_tab_point(rect, new_tab)
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)
+            self._wait_for_input(0.060)
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)
+            self._wait_for_input(0.030)
 
             self._skill_tab = new_tab
             layout = skill_layout_for(char_class, new_tab) or skill_layout_for("destroyer", new_tab)
@@ -2214,11 +2297,11 @@ class BridgeEngine(threading.Thread):
                 if tab_idx != self._skill_tab:
                     tab_x, tab_y = skill_tab_point(rect, tab_idx)
                     self.injector.move(tab_x, tab_y)
-                    time.sleep(0.060)
+                    self._wait_for_input(0.060)
                     self.injector.mouse_button("left", True)
-                    time.sleep(0.040)
+                    self._wait_for_input(0.040)
                     self.injector.mouse_button("left", False)
-                    time.sleep(0.030)
+                    self._wait_for_input(0.030)
                     self._skill_tab = tab_idx
                     hub.rumble(0.04, 0.10, 40)
                     self.shared.update(skill_menu_open=True, skill_tab=tab_idx)
@@ -2349,7 +2432,7 @@ class BridgeEngine(threading.Thread):
             if state.pressed("a") and not self._previous.pressed("a"):
                 # Clica no botão de melhoria da habilidade
                 self.injector.mouse_button("left", True)
-                time.sleep(0.04)
+                self._wait_for_input(0.04)
                 self.injector.mouse_button("left", False)
                 hub.rumble(0.04, 0.12, 50)
                 return
@@ -2628,9 +2711,9 @@ class BridgeEngine(threading.Thread):
             self._last_quest_slot = last_idx
             target_x, target_y = quest_slot_point(rect, last_idx)
             self.injector.move(target_x, target_y)
-            time.sleep(0.075)
+            self._wait_for_input(0.075)
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
             hub.rumble(0.02, 0.06, 25)
             self.shared.update(
@@ -2649,9 +2732,9 @@ class BridgeEngine(threading.Thread):
         if a_pressed and current == "abandon" and can_abandon:
             target_x, target_y = quest_abandon_point(rect)
             self.injector.move(target_x, target_y)
-            time.sleep(0.075)
+            self._wait_for_input(0.075)
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
             hub.rumble(0.04, 0.10, 35)
             return
@@ -2768,9 +2851,9 @@ class BridgeEngine(threading.Thread):
                     self._last_quest_slot = new_idx
                     target_x, target_y = quest_slot_point(rect, new_idx)
                     self.injector.move(target_x, target_y)
-                    time.sleep(0.075)
+                    self._wait_for_input(0.075)
                     self.injector.mouse_button("left", True)
-                    time.sleep(0.040)
+                    self._wait_for_input(0.040)
                     self.injector.mouse_button("left", False)
                     hub.rumble(0.02, 0.06, 25)
                 elif has_reward:
@@ -2804,9 +2887,9 @@ class BridgeEngine(threading.Thread):
                     self._last_quest_slot = last_idx
                     target_x, target_y = quest_slot_point(rect, last_idx)
                     self.injector.move(target_x, target_y)
-                    time.sleep(0.075)
+                    self._wait_for_input(0.075)
                     self.injector.mouse_button("left", True)
-                    time.sleep(0.040)
+                    self._wait_for_input(0.040)
                     self.injector.mouse_button("left", False)
                     hub.rumble(0.02, 0.06, 25)
             elif current == "reward":
@@ -2815,9 +2898,9 @@ class BridgeEngine(threading.Thread):
                 self._last_quest_slot = last_idx
                 target_x, target_y = quest_slot_point(rect, last_idx)
                 self.injector.move(target_x, target_y)
-                time.sleep(0.075)
+                self._wait_for_input(0.075)
                 self.injector.mouse_button("left", True)
-                time.sleep(0.040)
+                self._wait_for_input(0.040)
                 self.injector.mouse_button("left", False)
                 hub.rumble(0.02, 0.06, 25)
             elif current.startswith("quest_"):
@@ -2828,9 +2911,9 @@ class BridgeEngine(threading.Thread):
                     self._last_quest_slot = new_idx
                     target_x, target_y = quest_slot_point(rect, new_idx)
                     self.injector.move(target_x, target_y)
-                    time.sleep(0.075)
+                    self._wait_for_input(0.075)
                     self.injector.mouse_button("left", True)
-                    time.sleep(0.040)
+                    self._wait_for_input(0.040)
                     self.injector.mouse_button("left", False)
                     hub.rumble(0.02, 0.06, 25)
 
@@ -2892,13 +2975,13 @@ class BridgeEngine(threading.Thread):
             # Sequência calibrada para o jogo registrar o hover e o clique da aba:
             # 1. Move o cursor para a aba correspondente
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
+            self._wait_for_input(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
 
             # 2. Clica na aba com hold suficiente
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)  # Hold do clique de 40ms
+            self._wait_for_input(0.040)  # Hold do clique de 40ms
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)  # Espera pós-clique de 30ms
+            self._wait_for_input(0.030)  # Espera pós-clique de 30ms
 
             self._inventory_tab = f"tab-{new_tab_num}"
             self._inventory_focus = (1, 1)
@@ -3245,13 +3328,13 @@ class BridgeEngine(threading.Thread):
             # Sequência calibrada para o jogo registrar o hover e o clique da aba:
             # 1. Move o cursor para a aba correspondente
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
+            self._wait_for_input(0.060)  # Espera 60ms para o jogo registrar o hover sobre a aba
 
             # 2. Clica na aba com hold suficiente
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)  # Hold do clique de 40ms
+            self._wait_for_input(0.040)  # Hold do clique de 40ms
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)  # Espera pós-clique de 30ms
+            self._wait_for_input(0.030)  # Espera pós-clique de 30ms
 
             self._pet_inventory_tab = f"tab-{new_tab_num}"
             self._pet_inventory_focus = (1, 1)
@@ -3533,12 +3616,12 @@ class BridgeEngine(threading.Thread):
             tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
             # Sequência calibrada para o jogo registrar o hover e o clique da aba:
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)
+            self._wait_for_input(0.060)
 
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)
+            self._wait_for_input(0.030)
 
             self._stash_tab = f"tab-{new_tab_num}"
             self._stash_focus = ("pet", 1, 1)
@@ -3748,12 +3831,12 @@ class BridgeEngine(threading.Thread):
 
             tab_x, tab_y = pet_inventory_tab_point(rect, new_tab_num)
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)
+            self._wait_for_input(0.060)
 
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)
+            self._wait_for_input(0.030)
 
             self._stash_tab = f"tab-{new_tab_num}"
             self._merchant_focus = ("pet", 1, 1)
@@ -3781,11 +3864,11 @@ class BridgeEngine(threading.Thread):
             tab_idx = int(current[1])
             tab_x, tab_y = merchant_tab_point(rect, tab_idx)
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)
+            self._wait_for_input(0.060)
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)
+            self._wait_for_input(0.030)
 
             self._merchant_tab = f"tab-{tab_idx}"
             self._merchant_focus = ("merchant", 1, 1)
@@ -4009,11 +4092,11 @@ class BridgeEngine(threading.Thread):
 
             tab_x, tab_y = inventory_tab_point(rect, new_tab_num)
             self.injector.move(tab_x, tab_y)
-            time.sleep(0.060)
+            self._wait_for_input(0.060)
             self.injector.mouse_button("left", True)
-            time.sleep(0.040)
+            self._wait_for_input(0.040)
             self.injector.mouse_button("left", False)
-            time.sleep(0.030)
+            self._wait_for_input(0.030)
 
             self._inventory_tab = f"tab-{new_tab_num}"
 
@@ -4209,6 +4292,8 @@ class BridgeEngine(threading.Thread):
     # hardware mesmo quando nada é enviado, para um gatilho segurado através de uma
     # perda de foco não vazar um toque falso ao retomar o foco).
     def _update_trigger_edges(self, state: ControllerState) -> None:
+        self._lt_was_active = self._previous_lt_active
+        self._rt_edge_down = self._previous_rt_active and state.rt < self.TRIGGER_ACTIVE_THRESHOLD
         self._lt_current = state.lt >= self.TRIGGER_ACTIVE_THRESHOLD
         self._lt_edge_up = self._lt_current and not self._previous_lt_active
         self._rt_edge_up = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD and not self._previous_rt_active
@@ -4972,6 +5057,7 @@ class BridgeEngine(threading.Thread):
         now: float,
         dt: float,
     ) -> None:
+        self._update_trigger_edges(state)
         if self._memory_state.is_connected and self._memory_state.state_id == 1:
             was_open = self._virtual_keyboard_open
             self._handle_char_create_navigation(state, rect, hub)
@@ -4983,9 +5069,7 @@ class BridgeEngine(threading.Thread):
                 if state.pressed(confirm) or state.pressed("start"):
                     return
                 self._keyboard_confirm_latched = False
-        # BORDAS DOS GATILHOS PRIMEIRO: os handlers de combo/remap leem _lt_current e
-        # _rt_edge_up calculados aqui contra o estado do tick.
-        self._update_trigger_edges(state)
+                return
         bindings = cfg["bindings"]
         self._handle_center_buttons(state, rect, bindings, now)
         self._handle_discrete_bindings(state, bindings)
@@ -5538,8 +5622,7 @@ class BridgeEngine(threading.Thread):
         any_skill_held = False
         if is_overworld:
             rt_cur = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
-            rt_prev = getattr(self, "_previous_rt_active", False)
-            rt_rel = (not rt_cur and rt_prev)
+            rt_rel = self._rt_edge_down
 
             for btn in ("x", "y", "b", "rb"):
                 if not state.pressed(btn) and self._previous.pressed(btn):
@@ -5555,7 +5638,7 @@ class BridgeEngine(threading.Thread):
             # LT + A (combo da skill 5)
             if lt_held and state.pressed("a"):
                 any_skill_held = True
-            if not state.pressed("a") and self._previous.pressed("a") and getattr(self, "_previous_lt_active", False):
+            if not state.pressed("a") and self._previous.pressed("a") and self._lt_was_active:
                 skill_released = True
 
         if is_overworld and auto_move and not a_pressed:
@@ -5618,6 +5701,7 @@ class BridgeEngine(threading.Thread):
         last_tick = time.perf_counter()
         try:
             hub = ControllerHub()
+            self.injector = InputSession(self.injector, self._input_allowed)
             while not self._stop_event.is_set():
                 tick_start = time.perf_counter()
                 # Intervalo real desde o último tick (cursor em px/s); 'now' alimenta timeouts.
@@ -5634,7 +5718,7 @@ class BridgeEngine(threading.Thread):
                 # Cópia da configuração para este tick (imune a edições no meio do ciclo).
                 cfg = self.config.get()
                 # Estado atual do controle (SDL ou RAW, com reconexão automática).
-                state = hub.poll(cfg["raw_controller"])
+                state = hub.poll(cfg["raw_controller"], cfg["input"]["device_guid"])
                 # Janela do Torchlight (usa cache; varre com EnumWindows quando preciso).
                 hwnd = self.locator.find()
                 # Área útil da janela em coordenadas de tela; vazia sem janela.
@@ -5647,8 +5731,17 @@ class BridgeEngine(threading.Thread):
                 enabled = self.is_enabled()
 
                 # Controle conectado (novo ou religado): avisa e vibra para confirmar.
-                if state.connected and state.name != self._last_controller_name:
+                if state.connected and (state.name != self._last_controller_name or
+                                        state.instance_id != self._last_controller_instance):
+                    self._release_all()
+                    if (state.device_guid and not cfg["input"]["device_guid"] and
+                            not self.config.last_error):
+                        try:
+                            self.config.select_controller(state.device_guid)
+                        except OSError:
+                            log.warning("Não foi possível salvar a preferência de controle", exc_info=True)
                     self._last_controller_name = state.name
+                    self._last_controller_instance = state.instance_id
                     self.shared.toast(f"Controle conectado: {state.name}", 3.0)
                     hub.rumble()
                     self._previous = state
@@ -5656,9 +5749,14 @@ class BridgeEngine(threading.Thread):
                 elif not state.connected and self._last_controller_name:
                     self.shared.toast("Controle desconectado", 2.5)
                     self._last_controller_name = ""
+                    self._last_controller_instance = None
 
                 # Jogo acabou de aparecer: aviso único (sem spam a cada tick).
-                if game_found and not self._game_was_found:
+                if game_found and (not self._game_was_found or target_pid != self._last_game_pid):
+                    self._release_all()
+                    self.memory.close()
+                    self._memory_state = GameMemoryState()
+                    self._memory_last_read = 0.0
                     self.shared.toast("Torchlight detectado", 2.5)
                     # Sessão nova: reseta painéis/seleção da roda (Alt+F4 não limpou o estado).
                     self._reset_radial_session()
@@ -5669,10 +5767,11 @@ class BridgeEngine(threading.Thread):
 
                 # Guarda o estado de detecção para as bordas (subida/descida).
                 self._game_was_found = game_found
+                self._last_game_pid = target_pid
 
                 # Leitura periódica da memória RAM do Torchlight (a cada 20 ms / 50 Hz)
                 if now - self._memory_last_read >= 0.020:
-                    self._memory_state = self.memory.update(target_pid=target_pid)
+                    self._memory_state = self.memory.update(target_pid=target_pid or -1)
                     self._memory_last_read = now
 
                     # Sincroniza classe e reseta aba de skills ao trocar de personagem
@@ -5746,6 +5845,7 @@ class BridgeEngine(threading.Thread):
                     game_hwnd=hwnd,
                     game_pid=target_pid,
                     controller_connected=state.connected,
+                    controller_devices=hub.devices,
                     controller_name=state.name,
                     controller_mapping=state.mapping,
                     controller_type=state.controller_type,
@@ -5797,7 +5897,14 @@ class BridgeEngine(threading.Thread):
                     if self._memory_state.is_loading:
                         self._release_all()
                     else:
-                        self._process_active(hub, state, rect, cfg, now, dt)
+                        state = self._prepare_active_state(state)
+                        self._input_context = (hub, hwnd, target_pid, state.instance_id, cfg)
+                        try:
+                            self._process_active(hub, state, rect, cfg, now, dt)
+                        except InputCancelled:
+                            self._release_all()
+                        finally:
+                            self._input_context = None
                 # Qualquer interrupção (pausa, jogo em segundo plano, sem controle): libera tudo.
                 # As bordas dos gatilhos continuam acompanhando o hardware NOS TICKS
                 # INATIVOS (dentro de _process_active no tick ativo): um gatilho
@@ -5816,12 +5923,27 @@ class BridgeEngine(threading.Thread):
         # Erro inesperado não derruba em silêncio: loga e mostra toast com o caminho do log.
         except Exception:
             log.exception("Falha fatal no loop de entrada")
+            self.shared.update(engine_error="Erro no motor; consulte torchbridge.log")
             self.shared.toast("Erro no motor; consulte torchbridge.log", 8.0)
         # Garantias finais: solta entradas, desconecta o controle e restaura o relógio do Windows.
         finally:
             self.shared.update(game_active=False, game_found=False, game_hwnd=None, game_pid=None)
-            self._release_all()
-            if hub is not None:
-                hub.close()
-            self.memory.close()
-            end_high_resolution_timer()
+            try:
+                for attempt in range(3):
+                    self._release_all()
+                    pending = self._held_keys or self._held_mouse
+                    if isinstance(self.injector, InputSession):
+                        pending = pending or self.injector.keys or self.injector.mouse
+                    if not pending:
+                        break
+                    if attempt < 2:
+                        time.sleep(0.005)
+                if pending:
+                    log.warning("Entradas pendentes de liberação ao encerrar o motor")
+            finally:
+                try:
+                    if hub is not None:
+                        hub.close()
+                finally:
+                    self.memory.close()
+                    end_high_resolution_timer()
