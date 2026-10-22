@@ -25,6 +25,9 @@ from .mathutils import clamp, trigger_value
 from .models import ControllerState, controller_type_from_name
 
 
+IS_WINDOWS = os.name == "nt"
+
+
 # Eixos lógicos do GameController; getattr com fallback numérico preserva a ordem do SDL.
 AXES = {
     "lx": getattr(pygame, "CONTROLLER_AXIS_LEFTX", 0),
@@ -114,7 +117,9 @@ class ControllerHub:
         return False
 
     def _refresh_devices(self) -> None:
-        if not self._devices and not self._device_healthy():
+        # Windows discovery needs a refresh without a pygame window receiving
+        # WM_DEVICECHANGE. Restarting SDL elsewhere destroys virtual devices.
+        if IS_WINDOWS and not self._devices and not self._device_healthy():
             try:
                 sdl_controller.quit()
                 pygame.joystick.quit()

@@ -80,6 +80,41 @@ class ControllerSelectionTests(unittest.TestCase):
                 patch("torchbridge.controller.sdl_controller.init"):
             return ControllerHub()
 
+    def test_linux_enumeration_preserves_the_running_sdl_subsystems(self):
+        hub = self.make_hub()
+        with patch("torchbridge.controller.IS_WINDOWS", False), \
+                patch("torchbridge.controller.pygame.joystick.get_count", return_value=0), \
+                patch("torchbridge.controller.pygame.joystick.quit") as joystick_quit, \
+                patch("torchbridge.controller.sdl_controller.quit") as controller_quit:
+            hub._refresh_devices()
+        joystick_quit.assert_not_called()
+        controller_quit.assert_not_called()
+
+    def test_windows_empty_scan_reinitializes_discovery_before_enumerating(self):
+        hub = self.make_hub()
+        visible = False
+        joystick = MagicMock()
+        joystick.get_guid.return_value = "late-pad"
+        joystick.get_name.return_value = "Connected after launch"
+        joystick.get_instance_id.return_value = 42
+
+        def initialize_joysticks():
+            nonlocal visible
+            visible = True
+
+        with patch("torchbridge.controller.IS_WINDOWS", True), \
+                patch("torchbridge.controller.pygame.joystick.quit") as joystick_quit, \
+                patch("torchbridge.controller.sdl_controller.quit") as controller_quit, \
+                patch("torchbridge.controller.pygame.joystick.init", side_effect=initialize_joysticks), \
+                patch("torchbridge.controller.sdl_controller.init") as controller_init, \
+                patch("torchbridge.controller.pygame.joystick.get_count", side_effect=lambda: int(visible)), \
+                patch("torchbridge.controller.pygame.joystick.Joystick", return_value=joystick):
+            hub._refresh_devices()
+        self.assertEqual(hub.devices, (("late-pad", "Connected after launch"),))
+        joystick_quit.assert_called_once()
+        controller_quit.assert_called_once()
+        controller_init.assert_called_once()
+
     def test_transient_enumeration_error_returns_disconnected_and_recovers(self):
         hub = self.make_hub()
         joystick = MagicMock()
@@ -134,8 +169,12 @@ class ControllerSelectionTests(unittest.TestCase):
         raw = dict(DEFAULT_CONFIG["raw_controller"], force_raw=True)
         index = sdl.SDL_JoystickAttachVirtual(1, 6, 16, 1)
         self.assertGreaterEqual(index, 0)
+        virtual = pygame.joystick.Joystick(index)
+        raw["device_guid"] = virtual.get_guid()
+        virtual.quit()
         first = hub.poll(raw)
         self.assertTrue(first.connected)
+        self.assertEqual(first.device_guid, raw["device_guid"])
         self.assertEqual(sdl.SDL_JoystickDetachVirtual(index), 0)
         self.assertFalse(hub.poll(raw).connected)
         new_index = sdl.SDL_JoystickAttachVirtual(1, 6, 16, 1)

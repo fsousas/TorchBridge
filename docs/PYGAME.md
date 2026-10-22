@@ -48,6 +48,12 @@ modo RAW, e os eventos de conexão antecipam uma nova enumeração. Isso evita
 reter um objeto inicializado depois de o dispositivo ter sido desconectado.
 O GUID identifica a preferência salva; o instance ID distingue cada conexão.
 
+No Windows, a enumeração reinicializa os subsistemas de controle quando a lista
+está vazia e não há dispositivo saudável, para detectar controles conectados
+após a abertura do TorchBridge. Essa reinicialização é exclusiva do Windows;
+no Linux, os subsistemas permanecem ativos, preservando os dispositivos virtuais
+usados nos testes de conexão e reconexão.
+
 ## GameController: como ler
 
 ```python
