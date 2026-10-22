@@ -358,6 +358,18 @@ class ProfileAndMemoryTests(unittest.TestCase):
         self.assertEqual(reader._resolve_cgame_address(), address)
         self.assertEqual(reader.game_version, "Steam")
 
+    def test_remembering_detected_controller_preserves_user_backend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = ConfigManager(Path(directory) / "perfil.json")
+            mapping = dict(DEFAULT_CONFIG["raw_controller"], device_guid="calibrated", force_raw=False)
+            config.update_raw_mapping(mapping)
+            config.select_controller("calibrated", apply_raw_mapping=False)
+            self.assertFalse(config.get()["raw_controller"]["force_raw"])
+            config.select_controller("calibrated")
+            self.assertTrue(config.get()["raw_controller"]["force_raw"])
+            config.select_controller("")
+            self.assertFalse(config.get()["raw_controller"]["force_raw"])
+
     def test_full_diagonal_has_same_length_as_cardinal(self):
         for vector in ((1., 1.), (-1., 1.), (.9, -.9), (1., 0.)):
             x, y, magnitude = radial_deadzone(*vector)

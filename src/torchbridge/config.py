@@ -355,13 +355,13 @@ class ConfigManager:
         with self._lock:
             return deepcopy(self._data)
 
-    def select_controller(self, guid: str) -> None:
+    def select_controller(self, guid: str, *, apply_raw_mapping: bool = True) -> None:
         with self._lock:
             data = deepcopy(self._data)
             data["input"]["device_guid"] = guid
             calibrated_guid = data["raw_controller"].get("device_guid", "")
-            if guid and calibrated_guid:
-                data["raw_controller"]["force_raw"] = guid == calibrated_guid
+            if apply_raw_mapping and calibrated_guid:
+                data["raw_controller"]["force_raw"] = bool(guid and guid == calibrated_guid)
             self._write(data)
         self.reload(force=True)
 
