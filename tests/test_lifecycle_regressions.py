@@ -159,6 +159,7 @@ class EngineRegressionTests(unittest.TestCase):
         self.injector.key_pressed.return_value = False
         self.injector.cursor_position.return_value = (1500, 400)
         self.engine.injector = self.injector
+        self.engine.locator = MagicMock()
         self.rect = Rect(0, 0, 1920, 1080)
         self.hub = MagicMock()
 
