@@ -109,10 +109,17 @@ class ControllerHub:
         try:
             if self._controller is not None:
                 # No SDL, attached() informa se o controle ainda está presente (get_init() no caminho raw).
-                return bool(self._controller.attached())
+                if not self._controller.attached():
+                    self._drop_device()
+                    return False
+                return True
             if self._joystick is not None:
-                return bool(self._joystick.get_init())
+                if not self._joystick.get_init():
+                    self._drop_device()
+                    return False
+                return True
         except pygame.error:
+            self._drop_device()
             return False
         return False
 
@@ -133,6 +140,19 @@ class ControllerHub:
         # Marca a varredura e recomeça: o dispositivo anterior saiu ou ficou obsoleto.
         self._last_scan = now
         self._drop_device()
+
+        # Quando nenhum dispositivo estiver conectado, reinicializa o subsistema de joystick
+        # para forçar o SDL a re-consultar o Windows (DirectInput/XInput/RawInput/HIDAPI).
+        # Sem isso, por rodar em thread de fundo sem janela própria do pygame, o SDL não
+        # recebe mensagens WM_DEVICECHANGE do Windows e get_count() continua em 0 se o controle
+        # for ligado/plugado após o início do TorchBridge.
+        try:
+            sdl_controller.quit()
+            pygame.joystick.quit()
+            pygame.joystick.init()
+            sdl_controller.init()
+        except pygame.error:
+            pass
 
         # Quantos dispositivos o SDL enxerga agora.
         count = pygame.joystick.get_count()
@@ -289,6 +309,10 @@ class ControllerHub:
     def poll(self, raw_config: dict[str, Any]) -> ControllerState:
         # Processa a fila de eventos do SDL sem bloquear: é o que faz conexões novas aparecerem.
         pygame.event.pump()
+        try:
+            pygame.event.clear()
+        except pygame.error:
+            pass
         force_raw = bool(raw_config.get("force_raw", False))
         self._scan(raw_config)
         try:
