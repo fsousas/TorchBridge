@@ -11,8 +11,9 @@ permissions:
 jobs:
   python:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         python: ['3.11', '3.13']
     runs-on: ${{ matrix.os }}
     env:
@@ -32,6 +33,9 @@ jobs:
       - run: python scripts/run_tests.py --pattern "test_overlay*.py"
         env:
           QT_SCALE_FACTOR: '1.5'
+      - run: python scripts/run_tests.py --pattern "test_lifecycle_regressions.py"
+        env:
+          QT_SCALE_FACTOR: '1.5'
 
   native:
     runs-on: windows-latest
@@ -42,7 +46,7 @@ jobs:
           python-version: '3.13'
       - run: python scripts/build_fullscreen.py
       - run: ctest --test-dir build/fullscreen -C Release --output-on-failure
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: torchbridge-fullscreen-x86
           path: assets/native/x86/d3d9.dll

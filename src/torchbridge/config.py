@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import math
 import os
 from pathlib import Path
 from threading import RLock
@@ -22,6 +23,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # Configuração do loop e dos analógicos (veja o README para o efeito de cada um).
     "input": {
+        "device_guid": "",
         "poll_hz": 120,
         "deadzone": 0.18,
         "response_curve": 1.6,
@@ -149,6 +151,7 @@ class ConfigManager:
         self._lock = RLock()
         self._data = deepcopy(DEFAULT_CONFIG)
         self._mtime_ns = 0
+        self.last_error = ""
         # Carrega um perfil que já exista na inicialização.
         # Garante o arquivo antes do primeiro reload.
         self.ensure_exists()
@@ -188,6 +191,19 @@ class ConfigManager:
             values = data["target"].get(target_key)
             if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
                 data["target"][target_key] = deepcopy(DEFAULT_CONFIG["target"][target_key])
+        if not isinstance(data["input"].get("device_guid"), str):
+            raise ValueError("input.device_guid precisa ser uma string")
+        self._validate_raw(data["raw_controller"])
+        for section, keys in (
+            ("input", ("poll_hz", "deadzone", "response_curve")),
+            ("movement", ("anchor_x", "anchor_y", "movement_radius_percent", "click_center_fraction")),
+            ("cursor", ("speed_pixels_per_second",)),
+            ("overlay", ("scale", "bottom_hud_offset_y_percent", "bottom_hud_scale")),
+        ):
+            for name in keys:
+                value = data[section][name]
+                if isinstance(value, bool) or not math.isfinite(float(value)):
+                    raise ValueError(f"Número inválido em {section}.{name}")
         # Frequência do loop limitada a 30–240 Hz.
         data["input"]["poll_hz"] = int(clamp(float(data["input"]["poll_hz"]), 30, 240))
         # Deadzone entre 2% e 60% (valores extremos quebrariam a jogabilidade).
@@ -225,7 +241,12 @@ class ConfigManager:
         # Escala do overlay entre 0.6× e 2.0×.
         data["overlay"]["scale"] = clamp(float(data["overlay"]["scale"]), 0.6, 2.0)
         # Marcadores visuais: tipos booleanos, senão volta ao padrão da seção.
-        for flag in ("enabled", "show_aim_marker", "show_mode_badge", "show_calibration"):
+        data["overlay"]["bottom_hud_scale"] = clamp(float(data["overlay"]["bottom_hud_scale"]), 0.2, 4.0)
+        data["overlay"]["bottom_hud_offset_y_percent"] = clamp(
+            float(data["overlay"]["bottom_hud_offset_y_percent"]), -0.5, 0.5)
+        if data["overlay"].get("controller_layout") not in ("auto", "xbox", "playstation", "nintendo"):
+            data["overlay"]["controller_layout"] = "auto"
+        for flag in ("enabled", "show_aim_marker", "show_mode_badge", "show_calibration", "show_bottom_hud"):
             if not isinstance(data["overlay"].get(flag), bool):
                 data["overlay"][flag] = deepcopy(DEFAULT_CONFIG["overlay"][flag])
         # Slots da roda precisam ser uma lista de strings.
@@ -258,6 +279,46 @@ class ConfigManager:
             data["bindings"][dpad_key] = ""
         return data
 
+    @staticmethod
+    def _validate_raw(raw: dict[str, Any]) -> None:
+        if not isinstance(raw.get("force_raw"), bool):
+            raise ValueError("raw_controller.force_raw precisa ser booleano")
+        if not isinstance(raw.get("device_guid", ""), str):
+            raise ValueError("raw_controller.device_guid precisa ser uma string")
+        for section in ("axes", "triggers", "buttons"):
+            descriptors = raw.get(section)
+            if not isinstance(descriptors, dict):
+                raise ValueError(f"raw_controller.{section} precisa ser um objeto")
+            for name, descriptor in descriptors.items():
+                label = f"raw_controller.{section}.{name}"
+                if not isinstance(descriptor, dict):
+                    raise ValueError(f"{label} precisa ser um objeto")
+                index = descriptor.get("index", -1)
+                if type(index) is not int or not -1 <= index <= 512:
+                    raise ValueError(f"Índice inválido em {label}")
+                if section == "axes":
+                    if not isinstance(descriptor.get("invert", False), bool):
+                        raise ValueError(f"Inversão inválida em {label}")
+                    continue
+                kind = descriptor.get("type", "axis" if section == "triggers" else "button")
+                if kind not in {"axis", "button", "hat"} or (section == "triggers" and kind == "hat"):
+                    raise ValueError(f"Tipo inválido em {label}")
+                if kind == "hat":
+                    value = descriptor.get("value")
+                    if (not isinstance(value, list) or len(value) != 2 or
+                            any(type(v) is not int or v not in (-1, 0, 1) for v in value) or
+                            value == [0, 0]):
+                        raise ValueError(f"Direção inválida em {label}")
+                elif kind == "axis":
+                    rest = descriptor.get("rest", -1.0)
+                    active = descriptor.get("active", 1.0)
+                    threshold = descriptor.get("threshold", 0.5)
+                    if (any(not isinstance(v, (int, float)) or isinstance(v, bool) or
+                            not math.isfinite(v) for v in (rest, active, threshold)) or
+                            not -1 <= rest <= 1 or not -1 <= active <= 1 or
+                            abs(active - rest) < 1e-6 or not 0 <= threshold <= 1):
+                        raise ValueError(f"Faixa de eixo inválida em {label}")
+
     # Recarrega o arquivo quando o mtime muda (ou force). Qualquer erro mantém a última config válida.
     def reload(self, force: bool = False) -> bool:
         try:
@@ -279,18 +340,30 @@ class ConfigManager:
             if isinstance(old_b, dict) and ("rb_hold" in old_b or "l3_hold" in old_b):
                 incoming["_legacy_bindings"] = True
             merged = self._validate(_deep_merge(DEFAULT_CONFIG, incoming))
-        except (OSError, TypeError, KeyError, ValueError, json.JSONDecodeError):
+        except (OSError, TypeError, KeyError, ValueError, OverflowError):
+            self.last_error = "Perfil inválido; a última configuração válida continua ativa."
             return False
         with self._lock:
             # Publica o novo estado validado e registra o mtime lido.
             self._data = merged
             self._mtime_ns = mtime_ns
+            self.last_error = ""
         return True
 
     # Cópia profunda sob lock: o chamador lê sem travar e sem poder mutar o estado interno.
     def get(self) -> dict[str, Any]:
         with self._lock:
             return deepcopy(self._data)
+
+    def select_controller(self, guid: str, *, apply_raw_mapping: bool = True) -> None:
+        with self._lock:
+            data = deepcopy(self._data)
+            data["input"]["device_guid"] = guid
+            calibrated_guid = data["raw_controller"].get("device_guid", "")
+            if apply_raw_mapping and calibrated_guid:
+                data["raw_controller"]["force_raw"] = bool(guid and guid == calibrated_guid)
+            self._write(data)
+        self.reload(force=True)
 
     # Calibração do centro (combo Back+Start no jogo): grava a nova âncora e recarrega.
     def update_anchor(self, x: float, y: float) -> None:

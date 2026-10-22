@@ -22,7 +22,8 @@ def radial_deadzone(
     preserved, including on diagonals.
     """
     # Magnitude do vetor; a hipotenusa trata diagonais corretamente (deadzone redonda, não quadrada, para melhorar a suavidade do movimento).
-    magnitude = min(1.0, math.hypot(x, y))
+    original_magnitude = math.hypot(x, y)
+    magnitude = min(1.0, original_magnitude)
     # Dentro da deadzone: ignora o analógico (evita 'andar sozinho' por drift/folga).
     if magnitude <= deadzone:
         return 0.0, 0.0, 0.0
@@ -31,7 +32,7 @@ def radial_deadzone(
     scaled = (magnitude - deadzone) / (1.0 - deadzone)
     scaled = clamp(scaled, 0.0, 1.0) ** max(0.1, curve)
     # Escala o vetor original mantendo a direção; a magnitude final vira 'scaled'.
-    factor = scaled / magnitude
+    factor = scaled / original_magnitude
     return x * factor, y * factor, scaled
 
 

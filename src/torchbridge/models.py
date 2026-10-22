@@ -61,6 +61,8 @@ class ControllerState:
     name: str = ""
     mapping: str = ""
     controller_type: str = "xbox"
+    device_guid: str = ""
+    instance_id: int | None = None
     lx: float = 0.0
     ly: float = 0.0
     rx: float = 0.0
@@ -2131,6 +2133,8 @@ def quest_abandon_point(rect: Rect) -> tuple[int, int]:
 @dataclass(frozen=True)
 # Estado visual imutável que o motor publica para o overlay Qt desenhar.
 class OverlaySnapshot:
+    engine_error: str = ""
+    controller_devices: tuple[tuple[str, str], ...] = ()
     enabled: bool = True
     game_found: bool = False
     game_active: bool = False
@@ -2168,6 +2172,7 @@ class OverlaySnapshot:
     virtual_keyboard_focus: tuple[int, int] = (3, 1)
     virtual_keyboard_caps_state: str = "default"
     virtual_keyboard_pressed_key: str | None = None
+    virtual_keyboard_press_id: int = 0
     difficulty_focus: str | None = None
     dialog_focus: str | None = None
     dialog_type: str = ""

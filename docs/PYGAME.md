@@ -42,10 +42,17 @@ só atualiza quando a fila é processada:
 pygame.event.pump()  # processa a fila interna (sem bloquear)
 ```
 
-No TorchBridge o `ControllerHub.poll()` chama `pump()` uma vez por tick, a
-120 Hz, em vez de ficar consumindo `pygame.event.get()`. É o suficiente para
-ler o estado atual. Sem `pump()` frequente, `get_button`/`get_axis` ficam com o
-último valor antigo e a troca de conexão não é percebida.
+No TorchBridge, `ControllerHub.poll()` usa `pygame.event.get()`, que processa e
+esvazia a fila. Os eventos de remoção invalidam a instância atual, inclusive no
+modo RAW, e os eventos de conexão antecipam uma nova enumeração. Isso evita
+reter um objeto inicializado depois de o dispositivo ter sido desconectado.
+O GUID identifica a preferência salva; o instance ID distingue cada conexão.
+
+No Windows, a enumeração reinicializa os subsistemas de controle quando a lista
+está vazia e não há dispositivo saudável, para detectar controles conectados
+após a abertura do TorchBridge. Essa reinicialização é exclusiva do Windows;
+no Linux, os subsistemas permanecem ativos, preservando os dispositivos virtuais
+usados nos testes de conexão e reconexão.
 
 ## GameController: como ler
 

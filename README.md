@@ -41,6 +41,11 @@ Requisitos: Windows 10/11, Torchlight 1 e Python 3.11 ou mais recente.
 O programa fica no ícone **TB** ao lado do relógio do Windows. Pelo menu desse
 ícone é possível pausar, abrir o perfil, recarregar alterações ou sair.
 
+No submenu **Controle**, escolha o dispositivo que deseja usar. A preferência
+fica salva entre execuções; desconectar o controle selecionado não transfere
+os comandos para outro dispositivo. **Selecionar automaticamente** escolhe e
+salva o primeiro controle disponível novamente.
+
 ### Se o jogo for aberto como administrador
 
 O Windows bloqueia entradas enviadas por um programa com privilégio menor.
