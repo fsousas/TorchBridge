@@ -12,25 +12,32 @@ Referente à configuração dos atalhos na parte inferior da tela.
 - Ao selecionar e confirmar essa opção no menu radial, o menu radial fecha e ativa o modo de configuração de atalhos.
 
 ## MODO CONFIGURAÇÃO DE ATALHOS ATIVO
-- **Transição de Entrada / Saída:**
-  - O backdrop entra e sai suavemente com **Fade In / Fade Out** a 60 FPS (duração ~0.35s).
-- **Backdrop e Spotlight:**
-  - Tela escura com **backdrop preto de 70% de opacidade** (`rgba(0, 0, 0, 0.70)`).
-  - Efeito de **spotlight / recorte inverso** na parte inferior da tela utilizando:
-    - `assets\hud\inferior\mask-hud.png`
-  - Centralizado horizontalmente (`offset_x = (largura - mask_w) / 2`) e colado na borda inferior (`offset_y = 0`), escalado proporcionalmente a 1280 x 960.
+- **Remoção do Backdrop Escuro:**
+  - O backdrop escuro com recorte/spotlight foi completamente removido para eliminar conflitos visuais e manter o jogo e a interface 100% nítidos e claros.
+- **Variante da HUD Inferior com Menu Radial Desbotado (`shortcut-config-active`):**
+  - Durante todo o estado de configuração de atalhos (`shortcut_config_active = True`), a imagem da HUD inferior (`hud-{empresa}.png`) é automaticamente substituída pela variante:
+    - `assets\hud\inferior\hud-ps-shortcut-config-active.png` (PlayStation)
+    - `assets\hud\inferior\hud-xbox-shortcut-config-active.png` (Xbox)
+    - `assets\hud\inferior\hud-nintendo-shortcut-config-active.png` (Nintendo)
+  - Nessa variante, o ícone do menu radial fica quase opaco/desbotado, garantindo visibilidade limpa dos itens do grid sobre a barra.
+  - Ao sair da configuração e retornar ao jogo, a HUD inferior padrão com o ícone nítido é restaurada instantaneamente.
 - **Banner de Instruções:**
-  - Elemento posicionado acima do backdrop, carregando dinamicamente a arte correspondente ao controle ativo:
+  - Elemento em pergaminho posicionado no topo/centro, carregando dinamicamente a arte correspondente ao controle ativo:
     - `assets\images\instructions\shortcut-instruction-ps.png` (PlayStation)
     - `assets\images\instructions\shortcut-instruction-xbox.png` (Xbox)
     - `assets\images\instructions\shortcut-instruction-nintendo.png` (Nintendo)
   - **Animação de Descida / Subida:**
     - Ao entrar: desce do topo (fora da tela) e para suavemente no centro com desaceleração (*cubic ease-out*).
-    - Ao sair: sobe de volta para fora da tela (*slide-up*) enquanto o backdrop faz fade-out.
+    - Ao sair: sobe de volta para fora da tela (*slide-up*).
 
-## SAÍDA DO MODO DE ATALHOS
-- O usuário sai do modo de configuração e retorna ao jogo normal ao pressionar o **botão Leste** (Bolinha / B / East Button) ou **Start / ESC**.
-- Ao sair, a imagem sobe de volta para fora da tela e o backdrop desaparece em fade-out suave.
+## SAÍDA DO MODO DE ATALHOS (DESARME COM ESC / START)
+- **Tecla ESC (Teclado) e Botão Start (Controle):**
+  - Desarmam imediatamente e por completo o estado de configuração de atalhos, retornando diretamente para em jogo:
+    - Se estiver dentro do grid de opções (`shortcut_grid_active = True`): fecha o pop-up nativo do jogo e cancela todo o modo de configuração, voltando para o jogo.
+    - Se estiver na seleção de nós da HUD (`shortcut_config_active = True`): cancela imediatamente e devolve o controle ao jogo.
+- **Botão B / Bolinha (Controle):**
+  - Se estiver no grid: cancela e fecha apenas o grid de opções, voltando o cursor para a seleção de nós da HUD.
+  - Se estiver na seleção de nós da HUD: fecha o modo de atalhos e retorna para o jogo.
 
 ## FASE 2
 - Os nós devem respeitar o redimencionamento e posicao da hud 
@@ -142,9 +149,10 @@ Através da varredura direta no processo ativo do jogo via `CEGUIBase.dll`:
    - **Slots 6 a 0 (Nós 8 a 12):** Exibe Skills + Spells + Consumíveis. Grid de **8 colunas $\times$ 4 linhas**, com **clamping automático na margem direita** (`rect.right - 46px`) para que o popup não ultrapasse o limite da tela.
    - **Ancoragem Vertical Real:** O grid repousa logo acima da barra inferior de atalhos e se expande **PARA CIMA** a partir da base (`rect.bottom - 112px * scale`), mantendo a última linha sempre fixa e o topo ajustado conforme `num_rows`.
    - **Centralização Fina:** O ponto de partida horizontal aplica deslocamento de `+78.12px * scale` com clamping direito em `rect.right - 72px * scale`, centralizando com exatidão sobre os ícones das células do grid nativo.
-3. **Leitura Dinâmica da Memória (CEGUI Base Dinâmica):**
-   - O método `TorchlightMemoryReader.read_shortcut_grid_dims()` resolve dinamicamente a base de `CEGUIBase.dll` e a RVA `0x001B4844` (`ms_Singleton` do `WindowManager`), buscando a janela `gui__3501Base` em tempo real.
-   - Lê a largura e altura na hora e adapta `cols` e `rows` perfeitamente, mesmo com ASLR e reloads do jogo.
+3. **Leitura Dinâmica da Memória (CEGUI Base e Células Úteis):**
+   - O método `TorchlightMemoryReader.read_shortcut_grid_info()` resolve dinamicamente a base de `CEGUIBase.dll` e a RVA `0x001B4844` (`ms_Singleton` do `WindowManager`), buscando a janela `gui__3501Base` e as células filhas `gui__3501SkillIcon<col><row>`.
+   - Lê a flag de visibilidade (`+0x1A0`) de cada célula em tempo real (cache com leitura sub-milissegundo), descobrindo exatamente quantos itens/skills estão acessíveis em cada linha (ex: `(7, 2, 8)`).
+   - O D-pad e o overlay adaptam-se automaticamente: o overlay só desenha nós onde existem itens reais e o D-pad não navega para slots vazios.
 4. **Ciclo de Controle do Grid:**
    - **Abertura do Grid:** Pressionar **Sul (A / X)** em qualquer nó da HUD dispara clique esquerdo, abre o pop-up nativo e ativa `shortcut_grid_active = True`, posicionando o cursor na célula `(0, 0)`.
    - **Navegação 2D no D-pad:** O D-pad (Cima, Baixo, Esquerda, Direita) navega na matriz `(row, col)` respeitando a quantidade de itens por linha e move o cursor suavemente ao centro da célula.
@@ -152,5 +160,7 @@ Através da varredura direta no processo ativo do jogo via `CEGUIBase.dll`:
    - **Cancelamento (Botão B / Bolinha ou Start/ESC):** Fecha o popup do grid e devolve o foco para a navegação de nós da HUD.
 5. **Modo Calibração (`show_calibration: True`):**
    - Desenha as caixas delimitadoras de todas as células do grid na tela com destaque amarelo na célula em foco perfeitamente sobreposta aos ícones reais do jogo.
-
- 
+6. **Variante da HUD Inferior com Menu Radial Desbotado/Opaco:**
+   - Ao abrir o grid de opções dos slots de **números 1 ao 5** (`shortcut_grid_active == True` e `0 <= shortcut_node_focus <= 4`), o overlay substitui o PNG do HUD inferior pelo asset variante correspondente (`hud-<controle>-shortcut-config-active.png`).
+   - Nessa variante, o ícone do menu radial (D-pad Esquerdo) fica desbotado/quase transparente, evitando poluição visual sobre as linhas inferiores do popup de consumíveis/skills.
+   - Fora desse estado (grid fechado ou aberto para ataque primário, clique direito, Tab ou números 6 a 0), o HUD inferior padrão com o ícone nítido é preservado.
