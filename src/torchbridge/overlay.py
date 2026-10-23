@@ -571,16 +571,17 @@ class GameOverlay(QWidget):
             return None
 
     # HUD inferior para controles: carrega o PNG do controle especificado e guarda em cache.
-    def _get_bottom_hud_pixmap(self, controller_type: str) -> QPixmap | None:
-        if controller_type in self._bottom_hud_cache:
-            return self._bottom_hud_cache[controller_type]
-        path = bottom_hud_asset_path(controller_type)
+    def _get_bottom_hud_pixmap(self, controller_type: str, shortcut_active: bool = False) -> QPixmap | None:
+        cache_key = f"{controller_type}_shortcut" if shortcut_active else controller_type
+        if cache_key in self._bottom_hud_cache:
+            return self._bottom_hud_cache[cache_key]
+        path = bottom_hud_asset_path(controller_type, shortcut_active=shortcut_active)
         if path is None or not path.exists():
             return None
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             return None
-        self._bottom_hud_cache[controller_type] = pixmap
+        self._bottom_hud_cache[cache_key] = pixmap
         return pixmap
 
     # Carrega o background do teclado virtual e guarda em cache.
@@ -687,7 +688,8 @@ class GameOverlay(QWidget):
         else:
             controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
 
-        pixmap = self._get_bottom_hud_pixmap(controller_type)
+        shortcut_active = bool(snapshot.shortcut_config_active)
+        pixmap = self._get_bottom_hud_pixmap(controller_type, shortcut_active=shortcut_active)
         if pixmap is None or pixmap.isNull():
             return
 
@@ -2284,46 +2286,8 @@ class GameOverlay(QWidget):
             painter.end()
 
     def _draw_shortcut_spotlight(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
-        progress = self._shortcut_anim_progress
-        if progress <= 0.0:
-            return
-        rect = snapshot.game_rect
-        w = int(rect.width) if rect.valid and rect.width > 0 else self.width()
-        h = int(rect.height) if rect.valid and rect.height > 0 else self.height()
-        if w <= 0 or h <= 0:
-            return
-
-        if self._cached_spotlight_size != (w, h) or self._cached_spotlight_backdrop is None:
-            path = shortcut_mask_asset_path()
-            if path is None:
-                return
-            mask_img = QImage(str(path))
-            if mask_img.isNull():
-                return
-            canvas = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
-            canvas.fill(Qt.GlobalColor.transparent)
-            p = QPainter(canvas)
-            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            p.fillRect(0, 0, w, h, QColor(0, 0, 0, int(255 * 0.70)))
-            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
-            # Escala proporcional com base na altura da resolução de referência (1280x960),
-            # garantindo que o recorte do HUD acompanhe o redimensionamento do jogo em qualquer aspect ratio.
-            scale = h / 960.0
-            mw = int(round(948.0 * scale))
-            mh = int(round(171.0 * scale))
-            mx = int(round((w - mw) / 2.0))
-            my = int(round(h - mh))
-            p.drawImage(QRectF(mx, my, mw, mh), mask_img)
-            p.end()
-            self._cached_spotlight_backdrop = canvas
-            self._cached_spotlight_size = (w, h)
-
-        painter.save()
-        backdrop_opacity = 0.0 if snapshot.shortcut_grid_active else progress
-        painter.setOpacity(backdrop_opacity)
-        if backdrop_opacity > 0.0:
-            painter.drawImage(0, 0, self._cached_spotlight_backdrop)
-        painter.restore()
+        """Backdrop escuro desativado conforme solicitado."""
+        return
 
     def _get_shortcut_instruction_pixmap(self, controller_type: str) -> QPixmap | None:
         cached = self._shortcut_instruction_cache.get(controller_type)

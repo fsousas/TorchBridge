@@ -168,6 +168,7 @@ class BridgeEngine(threading.Thread):
         self._shortcut_grid_cols: int = 8
         self._shortcut_grid_rows: int = 3
         self._shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
+        self._previous_physical_esc: bool = False
         # Toggle interno da sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad
         # para BAIXO abre, para CIMA fecha. Desmarca o setor 'P' ou fecha a roda: a sublinha
         # some automaticamente (estado interno volta a False).
@@ -5569,6 +5570,11 @@ class BridgeEngine(threading.Thread):
             if state.pressed("lb"):
                 return
 
+            is_key_pressed_fn = getattr(self.injector, "is_key_pressed", None)
+            physical_esc = is_key_pressed_fn("ESC") if is_key_pressed_fn else False
+            esc_edge = physical_esc and not getattr(self, "_previous_physical_esc", False)
+            self._previous_physical_esc = physical_esc
+
             # Sub-modo: Grid de Opções aberto e ativo para navegação
             if self._shortcut_grid_active:
                 # Atualização dinâmica de dimensões caso CEGUI tenha atualizado o layout após o clique
@@ -5582,10 +5588,22 @@ class BridgeEngine(threading.Thread):
                         shortcut_grid_counts=self._shortcut_grid_counts,
                     )
 
-                # Botão Leste (B / Bolinha no PS) ou Start/ESC cancela e fecha o grid
-                if (state.pressed("b") and not self._previous.pressed("b")) or (
-                    state.pressed("start") and not self._previous.pressed("start")
-                ):
+                # Tecla ESC ou Botão Start: desarma completamente a configuração e volta para o jogo
+                if (state.pressed("start") and not self._previous.pressed("start")) or esc_edge:
+                    self._shortcut_config_active = False
+                    self._shortcut_grid_active = False
+                    self._shortcut_node_focus = 0
+                    self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False)
+                    # Envia clique para fechar o pop-up nativo do jogo
+                    target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(target_x, target_y)
+                    self.injector.mouse_button("left", True)
+                    self.injector.mouse_button("left", False)
+                    hub.rumble(0.04, 0.08, 30)
+                    return
+
+                # Botão Leste (B / Bolinha no PS): cancela e fecha apenas o grid, voltando para os nós da HUD
+                if state.pressed("b") and not self._previous.pressed("b"):
                     self._shortcut_grid_active = False
                     self.shared.update(shortcut_grid_active=False)
                     # Retorna o cursor para o nó da HUD que estava focado
@@ -5650,10 +5668,10 @@ class BridgeEngine(threading.Thread):
                 return
 
             # Modo principal de seleção de slots da HUD inferior:
-            # Botão Leste (B / Bolinha no PS) ou Start/ESC desativa o modo e remove o spotlight
+            # Botão Leste (B / Bolinha no PS) ou Start/ESC desativa o modo e volta ao jogo
             if (state.pressed("b") and not self._previous.pressed("b")) or (
                 state.pressed("start") and not self._previous.pressed("start")
-            ):
+            ) or esc_edge:
                 self._shortcut_config_active = False
                 self._shortcut_node_focus = 0
                 self._shortcut_grid_active = False
@@ -5715,15 +5733,19 @@ class BridgeEngine(threading.Thread):
                     default_cols, default_rows = 8, 4
                     default_counts = (8, 2, 8, 6)
 
-                # Consulta dinâmica das dimensões reais do grid (CEGUI gui__3501Base)
-                dims = self.memory.read_shortcut_grid_dims()
-                if dims:
-                    self._shortcut_grid_cols, self._shortcut_grid_rows = dims
-                    self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                # Consulta dinâmica das dimensões reais e contagem de itens por linha (CEGUI gui__3501Base)
+                grid_info = getattr(self.memory, "read_shortcut_grid_info", lambda: None)()
+                if grid_info:
+                    self._shortcut_grid_cols, self._shortcut_grid_rows, self._shortcut_grid_counts = grid_info
                 else:
-                    self._shortcut_grid_cols = default_cols
-                    self._shortcut_grid_rows = default_rows
-                    self._shortcut_grid_counts = default_counts
+                    dims = self.memory.read_shortcut_grid_dims()
+                    if dims:
+                        self._shortcut_grid_cols, self._shortcut_grid_rows = dims
+                        self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                    else:
+                        self._shortcut_grid_cols = default_cols
+                        self._shortcut_grid_rows = default_rows
+                        self._shortcut_grid_counts = default_counts
 
                 # Ativa o grid de opções e posiciona na célula (0, 0)
                 self._shortcut_grid_active = True
@@ -5743,6 +5765,8 @@ class BridgeEngine(threading.Thread):
                 hub.rumble(0.04, 0.08, 30)
 
             return
+        else:
+            self._previous_physical_esc = False
         self._handle_pet_click(now)
         self._handle_hud_purple_click(now)
         # Remap do overworld e combos de gatilho (mapa docs/REMAP-BOTOES): B/Y

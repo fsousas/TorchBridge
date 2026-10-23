@@ -331,6 +331,12 @@ BOTTOM_HUD_ASSETS: dict[str, str] = {
     "nintendo": "hud-nitendo.png",
 }
 
+BOTTOM_HUD_SHORTCUT_ACTIVE_ASSETS: dict[str, str] = {
+    "xbox": "hud-xbox-shortcut-config-active.png",
+    "playstation": "hud-playstation-shortcut-config-active.png",
+    "nintendo": "hud-nitendo-shortcut-config-active.png",
+}
+
 BOTTOM_HUD_REF_HEIGHT = 1080.0
 BOTTOM_HUD_WIDTH = 1347.0
 BOTTOM_HUD_HEIGHT = 242.0
@@ -340,13 +346,14 @@ BOTTOM_HUD_HEIGHT_FRACTION = (BOTTOM_HUD_HEIGHT * BOTTOM_HUD_DEFAULT_SCALE) / BO
 BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION = 0.015                                     # -1.5% da altura da janela
 
 
-def bottom_hud_asset_path(controller_type: str) -> Path | None:
+def bottom_hud_asset_path(controller_type: str, shortcut_active: bool = False) -> Path | None:
     """Retorna o caminho do asset PNG do layout do controle especificado."""
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
         base = Path(__file__).resolve().parent.parent.parent
-    filename = BOTTOM_HUD_ASSETS.get(controller_type, "hud-xbox.png")
+    assets_map = BOTTOM_HUD_SHORTCUT_ACTIVE_ASSETS if shortcut_active else BOTTOM_HUD_ASSETS
+    filename = assets_map.get(controller_type, assets_map.get("xbox", "hud-xbox.png"))
     path = base / "assets" / "hud" / "inferior" / filename
     return path if path.is_file() else None
 

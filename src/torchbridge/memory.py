@@ -254,6 +254,8 @@ class TorchlightMemoryReader:
             "music_mute": False,
         }
         self._last_disk_check: float = 0.0
+        self._cached_gui_3501_base_ptr: int | None = None
+        self._cached_gui_3501_icons: dict[tuple[int, int], int] = {}
 
     def close(self) -> None:
         if self._handle:
@@ -268,6 +270,8 @@ class TorchlightMemoryReader:
             self._exe_path = ""
             self._cgame_address = None
             self.game_version = ""
+            self._cached_gui_3501_base_ptr = None
+            self._cached_gui_3501_icons = {}
 
     def _get_module_info(self, pid: int) -> tuple[int, int, str]:
         """Obtém (base_address, base_size, exe_path) do módulo principal Torchlight.exe."""
@@ -466,77 +470,117 @@ class TorchlightMemoryReader:
 
     def read_shortcut_grid_dims(self) -> tuple[int, int] | None:
         """Lê em tempo real as dimensões (colunas, linhas) do popup de atalhos gui__3501Base."""
+        info = self.read_shortcut_grid_info()
+        if info:
+            return (info[0], info[1])
+        return None
+
+    def read_shortcut_grid_info(self) -> tuple[int, int, tuple[int, ...]] | None:
+        """Lê em tempo real as dimensões (colunas, linhas) e a contagem de nós acessíveis por linha."""
         if not self._ensure_handle():
             return None
 
         base_ptr = getattr(self, "_cached_gui_3501_base_ptr", None)
+        icon_ptrs = getattr(self, "_cached_gui_3501_icons", None)
+
         if base_ptr:
+            vis = self.read_u8(base_ptr + 0x1A0)
+            if vis == 0:
+                return None
             w = self.read_f32(base_ptr + 0x148)
             h = self.read_f32(base_ptr + 0x14C)
-            vis = self.read_u8(base_ptr + 0x1A0)
-            if vis == 1 and w is not None and h is not None and 50.0 <= w <= 800.0 and 50.0 <= h <= 800.0:
-                cols = max(1, round((w - 10.4) / 65.1))
-                rows = max(1, round((h - 10.4) / 65.1))
-                return (cols, rows)
-            elif vis == 0:
-                return None
-            else:
+            if vis != 1 or w is None or h is None or not (50.0 <= w <= 800.0 and 50.0 <= h <= 800.0):
+                base_ptr = None
                 self._cached_gui_3501_base_ptr = None
+                self._cached_gui_3501_icons = {}
+                icon_ptrs = None
 
-        # Busca gui__3501Base no std::map do WindowManager
-        cegui_base = self._get_cegui_base()
-        if not cegui_base:
+        if not base_ptr or not icon_ptrs:
+            cegui_base = self._get_cegui_base()
+            if not cegui_base:
+                return None
+
+            win_mgr = self.read_u32(cegui_base + 0x001B4844)
+            if not win_mgr:
+                return None
+
+            head_ptr = self.read_u32(win_mgr + 0x18)
+            if not head_ptr:
+                return None
+
+            root_ptr = self.read_u32(head_ptr + 4)
+            if not root_ptr:
+                return None
+
+            nodes = [root_ptr]
+            visited = set()
+            found_icons: dict[tuple[int, int], int] = {}
+            found_base = None
+
+            while nodes:
+                curr = nodes.pop()
+                if not curr or curr in visited or curr == head_ptr:
+                    continue
+                visited.add(curr)
+                l = self.read_u32(curr) or 0
+                r = self.read_u32(curr + 8) or 0
+
+                chars = []
+                for i in range(24):
+                    val = self.read_u32(curr + 0x20 + i * 4) or 0
+                    if 32 <= val < 127:
+                        chars.append(chr(val))
+                    else:
+                        break
+                name = "".join(chars)
+                w_ptr = self.read_u32(curr + 0xA4)
+                if name == "gui__3501Base":
+                    found_base = w_ptr
+                elif name.startswith("gui__3501SkillIcon") and w_ptr:
+                    suffix = name[len("gui__3501SkillIcon"):]
+                    if len(suffix) >= 2:
+                        try:
+                            col = int(suffix[:-1])
+                            row = int(suffix[-1:])
+                            found_icons[(row, col)] = w_ptr
+                        except Exception:
+                            pass
+
+                if l and l != head_ptr and l not in visited:
+                    nodes.append(l)
+                if r and r != head_ptr and r not in visited:
+                    nodes.append(r)
+
+            if found_base:
+                self._cached_gui_3501_base_ptr = found_base
+                base_ptr = found_base
+            self._cached_gui_3501_icons = found_icons
+            icon_ptrs = found_icons
+
+        if not base_ptr:
             return None
 
-        win_mgr = self.read_u32(cegui_base + 0x001B4844)
-        if not win_mgr:
+        vis = self.read_u8(base_ptr + 0x1A0)
+        if vis != 1:
             return None
 
-        head_ptr = self.read_u32(win_mgr + 0x18)
-        if not head_ptr:
+        w = self.read_f32(base_ptr + 0x148)
+        h = self.read_f32(base_ptr + 0x14C)
+        if w is None or h is None or not (50.0 <= w <= 800.0 and 50.0 <= h <= 800.0):
             return None
 
-        root_ptr = self.read_u32(head_ptr + 4)
-        if not root_ptr:
-            return None
+        cols = max(1, round((w - 10.4) / 65.1))
+        rows = max(1, round((h - 10.4) / 65.1))
 
-        nodes = [root_ptr]
-        visited = set()
-        while nodes:
-            curr = nodes.pop()
-            if not curr or curr in visited or curr == head_ptr:
-                continue
-            visited.add(curr)
-            l = self.read_u32(curr) or 0
-            r = self.read_u32(curr + 8) or 0
+        # Lê a visibilidade real das células em icon_ptrs
+        row_max_col: dict[int, int] = {}
+        if icon_ptrs:
+            for (row_1idx, col_1idx), ptr in icon_ptrs.items():
+                if self.read_u8(ptr + 0x1A0) == 1:
+                    row_max_col[row_1idx] = max(row_max_col.get(row_1idx, 0), col_1idx)
 
-            chars = []
-            for i in range(24):
-                val = self.read_u32(curr + 0x20 + i * 4) or 0
-                if 32 <= val < 127:
-                    chars.append(chr(val))
-                else:
-                    break
-            name = "".join(chars)
-            if name == "gui__3501Base":
-                base_ptr = self.read_u32(curr + 0xA4)
-                if base_ptr:
-                    self._cached_gui_3501_base_ptr = base_ptr
-                    w = self.read_f32(base_ptr + 0x148)
-                    h = self.read_f32(base_ptr + 0x14C)
-                    vis = self.read_u8(base_ptr + 0x1A0)
-                    if vis == 1 and w is not None and h is not None and 50.0 <= w <= 800.0 and 50.0 <= h <= 800.0:
-                        cols = max(1, round((w - 10.4) / 65.1))
-                        rows = max(1, round((h - 10.4) / 65.1))
-                        return (cols, rows)
-                break
-
-            if l and l != head_ptr and l not in visited:
-                nodes.append(l)
-            if r and r != head_ptr and r not in visited:
-                nodes.append(r)
-
-        return None
+        counts = tuple(row_max_col.get(r, cols) if row_max_col.get(r, 0) > 0 else cols for r in range(1, rows + 1))
+        return (cols, rows, counts)
 
     def read_wstring(self, address: int, max_chars: int = 64) -> str:
         """Lê uma string UTF-16LE da memória do jogo até o caractere nulo."""

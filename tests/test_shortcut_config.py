@@ -131,7 +131,8 @@ class ShortcutConfigTests(unittest.TestCase):
             self.assertFalse(engine._shortcut_config_active)
             self.assertFalse(shared.get().shortcut_config_active)
 
-    def test_spotlight_backdrop_renders_correctly(self):
+    def test_spotlight_backdrop_removed_keeps_transparency(self):
+        """Valida que o backdrop escuro foi removido e não escurece a tela."""
         with tempfile.TemporaryDirectory() as directory:
             _, _, config = self._engine(directory)
             shared = SharedOverlayState()
@@ -152,53 +153,9 @@ class ShortcutConfigTests(unittest.TestCase):
             finally:
                 painter.end()
 
-            # O centro superior deve ter o fundo preto 70% (alpha ~ 178)
-            self.assertAlmostEqual(img.pixelColor(640, 200).alpha(), 178, delta=2)
-            # A parte inferior central (onde está a máscara) deve estar recortada (alpha ~ 0)
+            # Como o backdrop escuro foi desativado/removido, a tela permanece totalmente transparente (alpha == 0)
+            self.assertEqual(img.pixelColor(640, 200).alpha(), 0)
             self.assertEqual(img.pixelColor(640, 950).alpha(), 0)
-
-    def test_spotlight_backdrop_adapts_to_window_resize_and_widescreen(self):
-        with tempfile.TemporaryDirectory() as directory:
-            _, _, config = self._engine(directory)
-            shared = SharedOverlayState()
-            overlay = GameOverlay(shared, config)
-            overlay._shortcut_anim_progress = 1.0
-
-            # 1. Primeira renderização em 1280x960
-            snapshot_1 = OverlaySnapshot(
-                game_rect=Rect(0, 0, 1280, 960),
-                shortcut_config_active=True,
-            )
-            img_1 = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
-            img_1.fill(Qt.GlobalColor.transparent)
-            painter_1 = QPainter(img_1)
-            try:
-                overlay._draw_shortcut_spotlight(painter_1, snapshot_1)
-            finally:
-                painter_1.end()
-            self.assertEqual(overlay._cached_spotlight_size, (1280, 960))
-
-            # 2. Usuário redimensiona a janela para widescreen (ex: 1920x1080)
-            snapshot_2 = OverlaySnapshot(
-                game_rect=Rect(0, 0, 1920, 1080),
-                shortcut_config_active=True,
-            )
-            img_2 = QImage(1920, 1080, QImage.Format.Format_ARGB32_Premultiplied)
-            img_2.fill(Qt.GlobalColor.transparent)
-            painter_2 = QPainter(img_2)
-            try:
-                overlay._draw_shortcut_spotlight(painter_2, snapshot_2)
-            finally:
-                painter_2.end()
-
-            # Cache do spotlight deve ter sido reconstruído nas novas dimensões
-            self.assertEqual(overlay._cached_spotlight_size, (1920, 1080))
-            # Centro recortado onde fica o HUD inferior (h = 1080, recortado na base)
-            self.assertEqual(img_2.pixelColor(960, 1070).alpha(), 0)
-            # Lateral fora do HUD inferior deve continuar com backdrop escuro 70%
-            self.assertAlmostEqual(img_2.pixelColor(100, 1070).alpha(), 178, delta=2)
-            # Área acima do HUD (y = 800) não deve estar recortada
-            self.assertAlmostEqual(img_2.pixelColor(960, 800).alpha(), 178, delta=2)
 
     def test_instruction_banner_animates_and_renders(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -424,7 +381,40 @@ class ShortcutConfigTests(unittest.TestCase):
             self.assertFalse(snap.shortcut_grid_active)
             self.assertTrue(snap.shortcut_config_active)
 
-    def test_backdrop_hidden_when_grid_active(self):
+    def test_press_start_or_esc_disarms_shortcut_config_completely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # 1. Abre o grid e pressiona Start: deve desarmar por completo e voltar para o jogo
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(shared.get().shortcut_grid_active)
+            self.assertTrue(shared.get().shortcut_config_active)
+
+            # Pressiona Start: desarma completamente
+            self._tick(engine, self._state(("start",)), now=0.25)
+            self._tick(engine, self._state(), now=0.30)
+            snap = shared.get()
+            self.assertFalse(snap.shortcut_grid_active)
+            self.assertFalse(snap.shortcut_config_active)
+
+            # 2. Entra no modo de atalhos (apenas nós da HUD) e pressiona Start: desarma para o jogo
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.35)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.40)
+            self._tick(engine, self._state(), now=0.45)
+            self.assertTrue(shared.get().shortcut_config_active)
+            self.assertFalse(shared.get().shortcut_grid_active)
+
+            self._tick(engine, self._state(("start",)), now=0.50)
+            self._tick(engine, self._state(), now=0.55)
+            snap2 = shared.get()
+            self.assertFalse(snap2.shortcut_config_active)
+            self.assertFalse(snap2.shortcut_grid_active)
+
+    def test_backdrop_completely_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             _, _, config = self._engine(directory)
             shared = SharedOverlayState()
@@ -432,7 +422,7 @@ class ShortcutConfigTests(unittest.TestCase):
             overlay._shortcut_anim_progress = 1.0
 
             rect = Rect(0, 0, 1280, 960)
-            # 1. Quando o grid NÃO está ativo: backdrop é desenhado
+            # O backdrop escuro foi desativado: nenhum pixel deve ser escurecido
             snap_hud = OverlaySnapshot(game_rect=rect, shortcut_config_active=True, shortcut_grid_active=False)
             img_hud = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
             img_hud.fill(Qt.GlobalColor.transparent)
@@ -441,20 +431,7 @@ class ShortcutConfigTests(unittest.TestCase):
                 overlay._draw_shortcut_spotlight(painter1, snap_hud)
             finally:
                 painter1.end()
-            # Ponto superior escurecido pelo backdrop
-            self.assertGreater(img_hud.pixelColor(640, 200).alpha(), 100)
-
-            # 2. Quando o grid ESTÁ ativo: backdrop tem opacidade 0 (invisível)
-            snap_grid = OverlaySnapshot(game_rect=rect, shortcut_config_active=True, shortcut_grid_active=True)
-            img_grid = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
-            img_grid.fill(Qt.GlobalColor.transparent)
-            painter2 = QPainter(img_grid)
-            try:
-                overlay._draw_shortcut_spotlight(painter2, snap_grid)
-            finally:
-                painter2.end()
-            # Nenhum pixel escurecido pelo backdrop!
-            self.assertEqual(img_grid.pixelColor(640, 200).alpha(), 0)
+            self.assertEqual(img_hud.pixelColor(640, 200).alpha(), 0)
 
 
     def test_shortcut_nodes_only_render_in_calibration_mode(self):
@@ -517,6 +494,88 @@ class ShortcutConfigTests(unittest.TestCase):
             self.assertEqual(snap.shortcut_grid_rows, 5)
             self.assertEqual(engine._shortcut_grid_cols, 5)
             self.assertEqual(engine._shortcut_grid_rows, 5)
+
+    def test_engine_adapts_grid_counts_from_memory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Simula leitura real da memória: 8 colunas, 3 linhas, contagens (7, 2, 8)
+            engine.memory.read_shortcut_grid_info = lambda: (8, 3, (7, 2, 8))
+
+            # Entra no modo de atalhos e abre o grid
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+
+            snap = shared.get()
+            self.assertTrue(snap.shortcut_grid_active)
+            self.assertEqual(snap.shortcut_grid_cols, 8)
+            self.assertEqual(snap.shortcut_grid_rows, 3)
+            self.assertEqual(snap.shortcut_grid_counts, (7, 2, 8))
+
+            # Desce para a linha 1 (que só possui 2 nós acessíveis: índice 0 e 1)
+            self._tick(engine, self._state(("dpad_down",)), now=0.25)
+            self._tick(engine, self._state(), now=0.30)
+            self.assertEqual(shared.get().shortcut_grid_pos, (1, 0))
+
+            # D-pad Direita: move para col=1
+            self._tick(engine, self._state(("dpad_right",)), now=0.35)
+            self._tick(engine, self._state(), now=0.40)
+            self.assertEqual(shared.get().shortcut_grid_pos, (1, 1))
+
+            # D-pad Direita novamente: trava no nó 1 (pois a linha 1 só tem 2 nós, índices 0 e 1)
+            self._tick(engine, self._state(("dpad_right",)), now=0.45)
+            self._tick(engine, self._state(), now=0.50)
+            self.assertEqual(shared.get().shortcut_grid_pos, (1, 1))
+
+    def test_bottom_hud_switches_to_shortcut_active_variant_in_shortcut_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, config = self._engine(directory)
+            shared = SharedOverlayState()
+            overlay = GameOverlay(shared, config)
+
+            rect = Rect(0, 0, 1280, 960)
+
+            # 1. Quando o modo de configuração está ativo: deve carregar a variante shortcut-config-active
+            snap_active = OverlaySnapshot(
+                game_rect=rect,
+                controller_connected=True,
+                memory_is_in_game=True,
+                shortcut_config_active=True,
+                shortcut_grid_active=False,
+                shortcut_node_focus=0,
+                controller_type="xbox",
+            )
+            img1 = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img1.fill(Qt.GlobalColor.transparent)
+            painter1 = QPainter(img1)
+            try:
+                overlay._draw_bottom_hud(painter1, snap_active)
+            finally:
+                painter1.end()
+            self.assertIn("xbox_shortcut", overlay._bottom_hud_cache)
+
+            # 2. Quando o modo de configuração NÃO está ativo: usa o HUD padrão
+            snap_game = OverlaySnapshot(
+                game_rect=rect,
+                controller_connected=True,
+                memory_is_in_game=True,
+                shortcut_config_active=False,
+                shortcut_grid_active=False,
+                shortcut_node_focus=0,
+                controller_type="playstation",
+            )
+            img2 = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img2.fill(Qt.GlobalColor.transparent)
+            painter2 = QPainter(img2)
+            try:
+                overlay._draw_bottom_hud(painter2, snap_game)
+            finally:
+                painter2.end()
+            self.assertIn("playstation", overlay._bottom_hud_cache)
+            self.assertNotIn("playstation_shortcut", overlay._bottom_hud_cache)
 
 
 if __name__ == "__main__":
