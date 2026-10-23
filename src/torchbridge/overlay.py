@@ -35,6 +35,7 @@ from .models import (
     BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
     shortcut_mask_asset_path,
     shortcut_instruction_asset_path,
+    SHORTCUT_HUD_NODES,
     virtual_keyboard_bg_asset_path,
     virtual_keyboard_target_rect,
     virtual_keyboard_asset_path,
@@ -2304,7 +2305,9 @@ class GameOverlay(QWidget):
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             p.fillRect(0, 0, w, h, QColor(0, 0, 0, int(255 * 0.70)))
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
-            scale = w / 1280.0
+            # Escala proporcional com base na altura da resolução de referência (1280x960),
+            # garantindo que o recorte do HUD acompanhe o redimensionamento do jogo em qualquer aspect ratio.
+            scale = h / 960.0
             mw = int(round(948.0 * scale))
             mh = int(round(171.0 * scale))
             mx = int(round((w - mw) / 2.0))
@@ -2374,10 +2377,55 @@ class GameOverlay(QWidget):
         painter.drawPixmap(bx, by, bw, bh, pixmap)
         painter.restore()
 
+    def _draw_shortcut_nodes(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
+        cfg = self.config.get()
+        if not cfg.get("overlay", {}).get("show_calibration", False):
+            return
+        rect = snapshot.game_rect
+        w = int(rect.width) if rect.valid and rect.width > 0 else self.width()
+        h = int(rect.height) if rect.valid and rect.height > 0 else self.height()
+        if w <= 0 or h <= 0:
+            return
+
+        scale = h / 960.0
+        mw = 948.0 * scale
+        mh = 171.0 * scale
+        mx = (w - mw) / 2.0
+        my = h - mh
+
+        c_amarelo = QColor(0xE6, 0xC1, 0x2A)
+        c_verde = QColor(0x09, 0xB2, 0x00)
+
+        progress = self._shortcut_anim_progress if snapshot.shortcut_config_active else 1.0
+        painter.save()
+        painter.setOpacity(progress)
+        box_sz = 15.0 * scale
+
+        for idx, col_name, base_x, base_y in SHORTCUT_HUD_NODES:
+            lx = mx + base_x * scale
+            ly = my + base_y * scale
+            node_rect = QRectF(lx - box_sz / 2.0, ly - box_sz / 2.0, box_sz, box_sz)
+
+            is_focus = (snapshot.shortcut_node_focus == idx)
+            base_col = c_amarelo if col_name == "yellow" else c_verde
+
+            if is_focus:
+                # Destaque no nó selecionado: borda branca brilhante e fundo amarelo vivo
+                painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                painter.setBrush(QColor(230, 193, 42, 230))
+            else:
+                painter.setPen(QPen(base_col, 1.5 * scale))
+                painter.setBrush(QColor(base_col.red(), base_col.green(), base_col.blue(), 170))
+
+            painter.drawRoundedRect(node_rect, 2.0 * scale, 2.0 * scale)
+
+        painter.restore()
+
     def _paint_overlay(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
         scale = float(self.config.get()["overlay"]["scale"])
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._draw_shortcut_spotlight(painter, snapshot)
+        self._draw_shortcut_nodes(painter, snapshot)
         self._draw_shortcut_instruction(painter, snapshot)
         self._draw_bottom_hud(painter, snapshot)
         self._draw_aim(painter, snapshot, scale)

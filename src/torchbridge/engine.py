@@ -88,6 +88,8 @@ from .models import (
     quest_slot_point,
     quest_reward_point,
     quest_abandon_point,
+    SHORTCUT_HUD_NODES,
+    shortcut_node_point,
 )
 
 from .memory import GameMemoryState, TorchlightMemoryReader
@@ -158,6 +160,7 @@ class BridgeEngine(threading.Thread):
         self._radial_dismissed: bool = False
         # Modo de configuração de atalhos inferior (spotlight ativo).
         self._shortcut_config_active: bool = False
+        self._shortcut_node_focus: int = 0
         # Toggle interno da sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad
         # para BAIXO abre, para CIMA fecha. Desmarca o setor 'P' ou fecha a roda: a sublinha
         # some automaticamente (estado interno volta a False).
@@ -4898,8 +4901,11 @@ class BridgeEngine(threading.Thread):
                 slot = slots[self._radial_selection - 1]
                 if str(slot).lower() in ("short-cut", "shortcut"):
                     self._shortcut_config_active = True
-                    self.shared.update(shortcut_config_active=True)
+                    self._shortcut_node_focus = 0
+                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0)
                     self._release_all()
+                    target_x, target_y = shortcut_node_point(rect, 0)
+                    self.injector.move(target_x, target_y)
                 else:
                     self._tap_binding(slot)
                     # O atalho também alterna o rastreador de painéis mostrado no overlay.
@@ -5557,8 +5563,49 @@ class BridgeEngine(threading.Thread):
                 state.pressed("start") and not self._previous.pressed("start")
             ):
                 self._shortcut_config_active = False
-                self.shared.update(shortcut_config_active=False)
+                self._shortcut_node_focus = 0
+                self.shared.update(shortcut_config_active=False, shortcut_node_focus=0)
                 hub.rumble(0.04, 0.08, 30)
+                return
+
+            # Navegação pelos 13 nós da HUD inferior via D-pad
+            dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+            dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+            if dpad_right:
+                new_focus = min(len(SHORTCUT_HUD_NODES) - 1, self._shortcut_node_focus + 1)
+                if new_focus != self._shortcut_node_focus:
+                    self._shortcut_node_focus = new_focus
+                    self.shared.update(shortcut_node_focus=new_focus)
+                    target_x, target_y = shortcut_node_point(rect, new_focus)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+            elif dpad_left:
+                new_focus = max(0, self._shortcut_node_focus - 1)
+                if new_focus != self._shortcut_node_focus:
+                    self._shortcut_node_focus = new_focus
+                    self.shared.update(shortcut_node_focus=new_focus)
+                    target_x, target_y = shortcut_node_point(rect, new_focus)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+
+            # Botão Norte (Y / Triângulo): Dispara Ctrl + Clique Esquerdo (remove item/skill do slot)
+            if state.pressed("y") and not self._previous.pressed("y"):
+                target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                self.injector.move(target_x, target_y)
+                self.injector.key("ctrl", True)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                self.injector.key("ctrl", False)
+                hub.rumble(0.04, 0.08, 30)
+
+            # Botão Sul (A / X): Dispara Clique Esquerdo (abre o grid de opções)
+            if state.pressed("a") and not self._previous.pressed("a"):
+                target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                hub.rumble(0.04, 0.08, 30)
+
             return
         self._handle_pet_click(now)
         self._handle_hud_purple_click(now)

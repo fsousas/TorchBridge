@@ -379,6 +379,50 @@ def shortcut_instruction_asset_path(controller_type: str) -> Path | None:
     return path if path.is_file() else None
 
 
+# Mapeamento dos nós da HUD inferior para configuração de atalhos (assets/hud/inferior/nodes.png).
+# Coordenadas relativas ao canvas da HUD (948x171) na resolução de referência 1280x960:
+SHORTCUT_HUD_NODES: tuple[tuple[int, str, float, float], ...] = (
+    (0, "yellow", 65.0, 118.0),   # Slot 1 (Amarelo #E6C12A - Início / Foco padrão)
+    (1, "green", 111.0, 118.0),   # Slot 2 (Verde #09B200)
+    (2, "green", 156.0, 118.0),   # Slot 3
+    (3, "green", 201.0, 118.0),   # Slot 4
+    (4, "green", 245.0, 118.0),   # Slot 5
+    (5, "green", 584.0, 118.0),   # Slot 6
+    (6, "green", 629.0, 118.0),   # Slot 7
+    (7, "green", 666.0, 111.0),   # Slot 8
+    (8, "green", 728.0, 118.0),   # Slot 9
+    (9, "green", 774.0, 118.0),   # Slot 10
+    (10, "green", 819.0, 118.0),  # Slot 11
+    (11, "green", 864.0, 118.0),  # Slot 12
+    (12, "green", 908.0, 118.0),  # Slot 13
+)
+
+
+def shortcut_nodes_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG com os nós da HUD inferior (nodes.png)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "hud" / "inferior" / "nodes.png"
+    return path if path.is_file() else None
+
+
+def shortcut_node_point(rect: Rect, index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) absoluta na tela de um nó da HUD inferior."""
+    if not rect.valid or index < 0 or index >= len(SHORTCUT_HUD_NODES):
+        return (0, 0)
+    scale = rect.height / 960.0
+    mw = 948.0 * scale
+    mh = 171.0 * scale
+    mx = rect.left + (rect.width - mw) / 2.0
+    my = rect.bottom - mh
+    _, _, base_x, base_y = SHORTCUT_HUD_NODES[index]
+    x = int(round(mx + base_x * scale))
+    y = int(round(my + base_y * scale))
+    return (x, y)
+
+
 def bottom_hud_target_rect(
     rect: Rect,
     offset_y_fraction: float = BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
@@ -2257,6 +2301,7 @@ class OverlaySnapshot:
     quest_can_abandon: bool = False
     quest_has_item_reward: bool = False
     shortcut_config_active: bool = False
+    shortcut_node_focus: int = 0
 
 
 

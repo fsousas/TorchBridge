@@ -12,6 +12,9 @@ from torchbridge.models import (
     OverlaySnapshot,
     Rect,
     SharedOverlayState,
+    SHORTCUT_HUD_NODES,
+    shortcut_node_point,
+    shortcut_nodes_asset_path,
     shortcut_mask_asset_path,
     shortcut_instruction_asset_path,
 )
@@ -28,13 +31,27 @@ class FakeInjector:
         self.tapped = []
         self.events = []
         self.buttons = {}
+        self.keys = {}
+        self.moves = []
 
     def tap(self, key):
         self.tapped.append(key)
+        self.events.append(("tap", key))
+
+    def key(self, name, down):
+        self.keys[name] = down
+        self.events.append(("key", name, down))
+        return True
 
     def mouse_button(self, button, pressed):
         self.buttons[button] = pressed
         self.events.append(("mouse", button, pressed))
+        return True
+
+    def move(self, x, y):
+        self.moves.append((x, y))
+        self.events.append(("move", x, y))
+        return True
 
     def cursor_position(self):
         return (960, 540)
@@ -139,6 +156,49 @@ class ShortcutConfigTests(unittest.TestCase):
             # A parte inferior central (onde está a máscara) deve estar recortada (alpha ~ 0)
             self.assertEqual(img.pixelColor(640, 950).alpha(), 0)
 
+    def test_spotlight_backdrop_adapts_to_window_resize_and_widescreen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, config = self._engine(directory)
+            shared = SharedOverlayState()
+            overlay = GameOverlay(shared, config)
+            overlay._shortcut_anim_progress = 1.0
+
+            # 1. Primeira renderização em 1280x960
+            snapshot_1 = OverlaySnapshot(
+                game_rect=Rect(0, 0, 1280, 960),
+                shortcut_config_active=True,
+            )
+            img_1 = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_1.fill(Qt.GlobalColor.transparent)
+            painter_1 = QPainter(img_1)
+            try:
+                overlay._draw_shortcut_spotlight(painter_1, snapshot_1)
+            finally:
+                painter_1.end()
+            self.assertEqual(overlay._cached_spotlight_size, (1280, 960))
+
+            # 2. Usuário redimensiona a janela para widescreen (ex: 1920x1080)
+            snapshot_2 = OverlaySnapshot(
+                game_rect=Rect(0, 0, 1920, 1080),
+                shortcut_config_active=True,
+            )
+            img_2 = QImage(1920, 1080, QImage.Format.Format_ARGB32_Premultiplied)
+            img_2.fill(Qt.GlobalColor.transparent)
+            painter_2 = QPainter(img_2)
+            try:
+                overlay._draw_shortcut_spotlight(painter_2, snapshot_2)
+            finally:
+                painter_2.end()
+
+            # Cache do spotlight deve ter sido reconstruído nas novas dimensões
+            self.assertEqual(overlay._cached_spotlight_size, (1920, 1080))
+            # Centro recortado onde fica o HUD inferior (h = 1080, recortado na base)
+            self.assertEqual(img_2.pixelColor(960, 1070).alpha(), 0)
+            # Lateral fora do HUD inferior deve continuar com backdrop escuro 70%
+            self.assertAlmostEqual(img_2.pixelColor(100, 1070).alpha(), 178, delta=2)
+            # Área acima do HUD (y = 800) não deve estar recortada
+            self.assertAlmostEqual(img_2.pixelColor(960, 800).alpha(), 178, delta=2)
+
     def test_instruction_banner_animates_and_renders(self):
         with tempfile.TemporaryDirectory() as directory:
             _, _, config = self._engine(directory)
@@ -162,6 +222,148 @@ class ShortcutConfigTests(unittest.TestCase):
                 overlay._draw_shortcut_instruction(painter, snapshot)
             finally:
                 painter.end()
+
+    def test_shortcut_nodes_definitions(self):
+        path = shortcut_nodes_asset_path()
+        self.assertIsNotNone(path)
+        self.assertTrue(path.exists())
+        self.assertEqual(len(SHORTCUT_HUD_NODES), 13)
+        self.assertEqual(SHORTCUT_HUD_NODES[0][1], "yellow")
+        for i in range(1, 13):
+            self.assertEqual(SHORTCUT_HUD_NODES[i][1], "green")
+
+    def test_shortcut_mode_entry_positions_cursor_at_node_0(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # Ativa o modo de atalhos a partir da confirmação do radial (South / Slot 5)
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self.assertTrue(shared.get().shortcut_config_active)
+            self.assertEqual(shared.get().shortcut_node_focus, 0)
+            self.assertEqual(engine._shortcut_node_focus, 0)
+
+            # Cursor deve ter sido movido para o nó 0
+            n0_x, n0_y = shortcut_node_point(rect, 0)
+            self.assertIn(("move", n0_x, n0_y), engine.injector.events)
+
+    def test_shortcut_mode_dpad_navigation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # Entra no modo de atalhos
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            engine.injector.events.clear()
+
+            # D-pad Direita: move do nó 0 para o nó 1
+            self._tick(engine, self._state(("dpad_right",)), now=0.15)
+            self.assertEqual(engine._shortcut_node_focus, 1)
+            self.assertEqual(shared.get().shortcut_node_focus, 1)
+            n1_x, n1_y = shortcut_node_point(rect, 1)
+            self.assertIn(("move", n1_x, n1_y), engine.injector.events)
+
+            # Solta D-pad
+            self._tick(engine, self._state(), now=0.20)
+            engine.injector.events.clear()
+
+            # D-pad Direita de novo: nó 1 -> nó 2
+            self._tick(engine, self._state(("dpad_right",)), now=0.25)
+            self.assertEqual(engine._shortcut_node_focus, 2)
+            n2_x, n2_y = shortcut_node_point(rect, 2)
+            self.assertIn(("move", n2_x, n2_y), engine.injector.events)
+
+            # Solta D-pad
+            self._tick(engine, self._state(), now=0.30)
+            engine.injector.events.clear()
+
+            # D-pad Esquerda: nó 2 -> nó 1
+            self._tick(engine, self._state(("dpad_left",)), now=0.35)
+            self.assertEqual(engine._shortcut_node_focus, 1)
+            self.assertIn(("move", n1_x, n1_y), engine.injector.events)
+
+    def test_shortcut_mode_north_button_ctrl_clicks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Entra no modo de atalhos
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            engine.injector.events.clear()
+
+            # Pressiona Y (Botão Norte): dispara Ctrl + Clique Esquerdo
+            self._tick(engine, self._state(("y",)), now=0.15)
+            expected_seq = [
+                ("key", "ctrl", True),
+                ("mouse", "left", True),
+                ("mouse", "left", False),
+                ("key", "ctrl", False),
+            ]
+            events = [e for e in engine.injector.events if e[0] in ("key", "mouse")]
+            self.assertEqual(events, expected_seq)
+
+    def test_shortcut_mode_south_button_left_clicks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Entra no modo de atalhos
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            engine.injector.events.clear()
+
+            # Pressiona A (Botão Sul): dispara Clique Esquerdo
+            self._tick(engine, self._state(("a",)), now=0.15)
+            expected_seq = [
+                ("mouse", "left", True),
+                ("mouse", "left", False),
+            ]
+            events = [e for e in engine.injector.events if e[0] == "mouse"]
+            self.assertEqual(events, expected_seq)
+
+    def test_shortcut_nodes_only_render_in_calibration_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, config = self._engine(directory)
+            shared = SharedOverlayState()
+            overlay = GameOverlay(shared, config)
+            overlay._shortcut_anim_progress = 1.0
+
+            rect = Rect(0, 0, 1280, 960)
+            snapshot = OverlaySnapshot(
+                game_rect=rect,
+                shortcut_config_active=True,
+                shortcut_node_focus=0,
+            )
+
+            # 1. Modo normal (sem calibração): os nós NÃO devem ser desenhados
+            img = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(img)
+            try:
+                overlay._draw_shortcut_nodes(painter, snapshot)
+            finally:
+                painter.end()
+
+            p0_x, p0_y = shortcut_node_point(rect, 0)
+            self.assertEqual(img.pixelColor(p0_x, p0_y).alpha(), 0)
+
+            # 2. Modo calibração ligado: os nós DEVEM ser desenhados
+            config.set_show_calibration(True)
+            img_cal = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_cal.fill(Qt.GlobalColor.transparent)
+            painter_cal = QPainter(img_cal)
+            try:
+                overlay._draw_shortcut_nodes(painter_cal, snapshot)
+            finally:
+                painter_cal.end()
+
+            self.assertGreater(img_cal.pixelColor(p0_x, p0_y).alpha(), 100)
+            p1_x, p1_y = shortcut_node_point(rect, 1)
+            self.assertGreater(img_cal.pixelColor(p1_x, p1_y).alpha(), 100)
 
 
 if __name__ == "__main__":
