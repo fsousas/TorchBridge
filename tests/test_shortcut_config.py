@@ -14,6 +14,7 @@ from torchbridge.models import (
     SharedOverlayState,
     SHORTCUT_HUD_NODES,
     shortcut_node_point,
+    shortcut_grid_cell_point,
     shortcut_nodes_asset_path,
     shortcut_mask_asset_path,
     shortcut_instruction_asset_path,
@@ -306,7 +307,7 @@ class ShortcutConfigTests(unittest.TestCase):
             events = [e for e in engine.injector.events if e[0] in ("key", "mouse")]
             self.assertEqual(events, expected_seq)
 
-    def test_shortcut_mode_south_button_left_clicks(self):
+    def test_shortcut_mode_south_button_opens_grid(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared, _ = self._engine(directory)
 
@@ -316,14 +317,145 @@ class ShortcutConfigTests(unittest.TestCase):
             self._tick(engine, self._state(), now=0.10)
             engine.injector.events.clear()
 
-            # Pressiona A (Botão Sul): dispara Clique Esquerdo
+            # Pressiona A (Botão Sul): abre o grid de opções e ativa o modo grid
             self._tick(engine, self._state(("a",)), now=0.15)
-            expected_seq = [
-                ("mouse", "left", True),
-                ("mouse", "left", False),
-            ]
-            events = [e for e in engine.injector.events if e[0] == "mouse"]
-            self.assertEqual(events, expected_seq)
+            snap = shared.get()
+            self.assertTrue(snap.shortcut_grid_active)
+            self.assertEqual(snap.shortcut_grid_pos, (0, 0))
+
+            # Verifica que enviou clique esquerdo e moveu para a primeira célula do grid
+            expected_mouse_clicks = [e for e in engine.injector.events if e[0] == "mouse"]
+            self.assertEqual(expected_mouse_clicks, [("mouse", "left", True), ("mouse", "left", False)])
+
+    def test_shortcut_grid_cell_point_calculation(self):
+        rect = Rect(0, 0, 1280, 960)
+        # Testa cálculo de pontos da célula (0, 0) e (1, 1)
+        p00 = shortcut_grid_cell_point(rect, slot_index=1, row=0, col=0, num_cols=8, num_rows=3)
+        p01 = shortcut_grid_cell_point(rect, slot_index=1, row=0, col=1, num_cols=8, num_rows=3)
+        p10 = shortcut_grid_cell_point(rect, slot_index=1, row=1, col=0, num_cols=8, num_rows=3)
+
+        self.assertGreater(p00[0], 0)
+        self.assertGreater(p00[1], 0)
+        # Na horizontal, a coluna 1 fica à direita da coluna 0 por ~60px (48px na base 768p)
+        self.assertAlmostEqual(p01[0] - p00[0], 60, delta=2)
+        # Na vertical, a linha 1 fica abaixo da linha 0 por ~60px
+        self.assertAlmostEqual(p10[1] - p00[1], 60, delta=2)
+
+    def test_dpad_navigates_grid_2d(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Entra no modo de atalhos e abre o grid
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(shared.get().shortcut_grid_active)
+
+            # 1. D-pad Direita: move para col=1
+            self._tick(engine, self._state(("dpad_right",)), now=0.25)
+            self._tick(engine, self._state(), now=0.30)
+            self.assertEqual(shared.get().shortcut_grid_pos, (0, 1))
+
+            # 2. D-pad Baixo: move para row=1, col=1
+            self._tick(engine, self._state(("dpad_down",)), now=0.35)
+            self._tick(engine, self._state(), now=0.40)
+            self.assertEqual(shared.get().shortcut_grid_pos, (1, 1))
+
+            # 3. D-pad Esquerda: volta para row=1, col=0
+            self._tick(engine, self._state(("dpad_left",)), now=0.45)
+            self._tick(engine, self._state(), now=0.50)
+            self.assertEqual(shared.get().shortcut_grid_pos, (1, 0))
+
+            # 4. D-pad Cima: volta para row=0, col=0
+            self._tick(engine, self._state(("dpad_up",)), now=0.55)
+            self._tick(engine, self._state(), now=0.60)
+            self.assertEqual(shared.get().shortcut_grid_pos, (0, 0))
+
+    def test_press_a_in_grid_confirms_and_closes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Entra no modo de atalhos e abre o grid
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(shared.get().shortcut_grid_active)
+
+            # Move para col=2
+            self._tick(engine, self._state(("dpad_right",)), now=0.25)
+            self._tick(engine, self._state(), now=0.30)
+            self._tick(engine, self._state(("dpad_right",)), now=0.35)
+            self._tick(engine, self._state(), now=0.40)
+            self.assertEqual(shared.get().shortcut_grid_pos, (0, 2))
+
+            # Pressiona A: confirma a seleção, envia clique na célula e sai do modo grid
+            engine.injector.events.clear()
+            self._tick(engine, self._state(("a",)), now=0.45)
+            self._tick(engine, self._state(), now=0.50)
+
+            snap = shared.get()
+            self.assertFalse(snap.shortcut_grid_active)
+            self.assertTrue(snap.shortcut_config_active)  # Ainda no modo de configuração de slots
+            clicks = [e for e in engine.injector.events if e[0] == "mouse"]
+            self.assertEqual(clicks, [("mouse", "left", True), ("mouse", "left", False)])
+
+    def test_press_b_in_grid_cancels_and_returns_to_hud(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Entra no modo de atalhos e abre o grid
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(shared.get().shortcut_grid_active)
+
+            # Pressiona B: cancela a seleção do grid
+            engine.injector.events.clear()
+            self._tick(engine, self._state(("b",)), now=0.25)
+            self._tick(engine, self._state(), now=0.30)
+
+            snap = shared.get()
+            self.assertFalse(snap.shortcut_grid_active)
+            self.assertTrue(snap.shortcut_config_active)
+
+    def test_backdrop_hidden_when_grid_active(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, config = self._engine(directory)
+            shared = SharedOverlayState()
+            overlay = GameOverlay(shared, config)
+            overlay._shortcut_anim_progress = 1.0
+
+            rect = Rect(0, 0, 1280, 960)
+            # 1. Quando o grid NÃO está ativo: backdrop é desenhado
+            snap_hud = OverlaySnapshot(game_rect=rect, shortcut_config_active=True, shortcut_grid_active=False)
+            img_hud = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_hud.fill(Qt.GlobalColor.transparent)
+            painter1 = QPainter(img_hud)
+            try:
+                overlay._draw_shortcut_spotlight(painter1, snap_hud)
+            finally:
+                painter1.end()
+            # Ponto superior escurecido pelo backdrop
+            self.assertGreater(img_hud.pixelColor(640, 200).alpha(), 100)
+
+            # 2. Quando o grid ESTÁ ativo: backdrop tem opacidade 0 (invisível)
+            snap_grid = OverlaySnapshot(game_rect=rect, shortcut_config_active=True, shortcut_grid_active=True)
+            img_grid = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_grid.fill(Qt.GlobalColor.transparent)
+            painter2 = QPainter(img_grid)
+            try:
+                overlay._draw_shortcut_spotlight(painter2, snap_grid)
+            finally:
+                painter2.end()
+            # Nenhum pixel escurecido pelo backdrop!
+            self.assertEqual(img_grid.pixelColor(640, 200).alpha(), 0)
+
 
     def test_shortcut_nodes_only_render_in_calibration_mode(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -365,6 +497,28 @@ class ShortcutConfigTests(unittest.TestCase):
             p1_x, p1_y = shortcut_node_point(rect, 1)
             self.assertGreater(img_cal.pixelColor(p1_x, p1_y).alpha(), 100)
 
+    def test_engine_adapts_grid_dimensions_from_memory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Simula que a memória reporta grid 5x5 (sem spells)
+            engine.memory.read_shortcut_grid_dims = lambda: (5, 5)
+
+            # Entra no modo de atalhos e abre o grid
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+
+            snap = shared.get()
+            self.assertTrue(snap.shortcut_grid_active)
+            self.assertEqual(snap.shortcut_grid_cols, 5)
+            self.assertEqual(snap.shortcut_grid_rows, 5)
+            self.assertEqual(engine._shortcut_grid_cols, 5)
+            self.assertEqual(engine._shortcut_grid_rows, 5)
+
 
 if __name__ == "__main__":
     unittest.main()
+

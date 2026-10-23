@@ -90,6 +90,7 @@ from .models import (
     quest_abandon_point,
     SHORTCUT_HUD_NODES,
     shortcut_node_point,
+    shortcut_grid_cell_point,
 )
 
 from .memory import GameMemoryState, TorchlightMemoryReader
@@ -161,6 +162,12 @@ class BridgeEngine(threading.Thread):
         # Modo de configuração de atalhos inferior (spotlight ativo).
         self._shortcut_config_active: bool = False
         self._shortcut_node_focus: int = 0
+        self._shortcut_grid_active: bool = False
+        self._shortcut_grid_row: int = 0
+        self._shortcut_grid_col: int = 0
+        self._shortcut_grid_cols: int = 8
+        self._shortcut_grid_rows: int = 3
+        self._shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
         # Toggle interno da sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad
         # para BAIXO abre, para CIMA fecha. Desmarca o setor 'P' ou fecha a roda: a sublinha
         # some automaticamente (estado interno volta a False).
@@ -5558,13 +5565,99 @@ class BridgeEngine(threading.Thread):
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
         if self._shortcut_config_active:
+            # Se LB ainda estiver segurado após a confirmação na roda, aguarda soltura
+            if state.pressed("lb"):
+                return
+
+            # Sub-modo: Grid de Opções aberto e ativo para navegação
+            if self._shortcut_grid_active:
+                # Atualização dinâmica de dimensões caso CEGUI tenha atualizado o layout após o clique
+                dims = self.memory.read_shortcut_grid_dims()
+                if dims and dims != (self._shortcut_grid_cols, self._shortcut_grid_rows):
+                    self._shortcut_grid_cols, self._shortcut_grid_rows = dims
+                    self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                    self.shared.update(
+                        shortcut_grid_cols=self._shortcut_grid_cols,
+                        shortcut_grid_rows=self._shortcut_grid_rows,
+                        shortcut_grid_counts=self._shortcut_grid_counts,
+                    )
+
+                # Botão Leste (B / Bolinha no PS) ou Start/ESC cancela e fecha o grid
+                if (state.pressed("b") and not self._previous.pressed("b")) or (
+                    state.pressed("start") and not self._previous.pressed("start")
+                ):
+                    self._shortcut_grid_active = False
+                    self.shared.update(shortcut_grid_active=False)
+                    # Retorna o cursor para o nó da HUD que estava focado
+                    target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(target_x, target_y)
+                    # Envia clique para fechar o pop-up nativo do jogo
+                    self.injector.mouse_button("left", True)
+                    self.injector.mouse_button("left", False)
+                    hub.rumble(0.04, 0.08, 30)
+                    return
+
+                # Navegação no Grid com D-pad (Cima / Baixo / Esquerda / Direita)
+                dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+                dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+                dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+                dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+                if dpad_up or dpad_down or dpad_left or dpad_right:
+                    new_r = self._shortcut_grid_row
+                    new_c = self._shortcut_grid_col
+                    if dpad_up:
+                        new_r = max(0, new_r - 1)
+                    elif dpad_down:
+                        new_r = min(self._shortcut_grid_rows - 1, new_r + 1)
+
+                    # Número de colunas válidas nesta linha específica
+                    row_items = self._shortcut_grid_counts[new_r] if new_r < len(self._shortcut_grid_counts) else self._shortcut_grid_cols
+                    max_col_for_row = max(0, row_items - 1)
+
+                    if dpad_left:
+                        new_c = max(0, min(new_c, max_col_for_row) - 1)
+                    elif dpad_right:
+                        new_c = min(max_col_for_row, new_c + 1)
+                    else:
+                        new_c = min(new_c, max_col_for_row)
+
+                    if new_r != self._shortcut_grid_row or new_c != self._shortcut_grid_col:
+                        self._shortcut_grid_row = new_r
+                        self._shortcut_grid_col = new_c
+                        self.shared.update(shortcut_grid_pos=(new_r, new_c))
+                        target_x, target_y = shortcut_grid_cell_point(
+                            rect, self._shortcut_node_focus, new_r, new_c, self._shortcut_grid_cols, self._shortcut_grid_rows
+                        )
+                        self.injector.move(target_x, target_y)
+                        hub.rumble(0.03, 0.06, 25)
+
+                # Botão Sul (A / X): Confirma a seleção do item/habilidade no grid
+                if state.pressed("a") and not self._previous.pressed("a"):
+                    target_x, target_y = shortcut_grid_cell_point(
+                        rect, self._shortcut_node_focus, self._shortcut_grid_row, self._shortcut_grid_col, self._shortcut_grid_cols, self._shortcut_grid_rows
+                    )
+                    self.injector.move(target_x, target_y)
+                    self.injector.mouse_button("left", True)
+                    self.injector.mouse_button("left", False)
+                    # O grid nativo fecha ao clicar numa opção; voltamos para a navegação de nós
+                    self._shortcut_grid_active = False
+                    self.shared.update(shortcut_grid_active=False)
+                    node_x, node_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(node_x, node_y)
+                    hub.rumble(0.05, 0.12, 40)
+
+                return
+
+            # Modo principal de seleção de slots da HUD inferior:
             # Botão Leste (B / Bolinha no PS) ou Start/ESC desativa o modo e remove o spotlight
             if (state.pressed("b") and not self._previous.pressed("b")) or (
                 state.pressed("start") and not self._previous.pressed("start")
             ):
                 self._shortcut_config_active = False
                 self._shortcut_node_focus = 0
-                self.shared.update(shortcut_config_active=False, shortcut_node_focus=0)
+                self._shortcut_grid_active = False
+                self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False)
                 hub.rumble(0.04, 0.08, 30)
                 return
 
@@ -5598,12 +5691,55 @@ class BridgeEngine(threading.Thread):
                 self.injector.key("ctrl", False)
                 hub.rumble(0.04, 0.08, 30)
 
-            # Botão Sul (A / X): Dispara Clique Esquerdo (abre o grid de opções)
+            # Botão Sul (A / X): Dispara Clique Esquerdo (abre o grid de opções e ativa navegação no grid)
             if state.pressed("a") and not self._previous.pressed("a"):
                 target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
                 self.injector.move(target_x, target_y)
                 self.injector.mouse_button("left", True)
                 self.injector.mouse_button("left", False)
+                # Define dimensões padrão inteligentes para cada tipo de nó da HUD
+                if self._shortcut_node_focus == 5:
+                    # Clique Esquerdo: apenas ataque físico + skills ativas Lv 1 (1 linha x 3 colunas)
+                    default_cols, default_rows = 3, 1
+                    default_counts = (3,)
+                elif self._shortcut_node_focus in (6, 7):
+                    # Clique Direito e Tab: apenas skills + spells (sem consumíveis)
+                    default_cols, default_rows = 7, 2
+                    default_counts = (7, 2)
+                elif self._shortcut_node_focus <= 4:
+                    # Números 1 a 5: skills + spells + consumíveis
+                    default_cols, default_rows = 7, 3
+                    default_counts = (7, 2, 7)
+                else:
+                    # Números 6 a 0: skills + spells + consumíveis (clamped à direita)
+                    default_cols, default_rows = 8, 4
+                    default_counts = (8, 2, 8, 6)
+
+                # Consulta dinâmica das dimensões reais do grid (CEGUI gui__3501Base)
+                dims = self.memory.read_shortcut_grid_dims()
+                if dims:
+                    self._shortcut_grid_cols, self._shortcut_grid_rows = dims
+                    self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                else:
+                    self._shortcut_grid_cols = default_cols
+                    self._shortcut_grid_rows = default_rows
+                    self._shortcut_grid_counts = default_counts
+
+                # Ativa o grid de opções e posiciona na célula (0, 0)
+                self._shortcut_grid_active = True
+                self._shortcut_grid_row = 0
+                self._shortcut_grid_col = 0
+                self.shared.update(
+                    shortcut_grid_active=True,
+                    shortcut_grid_pos=(0, 0),
+                    shortcut_grid_cols=self._shortcut_grid_cols,
+                    shortcut_grid_rows=self._shortcut_grid_rows,
+                    shortcut_grid_counts=self._shortcut_grid_counts,
+                )
+                gx, gy = shortcut_grid_cell_point(
+                    rect, self._shortcut_node_focus, 0, 0, self._shortcut_grid_cols, self._shortcut_grid_rows
+                )
+                self.injector.move(gx, gy)
                 hub.rumble(0.04, 0.08, 30)
 
             return

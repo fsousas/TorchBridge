@@ -36,6 +36,7 @@ from .models import (
     shortcut_mask_asset_path,
     shortcut_instruction_asset_path,
     SHORTCUT_HUD_NODES,
+    shortcut_grid_cell_point,
     virtual_keyboard_bg_asset_path,
     virtual_keyboard_target_rect,
     virtual_keyboard_asset_path,
@@ -2318,8 +2319,10 @@ class GameOverlay(QWidget):
             self._cached_spotlight_size = (w, h)
 
         painter.save()
-        painter.setOpacity(progress)
-        painter.drawImage(0, 0, self._cached_spotlight_backdrop)
+        backdrop_opacity = 0.0 if snapshot.shortcut_grid_active else progress
+        painter.setOpacity(backdrop_opacity)
+        if backdrop_opacity > 0.0:
+            painter.drawImage(0, 0, self._cached_spotlight_backdrop)
         painter.restore()
 
     def _get_shortcut_instruction_pixmap(self, controller_type: str) -> QPixmap | None:
@@ -2388,13 +2391,46 @@ class GameOverlay(QWidget):
             return
 
         scale = h / 960.0
+        c_amarelo = QColor(0xE6, 0xC1, 0x2A)
+        c_verde = QColor(0x09, 0xB2, 0x00)
+
+        # Se o grid de opções estiver ativo, desenha as células do grid (modo calibração)
+        if snapshot.shortcut_grid_active:
+            painter.save()
+            sel_r, sel_c = snapshot.shortcut_grid_pos
+            cell_box = 18.0 * scale
+            for r in range(snapshot.shortcut_grid_rows):
+                items_in_row = (
+                    snapshot.shortcut_grid_counts[r]
+                    if r < len(snapshot.shortcut_grid_counts)
+                    else snapshot.shortcut_grid_cols
+                )
+                for c in range(items_in_row):
+                    cx, cy = shortcut_grid_cell_point(
+                        rect,
+                        snapshot.shortcut_node_focus,
+                        r,
+                        c,
+                        snapshot.shortcut_grid_cols,
+                        snapshot.shortcut_grid_rows,
+                    )
+                    lx = cx - rect.left - cell_box / 2.0
+                    ly = cy - rect.top - cell_box / 2.0
+                    is_focus = (r == sel_r and c == sel_c)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                        painter.setBrush(QColor(230, 193, 42, 230))
+                    else:
+                        painter.setPen(QPen(c_verde, 1.5 * scale))
+                        painter.setBrush(QColor(9, 178, 0, 140))
+                    painter.drawRoundedRect(QRectF(lx, ly, cell_box, cell_box), 2.0 * scale, 2.0 * scale)
+            painter.restore()
+            return
+
         mw = 948.0 * scale
         mh = 171.0 * scale
         mx = (w - mw) / 2.0
         my = h - mh
-
-        c_amarelo = QColor(0xE6, 0xC1, 0x2A)
-        c_verde = QColor(0x09, 0xB2, 0x00)
 
         progress = self._shortcut_anim_progress if snapshot.shortcut_config_active else 1.0
         painter.save()

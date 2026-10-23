@@ -423,6 +423,48 @@ def shortcut_node_point(rect: Rect, index: int) -> tuple[int, int]:
     return (x, y)
 
 
+def shortcut_grid_cell_point(
+    rect: Rect,
+    slot_index: int,
+    row: int,
+    col: int,
+    num_cols: int = 8,
+    num_rows: int = 3,
+) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) absoluta na tela do centro de uma célula (row, col) do grid de atalhos."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+
+    pitch_x = 48.0 * scale
+    pitch_y = 48.0 * scale
+
+    # O grid repousa logo acima da barra inferior de atalhos e se expande PARA CIMA:
+    # A linha inferior do popup fica centralizada em rect.bottom - (112.12 * scale) (subido mais 50% de um bloco)
+    bottom_row_y = rect.bottom - (112.12 * scale)
+    cy = bottom_row_y - (num_rows - 1 - row) * pitch_y
+
+    slot_x, _ = shortcut_node_point(rect, slot_index)
+
+    # O jogo abre o popup deslocado para a direita em relação ao slot selecionado (+78.12 * scale, recuado 50% para a esquerda)
+    start_x = float(slot_x) + (78.12 * scale)
+
+    # Clamping na borda direita: no Torchlight o popup alinha-se perto da borda direita da HUD/janela
+    max_right = rect.right - (44.0 * scale)
+    if start_x + (num_cols - 1) * pitch_x > max_right:
+        start_x = max_right - (num_cols - 1) * pitch_x
+
+    # Clamping na borda esquerda
+    min_left = rect.left + (24.0 * scale)
+    if start_x < min_left:
+        start_x = min_left
+
+    cx = start_x + col * pitch_x
+    return (int(round(cx)), int(round(cy)))
+
+
+
+
 def bottom_hud_target_rect(
     rect: Rect,
     offset_y_fraction: float = BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
@@ -2302,6 +2344,11 @@ class OverlaySnapshot:
     quest_has_item_reward: bool = False
     shortcut_config_active: bool = False
     shortcut_node_focus: int = 0
+    shortcut_grid_active: bool = False
+    shortcut_grid_pos: tuple[int, int] = (0, 0)
+    shortcut_grid_cols: int = 8
+    shortcut_grid_rows: int = 3
+    shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
 
 
 
