@@ -115,6 +115,34 @@ class ControllerSelectionTests(unittest.TestCase):
         controller_quit.assert_called_once()
         controller_init.assert_called_once()
 
+    def test_windows_reconnection_reinitializes_discovery_even_with_stale_device_list(self):
+        hub = self.make_hub()
+        # Simula que um controle estava conectado previamente no cache _devices,
+        # mas foi desconectado e o dispositivo não está saudável.
+        hub._devices = [(0, "stale-pad", "Disconnected pad", 10)]
+        visible = False
+        joystick = MagicMock()
+        joystick.get_guid.return_value = "reconnected-pad"
+        joystick.get_name.return_value = "Reconnected DualSense"
+        joystick.get_instance_id.return_value = 20
+
+        def initialize_joysticks():
+            nonlocal visible
+            visible = True
+
+        with patch("torchbridge.controller.IS_WINDOWS", True), \
+                patch("torchbridge.controller.pygame.joystick.quit") as joystick_quit, \
+                patch("torchbridge.controller.sdl_controller.quit") as controller_quit, \
+                patch("torchbridge.controller.pygame.joystick.init", side_effect=initialize_joysticks), \
+                patch("torchbridge.controller.sdl_controller.init") as controller_init, \
+                patch("torchbridge.controller.pygame.joystick.get_count", side_effect=lambda: int(visible)), \
+                patch("torchbridge.controller.pygame.joystick.Joystick", return_value=joystick):
+            hub._refresh_devices()
+        self.assertEqual(hub.devices, (("reconnected-pad", "Reconnected DualSense"),))
+        joystick_quit.assert_called_once()
+        controller_quit.assert_called_once()
+        controller_init.assert_called_once()
+
     def test_transient_enumeration_error_returns_disconnected_and_recovers(self):
         hub = self.make_hub()
         joystick = MagicMock()
@@ -153,6 +181,30 @@ class ControllerSelectionTests(unittest.TestCase):
             self.assertFalse(hub.poll(DEFAULT_CONFIG["raw_controller"], "wanted").connected)
             hub._devices = [(0, "wanted", "Wanted", 30), (1, "other", "Other", 10)]
             self.assertEqual(hub.poll(DEFAULT_CONFIG["raw_controller"], "wanted").instance_id, 30)
+
+    def test_controller_device_removed_uses_which_attribute_safely(self):
+        hub = self.make_hub()
+        hub._instance_id = 42
+        hub._controller = MagicMock()
+        hub._controller.attached.return_value = True
+        hub._devices = [(0, "guid", "Name", 42)]
+        remove_event = pygame.event.Event(pygame.CONTROLLERDEVICEREMOVED, {"which": 42})
+        with patch("torchbridge.controller.pygame.event.get", return_value=[remove_event]), \
+                patch.object(hub, "_scan"):
+            hub.poll(DEFAULT_CONFIG["raw_controller"])
+        self.assertIsNone(hub._instance_id)
+        self.assertIsNone(hub._controller)
+
+    def test_trigger_rescan_preserves_healthy_controller(self):
+        hub = self.make_hub()
+        hub._instance_id = 99
+        hub._controller = MagicMock()
+        hub._controller.attached.return_value = True
+        hub._devices = [(0, "guid", "Name", 99)]
+        hub.trigger_rescan()
+        self.assertEqual(hub._instance_id, 99)
+        self.assertIsNotNone(hub._controller)
+        self.assertFalse(hub._rescan_requested)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Uses the bundled Linux SDL shared library")
     def test_real_sdl_raw_disconnect_reconnect_uses_new_instance(self):

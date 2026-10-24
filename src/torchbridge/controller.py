@@ -66,6 +66,12 @@ class ControllerHub:
     def __init__(self) -> None:
         # Inicializa o display (exigido pelo joystick/eventos do SDL em várias plataformas).
         pygame.display.init()
+        if IS_WINDOWS:
+            try:
+                if not pygame.display.get_surface():
+                    pygame.display.set_mode((1, 1), pygame.HIDDEN)
+            except pygame.error:
+                pass
         # Liga o subsistema de joystick do SDL.
         pygame.joystick.init()
         # Liga o GameController (banco de mapas SDL).
@@ -80,10 +86,22 @@ class ControllerHub:
         self._devices: list[tuple[int, str, str, int]] = []
         self._device_guid = ""
         self._instance_id: int | None = None
+        self._initial_scan_done: bool = False
+        self._rescan_requested: bool = False
 
     @property
     def devices(self) -> tuple[tuple[str, str], ...]:
         return tuple((guid, name) for _, guid, name, _ in self._devices)
+
+    def trigger_rescan(self) -> None:
+        """Força re-enumeração imediata de dispositivos."""
+        if not self._device_healthy():
+            self._drop_device()
+            self._devices = []
+            self._last_scan = 0.0
+            self._rescan_requested = True
+        else:
+            self._last_scan = 0.0
 
     def close(self) -> None:
         self._drop_device()
@@ -94,6 +112,16 @@ class ControllerHub:
             pygame.display.quit()
 
     def _drop_device(self) -> None:
+        if self._controller is not None:
+            try:
+                self._controller.rumble(0.0, 0.0, 0)
+            except Exception:
+                pass
+        if self._joystick is not None:
+            try:
+                self._joystick.rumble(0.0, 0.0, 0)
+            except Exception:
+                pass
         for device in (self._controller, self._joystick):
             if device is not None:
                 try:
@@ -119,14 +147,31 @@ class ControllerHub:
     def _refresh_devices(self) -> None:
         # Windows discovery needs a refresh without a pygame window receiving
         # WM_DEVICECHANGE. Restarting SDL elsewhere destroys virtual devices.
-        if IS_WINDOWS and not self._devices and not self._device_healthy():
+        # Re-inicializa apenas no arranque inicial, quando a lista estiver vazia, ou
+        # quando explicitamente solicitado por evento de hardware (WM_DEVICECHANGE).
+        # NUNCA reinicializa enquanto houver um controle saudável ativo.
+        needs_reinit = (
+            getattr(self, "_rescan_requested", False)
+            or not getattr(self, "_initial_scan_done", False)
+            or not self._devices
+            or not self._device_healthy()
+        )
+        if IS_WINDOWS and not self._device_healthy() and needs_reinit:
+            self._rescan_requested = False
+            self._initial_scan_done = True
             try:
                 sdl_controller.quit()
                 pygame.joystick.quit()
                 pygame.joystick.init()
                 sdl_controller.init()
+                pygame.event.pump()
             except pygame.error:
                 pass
+        self._initial_scan_done = True
+        try:
+            pygame.event.pump()
+        except pygame.error:
+            pass
         devices = []
         for index in range(pygame.joystick.get_count()):
             joystick = None
@@ -175,12 +220,8 @@ class ControllerHub:
                         self._joystick = pygame.joystick.Joystick(index)
                         self._mode = "RAW"
                     opened = self._controller.as_joystick() if mapped else self._joystick
-                    try:
-                        if opened.get_instance_id() != instance or opened.get_guid() != guid:
-                            raise pygame.error("Device changed during enumeration")
-                    finally:
-                        if mapped:
-                            opened.quit()
+                    if opened.get_instance_id() != instance or opened.get_guid() != guid:
+                        raise pygame.error("Device changed during enumeration")
                     self._device_guid = guid
                     self._instance_id = instance
                     self._name = name or "Controle"
@@ -311,7 +352,8 @@ class ControllerHub:
             # Drain events: removal invalidates RAW even while get_init is True.
             for event in pygame.event.get():
                 if event.type in (pygame.JOYDEVICEREMOVED, pygame.CONTROLLERDEVICEREMOVED):
-                    if event.instance_id == self._instance_id:
+                    which = getattr(event, "instance_id", getattr(event, "which", None))
+                    if which is None or which == self._instance_id:
                         self._drop_device()
                     self._last_scan = 0.0
                 elif event.type in (pygame.JOYDEVICEADDED, pygame.CONTROLLERDEVICEADDED):
@@ -322,7 +364,7 @@ class ControllerHub:
             if self._joystick is not None:
                 return self._poll_raw(raw_config)
         # Dispositivo sumiu/mudou no meio da leitura: solta e reporta desconectado neste tick.
-        except (pygame.error, OSError, IndexError, TypeError, ValueError):
+        except Exception:
             self._drop_device()
         return ControllerState()
 

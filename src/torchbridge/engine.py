@@ -88,6 +88,10 @@ from .models import (
     quest_slot_point,
     quest_reward_point,
     quest_abandon_point,
+    SHORTCUT_HUD_NODES,
+    shortcut_node_point,
+    shortcut_info_node_point,
+    shortcut_grid_cell_point,
 )
 
 from .memory import GameMemoryState, TorchlightMemoryReader
@@ -152,10 +156,19 @@ class BridgeEngine(threading.Thread):
         # Estado do combo Back+Start (calibração): visto?, desde quando?, já disparou?
         # Setor da roda selecionado enquanto LB estiver segurado.
         self._radial_selection: int | None = None
-        # Latch de "roda confirmada pelo A": o jogador aperta A com o polegar esquerdo
-        # ainda segurando o LB, então a roda precisa ficar fechada mesmo com o LB
-        # pressionado. Rearma na borda de subida do LB (próximo aperto reabre).
         self._radial_dismissed: bool = False
+        self._rescan_requested: bool = False
+        # Modo de configuração de atalhos inferior (spotlight ativo).
+        self._shortcut_config_active: bool = False
+        self._shortcut_node_focus: int = 0
+        self._shortcut_info_focus: bool = False
+        self._shortcut_grid_active: bool = False
+        self._shortcut_grid_row: int = 0
+        self._shortcut_grid_col: int = 0
+        self._shortcut_grid_cols: int = 8
+        self._shortcut_grid_rows: int = 3
+        self._shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
+        self._previous_physical_esc: bool = False
         # Toggle interno da sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad
         # para BAIXO abre, para CIMA fecha. Desmarca o setor 'P' ou fecha a roda: a sublinha
         # some automaticamente (estado interno volta a False).
@@ -664,6 +677,20 @@ class BridgeEngine(threading.Thread):
         if not isinstance(value, str) or not value.strip():
             return
         normalized = value.strip().upper()
+        if normalized in {"MOUSE_LEFT", "LEFT_CLICK", "LMB", "CLICK", "MOUSE1"}:
+            if "left" in self._held_mouse:
+                self.injector.mouse_button("left", False)
+                self._held_mouse.discard("left")
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            return
+        if normalized in {"MOUSE_RIGHT", "RIGHT_CLICK", "RMB", "MOUSE2"}:
+            if "right" in self._held_mouse:
+                self.injector.mouse_button("right", False)
+                self._held_mouse.discard("right")
+            self.injector.mouse_button("right", True)
+            self.injector.mouse_button("right", False)
+            return
         temporarily_released: list[str] = []
         modifiers = ["ALT"]
         # Para TAB/ESC, libera também o SHIFT retido: senão o toque viraria Shift+Tab ou Shift+Esc.
@@ -745,23 +772,32 @@ class BridgeEngine(threading.Thread):
             self._center_combo_started = None
             self._center_combo_triggered = False
 
-    # Botões discretos do overworld (mapa docs/REMAP-BOTOES): R3 continua tocando seu
-    # binding (TAB). O d-pad NÃO dispara no overworld (vazio por padrão; a tela inicial
-    # usará, mas o rastreamento dela ainda não existe). B/Y e os gatilhos têm tratamento
+    # Botões discretos do overworld (mapa docs/REMAP-BOTOES): R3 toca seu binding
+    # (MOUSE_LEFT por padrão). Só opera estritamente no modo EM JOGO (is_in_game=True).
+    # O d-pad NÃO dispara no overworld (vazio por padrão; a tela inicial usará,
+    # mas o rastreamento dela ainda não existe). B/Y e os gatilhos têm tratamento
     # próprio — ver _handle_overworld_remap e _handle_trigger_combos. Com a roda ABERTA
-    # (LB segurado) a supressão inteira vale: nenhum toque de tecla pode vazar.
+    # (LB segurado) ou configuração de atalhos aberta a supressão inteira vale.
     def _handle_discrete_bindings(
         self,
         state: ControllerState,
         bindings: dict[str, Any],
     ) -> None:
+        # Só opera estritamente no modo EM JOGO
+        if self._memory_state.is_connected and not self._memory_state.is_in_game:
+            return
+        if self._shortcut_config_active:
+            return
         # Roda aberta: a roda é o mundo — nenhum toque de tecla dispara enquanto ela
         # estiver de pé (o d-pad controla a sublinha de pet actions lá dentro).
         if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
         # R3: borda de subida, um toque por pressionamento, sem auto-repeat.
         if state.pressed("r3") and not self._previous.pressed("r3"):
-            self._tap_binding(bindings.get("r3"))
+            r3_action = bindings.get("r3")
+            if not r3_action or r3_action == "TAB":
+                r3_action = "MOUSE_LEFT"
+            self._tap_binding(r3_action)
 
     # Navegação por D-pad na Tela Inicial (Title Screen, state_id == 0)
     def _handle_title_menu_navigation(
@@ -4894,12 +4930,42 @@ class BridgeEngine(threading.Thread):
         ):
             if not self._pet_submenu:
                 slot = slots[self._radial_selection - 1]
-                self._tap_binding(slot)
-                # O atalho também alterna o rastreador de painéis mostrado no overlay.
-                next_panels = toggle_panel(self._active_panels, slot)
-                if next_panels != self._active_panels:
-                    self._active_panels = next_panels
-                    self.shared.update(active_panels=list(next_panels))
+                if str(slot).lower() in ("short-cut", "shortcut"):
+                    has_open_menu = bool(
+                        self._memory_state.is_menu_open
+                        or any(self._active_panels)
+                        or getattr(self, "_skill_menu_open", False)
+                        or getattr(self, "_quest_menu_initialized", False)
+                        or getattr(self, "_dialog_initialized", False)
+                    )
+                    if has_open_menu:
+                        self.injector.tap("ESC")
+                        self._reset_active_panels()
+                        if getattr(self, "_skill_menu_open", False):
+                            self._skill_menu_open = False
+                            self._skill_in_spells = False
+                            self._skill_spell_idx = 0
+                        if getattr(self, "_quest_menu_initialized", False):
+                            self._quest_menu_initialized = False
+                            self._quest_b_consumed = False
+                        if getattr(self, "_dialog_initialized", False):
+                            self._dialog_initialized = False
+                            self._dialog_focus = None
+
+                    self._shortcut_config_active = True
+                    self._shortcut_node_focus = 0
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0, shortcut_info_focus=False, active_panels=list(self._active_panels))
+                    self._release_all()
+                    target_x, target_y = shortcut_node_point(rect, 0)
+                    self.injector.move(target_x, target_y)
+                else:
+                    self._tap_binding(slot)
+                    # O atalho também alterna o rastreador de painéis mostrado no overlay.
+                    next_panels = toggle_panel(self._active_panels, slot)
+                    if next_panels != self._active_panels:
+                        self._active_panels = next_panels
+                        self.shared.update(active_panels=list(next_panels))
             else:
                 # Sublinha do pet aberta: arma a sequência de clique do quadrado
                 # marcado (1=agressivo/vermelho, 2=defensivo/azul, 3=passivo/branco,
@@ -5544,6 +5610,257 @@ class BridgeEngine(threading.Thread):
         # A roda antes das sequências: o A arma a do pet neste mesmo tick e o
         # _handle_pet_click abaixo já faz o movimento até o botão na hora.
         self._handle_radial(hub, state, bindings, rect, now)
+        if self._shortcut_config_active:
+            # Se LB ainda estiver segurado após a confirmação na roda, aguarda soltura
+            if state.pressed("lb"):
+                return
+
+            is_key_pressed_fn = getattr(self.injector, "is_key_pressed", None)
+            physical_esc = is_key_pressed_fn("ESC") if is_key_pressed_fn else False
+            esc_edge = physical_esc and not getattr(self, "_previous_physical_esc", False)
+            self._previous_physical_esc = physical_esc
+
+            # Sub-modo: Grid de Opções aberto e ativo para navegação
+            if self._shortcut_grid_active:
+                # Atualização dinâmica de dimensões caso CEGUI tenha atualizado o layout após o clique
+                dims = self.memory.read_shortcut_grid_dims()
+                if dims and dims != (self._shortcut_grid_cols, self._shortcut_grid_rows):
+                    self._shortcut_grid_cols, self._shortcut_grid_rows = dims
+                    self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                    self.shared.update(
+                        shortcut_grid_cols=self._shortcut_grid_cols,
+                        shortcut_grid_rows=self._shortcut_grid_rows,
+                        shortcut_grid_counts=self._shortcut_grid_counts,
+                    )
+
+                # Tecla ESC ou Botão Start: desarma completamente a configuração e volta para o jogo
+                if (state.pressed("start") and not self._previous.pressed("start")) or esc_edge:
+                    self._shortcut_config_active = False
+                    self._shortcut_grid_active = False
+                    self._shortcut_node_focus = 0
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
+                    # Envia clique para fechar o pop-up nativo do jogo
+                    target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(target_x, target_y)
+                    self.injector.mouse_button("left", True)
+                    self.injector.mouse_button("left", False)
+                    center_x = rect.left + rect.width // 2
+                    center_y = rect.top + rect.height // 2
+                    self.injector.move(center_x, center_y)
+                    hub.rumble(0.04, 0.08, 30)
+                    return
+
+                # Botão Leste (B / Bolinha no PS): cancela e fecha apenas o grid, voltando para os nós da HUD
+                if state.pressed("b") and not self._previous.pressed("b"):
+                    self._shortcut_grid_active = False
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_grid_active=False, shortcut_info_focus=False)
+                    # Retorna o cursor para o nó da HUD que estava focado
+                    target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(target_x, target_y)
+                    # Envia clique para fechar o pop-up nativo do jogo
+                    self.injector.mouse_button("left", True)
+                    self.injector.mouse_button("left", False)
+                    hub.rumble(0.04, 0.08, 30)
+                    return
+
+                # Navegação no Grid com D-pad (Cima / Baixo / Esquerda / Direita)
+                dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+                dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+                dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+                dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+
+                if dpad_up or dpad_down or dpad_left or dpad_right:
+                    new_r = self._shortcut_grid_row
+                    new_c = self._shortcut_grid_col
+                    if dpad_up:
+                        new_r = max(0, new_r - 1)
+                    elif dpad_down:
+                        new_r = min(self._shortcut_grid_rows - 1, new_r + 1)
+
+                    # Número de colunas válidas nesta linha específica
+                    row_items = self._shortcut_grid_counts[new_r] if new_r < len(self._shortcut_grid_counts) else self._shortcut_grid_cols
+                    max_col_for_row = max(0, row_items - 1)
+
+                    if dpad_left:
+                        new_c = max(0, min(new_c, max_col_for_row) - 1)
+                    elif dpad_right:
+                        new_c = min(max_col_for_row, new_c + 1)
+                    else:
+                        new_c = min(new_c, max_col_for_row)
+
+                    if new_r != self._shortcut_grid_row or new_c != self._shortcut_grid_col:
+                        self._shortcut_grid_row = new_r
+                        self._shortcut_grid_col = new_c
+                        self.shared.update(shortcut_grid_pos=(new_r, new_c))
+                        target_x, target_y = shortcut_grid_cell_point(
+                            rect, self._shortcut_node_focus, new_r, new_c, self._shortcut_grid_cols, self._shortcut_grid_rows
+                        )
+                        self.injector.move(target_x, target_y)
+                        hub.rumble(0.03, 0.06, 25)
+
+                # Botão Sul (A / X): Confirma a seleção do item/habilidade no grid
+                if state.pressed("a") and not self._previous.pressed("a"):
+                    target_x, target_y = shortcut_grid_cell_point(
+                        rect, self._shortcut_node_focus, self._shortcut_grid_row, self._shortcut_grid_col, self._shortcut_grid_cols, self._shortcut_grid_rows
+                    )
+                    self.injector.move(target_x, target_y)
+                    self.injector.mouse_button("left", True)
+                    self.injector.mouse_button("left", False)
+                    # O grid nativo fecha ao clicar numa opção; voltamos para a navegação de nós
+                    self._shortcut_grid_active = False
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_grid_active=False, shortcut_info_focus=False)
+                    node_x, node_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(node_x, node_y)
+                    hub.rumble(0.05, 0.12, 40)
+
+                return
+
+            # Sub-modo: Foco na aba superior de informações (config-info.png)
+            if self._shortcut_info_focus:
+                # Tecla ESC ou Botão Start: desarma completamente a configuração e volta para o jogo
+                if (state.pressed("start") and not self._previous.pressed("start")) or esc_edge:
+                    self._shortcut_config_active = False
+                    self._shortcut_node_focus = 0
+                    self._shortcut_grid_active = False
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
+                    center_x = rect.left + rect.width // 2
+                    center_y = rect.top + rect.height // 2
+                    self.injector.move(center_x, center_y)
+                    hub.rumble(0.04, 0.08, 30)
+                    return
+
+                # D-pad Baixo ou Botão Leste (B / Bolinha no PS): retorna para os nós da HUD inferior
+                dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+                b_pressed = state.pressed("b") and not self._previous.pressed("b")
+                if dpad_down or b_pressed:
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_info_focus=False)
+                    target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+                    return
+
+                # Suprime os outros comandos enquanto na aba superior
+                return
+
+            # Modo principal de seleção de slots da HUD inferior:
+            # Botão Leste (B / Bolinha no PS) ou Start/ESC desativa o modo e volta ao jogo
+            if (state.pressed("b") and not self._previous.pressed("b")) or (
+                state.pressed("start") and not self._previous.pressed("start")
+            ) or esc_edge:
+                self._shortcut_config_active = False
+                self._shortcut_node_focus = 0
+                self._shortcut_grid_active = False
+                self._shortcut_info_focus = False
+                self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
+                center_x = rect.left + rect.width // 2
+                center_y = rect.top + rect.height // 2
+                self.injector.move(center_x, center_y)
+                hub.rumble(0.04, 0.08, 30)
+                return
+
+            # D-pad Cima: navega para a aba superior de informações (config-info.png)
+            dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+            if dpad_up:
+                self._shortcut_info_focus = True
+                self.shared.update(shortcut_info_focus=True)
+                target_x, target_y = shortcut_info_node_point(rect)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
+                return
+
+            # Navegação pelos 13 nós da HUD inferior via D-pad
+            dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+            dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+            if dpad_right:
+                new_focus = min(len(SHORTCUT_HUD_NODES) - 1, self._shortcut_node_focus + 1)
+                if new_focus != self._shortcut_node_focus:
+                    self._shortcut_node_focus = new_focus
+                    self.shared.update(shortcut_node_focus=new_focus)
+                    target_x, target_y = shortcut_node_point(rect, new_focus)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+            elif dpad_left:
+                new_focus = max(0, self._shortcut_node_focus - 1)
+                if new_focus != self._shortcut_node_focus:
+                    self._shortcut_node_focus = new_focus
+                    self.shared.update(shortcut_node_focus=new_focus)
+                    target_x, target_y = shortcut_node_point(rect, new_focus)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+
+            # Botão Norte (Y / Triângulo): Dispara Ctrl + Clique Esquerdo (remove item/skill do slot)
+            if state.pressed("y") and not self._previous.pressed("y"):
+                target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                self.injector.move(target_x, target_y)
+                self.injector.key("ctrl", True)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                self.injector.key("ctrl", False)
+                hub.rumble(0.04, 0.08, 30)
+
+            # Botão Sul (A / X): Dispara Clique Esquerdo (abre o grid de opções e ativa navegação no grid)
+            if state.pressed("a") and not self._previous.pressed("a"):
+                target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                self.injector.move(target_x, target_y)
+                self.injector.mouse_button("left", True)
+                self.injector.mouse_button("left", False)
+                # Define dimensões padrão inteligentes para cada tipo de nó da HUD
+                if self._shortcut_node_focus == 5:
+                    # Clique Esquerdo: apenas ataque físico + skills ativas Lv 1 (1 linha x 3 colunas)
+                    default_cols, default_rows = 3, 1
+                    default_counts = (3,)
+                elif self._shortcut_node_focus in (6, 7):
+                    # Clique Direito e Tab: apenas skills + spells (sem consumíveis)
+                    default_cols, default_rows = 7, 2
+                    default_counts = (7, 2)
+                elif self._shortcut_node_focus <= 4:
+                    # Números 1 a 5: skills + spells + consumíveis
+                    default_cols, default_rows = 7, 3
+                    default_counts = (7, 2, 7)
+                else:
+                    # Números 6 a 0: skills + spells + consumíveis (clamped à direita)
+                    default_cols, default_rows = 8, 4
+                    default_counts = (8, 2, 8, 6)
+
+                # Consulta dinâmica das dimensões reais e contagem de itens por linha (CEGUI gui__3501Base)
+                grid_info = getattr(self.memory, "read_shortcut_grid_info", lambda: None)()
+                if grid_info:
+                    self._shortcut_grid_cols, self._shortcut_grid_rows, self._shortcut_grid_counts = grid_info
+                else:
+                    dims = self.memory.read_shortcut_grid_dims()
+                    if dims:
+                        self._shortcut_grid_cols, self._shortcut_grid_rows = dims
+                        self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                    else:
+                        self._shortcut_grid_cols = default_cols
+                        self._shortcut_grid_rows = default_rows
+                        self._shortcut_grid_counts = default_counts
+
+                # Ativa o grid de opções e posiciona na célula (0, 0)
+                self._shortcut_grid_active = True
+                self._shortcut_grid_row = 0
+                self._shortcut_grid_col = 0
+                self.shared.update(
+                    shortcut_grid_active=True,
+                    shortcut_grid_pos=(0, 0),
+                    shortcut_grid_cols=self._shortcut_grid_cols,
+                    shortcut_grid_rows=self._shortcut_grid_rows,
+                    shortcut_grid_counts=self._shortcut_grid_counts,
+                )
+                gx, gy = shortcut_grid_cell_point(
+                    rect, self._shortcut_node_focus, 0, 0, self._shortcut_grid_cols, self._shortcut_grid_rows
+                )
+                self.injector.move(gx, gy)
+                hub.rumble(0.04, 0.08, 30)
+
+            return
+        else:
+            self._previous_physical_esc = False
         self._handle_pet_click(now)
         self._handle_hud_purple_click(now)
         # Remap do overworld e combos de gatilho (mapa docs/REMAP-BOTOES): B/Y
@@ -5734,6 +6051,10 @@ class BridgeEngine(threading.Thread):
         # B/Y decide com o estado ESTÁVEL do tick anterior (ver docstring do handler).
         self._previous_panels = (self._active_panels[0], self._active_panels[1])
 
+    def trigger_rescan(self) -> None:
+        """Solicita re-enumeração e reconexão imediata do controle (ex: evento do Windows)."""
+        self._rescan_requested = True
+
     # Loop principal da thread: lê controle → confere foco → age → espera o restante do período.
     def run(self) -> None:
         # Sobe a resolução do relógio do Windows para 1 ms (estabilidade do 120 Hz).
@@ -5749,6 +6070,12 @@ class BridgeEngine(threading.Thread):
                 dt = tick_start - last_tick
                 last_tick = tick_start
                 now = time.monotonic()
+
+                # Evento nativo do SO (WM_DEVICECHANGE) ou solicitação externa de reconexão
+                if self._rescan_requested:
+                    self._rescan_requested = False
+                    if hub is not None:
+                        hub.trigger_rescan()
 
                 # A cada 1 s tenta recarregar o perfil — edição externa vale na hora.
                 if now - self._last_reload >= 1.0:
@@ -5775,12 +6102,6 @@ class BridgeEngine(threading.Thread):
                 if state.connected and (state.name != self._last_controller_name or
                                         state.instance_id != self._last_controller_instance):
                     self._release_all()
-                    if (state.device_guid and not cfg["input"]["device_guid"] and
-                            not self.config.last_error):
-                        try:
-                            self.config.select_controller(state.device_guid, apply_raw_mapping=False)
-                        except OSError:
-                            log.warning("Não foi possível salvar a preferência de controle", exc_info=True)
                     self._last_controller_name = state.name
                     self._last_controller_instance = state.instance_id
                     self.shared.toast(f"Controle conectado: {state.name}", 3.0)

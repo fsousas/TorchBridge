@@ -331,6 +331,12 @@ BOTTOM_HUD_ASSETS: dict[str, str] = {
     "nintendo": "hud-nitendo.png",
 }
 
+BOTTOM_HUD_SHORTCUT_ACTIVE_ASSETS: dict[str, str] = {
+    "xbox": "hud-xbox-shortcut-config-active.png",
+    "playstation": "hud-playstation-shortcut-config-active.png",
+    "nintendo": "hud-nitendo-shortcut-config-active.png",
+}
+
 BOTTOM_HUD_REF_HEIGHT = 1080.0
 BOTTOM_HUD_WIDTH = 1347.0
 BOTTOM_HUD_HEIGHT = 242.0
@@ -340,15 +346,168 @@ BOTTOM_HUD_HEIGHT_FRACTION = (BOTTOM_HUD_HEIGHT * BOTTOM_HUD_DEFAULT_SCALE) / BO
 BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION = 0.015                                     # -1.5% da altura da janela
 
 
-def bottom_hud_asset_path(controller_type: str) -> Path | None:
+def bottom_hud_asset_path(controller_type: str, shortcut_active: bool = False) -> Path | None:
     """Retorna o caminho do asset PNG do layout do controle especificado."""
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
         base = Path(__file__).resolve().parent.parent.parent
-    filename = BOTTOM_HUD_ASSETS.get(controller_type, "hud-xbox.png")
+    assets_map = BOTTOM_HUD_SHORTCUT_ACTIVE_ASSETS if shortcut_active else BOTTOM_HUD_ASSETS
+    filename = assets_map.get(controller_type, assets_map.get("xbox", "hud-xbox.png"))
     path = base / "assets" / "hud" / "inferior" / filename
     return path if path.is_file() else None
+
+
+def shortcut_mask_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG da máscara do HUD (mask-hud.png)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "hud" / "inferior" / "mask-hud.png"
+    return path if path.is_file() else None
+
+
+SHORTCUT_INSTRUCTION_ASSETS = {
+    "playstation": "shortcut-instruction-ps.png",
+    "nintendo": "shortcut-instruction-nintendo.png",
+    "xbox": "shortcut-instruction-xbox.png",
+}
+
+
+def shortcut_instruction_asset_path(controller_type: str) -> Path | None:
+    """Retorna o caminho do asset PNG com instruções de atalhos conforme o layout do controle."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    filename = SHORTCUT_INSTRUCTION_ASSETS.get(controller_type.lower(), "shortcut-instruction-xbox.png")
+    path = base / "assets" / "images" / "instructions" / filename
+    return path if path.is_file() else None
+
+
+def shortcut_config_info_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG da aba superior de informações (config-info.png)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "hud" / "superior" / "config-info.png"
+    return path if path.is_file() else None
+
+
+SHORTCUT_CONFIG_INFO_TOOLTIP_ASSETS = {
+    "playstation": "config-info-tooltip-ps.png",
+    "nintendo": "config-info-tooltip-nintendo.png",
+    "xbox": "config-info-tooltip-xbox.png",
+}
+
+
+def shortcut_config_info_tooltip_asset_path(controller_type: str) -> Path | None:
+    """Retorna o caminho do asset PNG do tooltip de informações de atalhos por tipo de controle."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    filename = SHORTCUT_CONFIG_INFO_TOOLTIP_ASSETS.get(controller_type.lower(), "config-info-tooltip-xbox.png")
+    path = base / "assets" / "hud" / "superior" / filename
+    return path if path.is_file() else None
+
+
+def shortcut_info_node_point(rect: Rect) -> tuple[int, int]:
+    """Retorna o ponto central do cursor sobre a aba superior de informações (config-info.png)."""
+    if not rect.valid or rect.height <= 0:
+        return (0, 0)
+    scale = rect.height / 960.0
+    cx = rect.left + rect.width / 2.0
+    cy = rect.top + 34.0 * scale
+    return int(round(cx)), int(round(cy))
+
+
+# Mapeamento dos nós da HUD inferior para configuração de atalhos (assets/hud/inferior/nodes.png).
+# Coordenadas relativas ao canvas da HUD (948x171) na resolução de referência 1280x960:
+SHORTCUT_HUD_NODES: tuple[tuple[int, str, float, float], ...] = (
+    (0, "yellow", 65.0, 118.0),   # Slot 1 (Amarelo #E6C12A - Início / Foco padrão)
+    (1, "green", 111.0, 118.0),   # Slot 2 (Verde #09B200)
+    (2, "green", 156.0, 118.0),   # Slot 3
+    (3, "green", 201.0, 118.0),   # Slot 4
+    (4, "green", 245.0, 118.0),   # Slot 5
+    (5, "green", 584.0, 118.0),   # Slot 6
+    (6, "green", 629.0, 118.0),   # Slot 7
+    (7, "green", 666.0, 111.0),   # Slot 8
+    (8, "green", 728.0, 118.0),   # Slot 9
+    (9, "green", 774.0, 118.0),   # Slot 10
+    (10, "green", 819.0, 118.0),  # Slot 11
+    (11, "green", 864.0, 118.0),  # Slot 12
+    (12, "green", 908.0, 118.0),  # Slot 13
+)
+
+
+def shortcut_nodes_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG com os nós da HUD inferior (nodes.png)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "hud" / "inferior" / "nodes.png"
+    return path if path.is_file() else None
+
+
+def shortcut_node_point(rect: Rect, index: int) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) absoluta na tela de um nó da HUD inferior."""
+    if not rect.valid or index < 0 or index >= len(SHORTCUT_HUD_NODES):
+        return (0, 0)
+    scale = rect.height / 960.0
+    mw = 948.0 * scale
+    mh = 171.0 * scale
+    mx = rect.left + (rect.width - mw) / 2.0
+    my = rect.bottom - mh
+    _, _, base_x, base_y = SHORTCUT_HUD_NODES[index]
+    x = int(round(mx + base_x * scale))
+    y = int(round(my + base_y * scale))
+    return (x, y)
+
+
+def shortcut_grid_cell_point(
+    rect: Rect,
+    slot_index: int,
+    row: int,
+    col: int,
+    num_cols: int = 8,
+    num_rows: int = 3,
+) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) absoluta na tela do centro de uma célula (row, col) do grid de atalhos."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+
+    pitch_x = 48.0 * scale
+    pitch_y = 48.0 * scale
+
+    # O grid repousa logo acima da barra inferior de atalhos e se expande PARA CIMA:
+    # A linha inferior do popup fica centralizada em rect.bottom - (112.12 * scale) (subido mais 50% de um bloco)
+    bottom_row_y = rect.bottom - (112.12 * scale)
+    cy = bottom_row_y - (num_rows - 1 - row) * pitch_y
+
+    slot_x, _ = shortcut_node_point(rect, slot_index)
+
+    # O jogo abre o popup deslocado para a direita em relação ao slot selecionado (+78.12 * scale, recuado 50% para a esquerda)
+    start_x = float(slot_x) + (78.12 * scale)
+
+    # Clamping na borda direita: no Torchlight o popup alinha-se perto da borda direita da HUD/janela
+    max_right = rect.right - (44.0 * scale)
+    if start_x + (num_cols - 1) * pitch_x > max_right:
+        start_x = max_right - (num_cols - 1) * pitch_x
+
+    # Clamping na borda esquerda
+    min_left = rect.left + (24.0 * scale)
+    if start_x < min_left:
+        start_x = min_left
+
+    cx = start_x + col * pitch_x
+    return (int(round(cx)), int(round(cy)))
+
+
 
 
 def bottom_hud_target_rect(
@@ -2228,6 +2387,14 @@ class OverlaySnapshot:
     quest_visible_rows: int = 0
     quest_can_abandon: bool = False
     quest_has_item_reward: bool = False
+    shortcut_config_active: bool = False
+    shortcut_node_focus: int = 0
+    shortcut_info_focus: bool = False
+    shortcut_grid_active: bool = False
+    shortcut_grid_pos: tuple[int, int] = (0, 0)
+    shortcut_grid_cols: int = 8
+    shortcut_grid_rows: int = 3
+    shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
 
 
 
