@@ -1351,6 +1351,42 @@ def pause_menu_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+# Coordenadas dos botões da tela de Morte / Respawn em jogo (base 1024x768)
+# Calibradas e validadas a partir de assets/images/sreensXcursor/death-screen.png
+# Ordem vertical:
+# 1. "resurrect_here" (verde - superior): Resurrect here, but lose Experience/Fame
+# 2. "resurrect_entrance" (amarelo - padrão inicial): Resurrect at entrance, but lose Gold
+# 3. "resurrect_town" (verde - intermediário): Resurrect in town and lose nothing
+# 4. "exit_to_title" (verde - inferior): Exit to Title
+DEATH_SCREEN_BUTTONS: tuple[str, ...] = (
+    "resurrect_here",
+    "resurrect_entrance",
+    "resurrect_town",
+    "exit_to_title",
+)
+
+DEATH_SCREEN_BUTTON_COORDS: dict[str, tuple[float, float]] = {
+    "resurrect_here": (334.0, 248.0),
+    "resurrect_entrance": (334.0, 348.0),
+    "resurrect_town": (334.0, 448.0),
+    "exit_to_title": (563.0, 552.0),
+}
+
+
+def death_screen_button_point(rect: Rect, button_name: str) -> tuple[int, int]:
+    """Calcula a coordenada (x, y) de um botão na tela de Morte / Respawn."""
+    if not rect.valid:
+        return (0, 0)
+    bx, by = DEATH_SCREEN_BUTTON_COORDS.get(button_name.lower(), (334.0, 348.0))
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    x = center_x + (bx - 512.0) * scale
+    y = rect.top + by * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 # Coordenadas dos botões e slots da tela de Carregar Personagem (state_id == 3) (base 1024x768)
 # Calibradas e validadas a partir de assets/images/sreensXcursor/load-char
 LOAD_CHAR_BUTTONS: tuple[str, ...] = (
@@ -2338,6 +2374,7 @@ class OverlaySnapshot:
     dialog_buttons: list[str] = field(default_factory=list)
     dialog_has_reward: bool = False
     pause_menu_focus: str | None = None
+    death_screen_focus: str | None = None
     load_char_focus: str | None = None
     load_char_delete_open: bool = False
     settings_focus: str | None = None

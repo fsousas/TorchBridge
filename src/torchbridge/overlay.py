@@ -64,6 +64,8 @@ from .models import (
     title_menu_button_point,
     PAUSE_BUTTONS,
     pause_menu_button_point,
+    DEATH_SCREEN_BUTTONS,
+    death_screen_button_point,
     LOAD_CHAR_BUTTONS,
     load_char_button_point,
     fishing_hook_point,
@@ -1317,6 +1319,28 @@ class GameOverlay(QWidget):
                     else:
                         painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
                         painter.setBrush(QColor(46, 204, 113, 90))
+                    painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3.0 * scale, 3.0 * scale)
+
+            # 8b. Alvos da Tela de Morte / Respawn em modo calibração
+            # Segue o padrão de assets/images/sreensXcursor/death-screen.png:
+            # Amarelo para o foco ativo (default: resurrect_entrance) e verde para as possibilidades.
+            is_death_screen = (
+                "Morte / Respawn" in (snapshot.memory_open_menus or [])
+                or any("morte" in m.lower() or "respawn" in m.lower() for m in (snapshot.memory_open_menus or []))
+            )
+            if is_death_screen:
+                box_size = 20.0 * scale * (rect.height / 768.0)
+                for btn_name in DEATH_SCREEN_BUTTONS:
+                    bx, by = death_screen_button_point(rect, btn_name)
+                    lx = bx - rect.left - box_size / 2.0
+                    ly = by - rect.top - box_size / 2.0
+                    is_focus = (snapshot.death_screen_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(230, 193, 42, 240), 2.0 * scale))
+                        painter.setBrush(QColor(230, 193, 42, 160))
+                    else:
+                        painter.setPen(QPen(QColor(9, 178, 0, 230), 1.5 * scale))
+                        painter.setBrush(QColor(9, 178, 0, 90))
                     painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3.0 * scale, 3.0 * scale)
 
             # 9. Alvos do Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)

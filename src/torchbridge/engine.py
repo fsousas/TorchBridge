@@ -33,6 +33,7 @@ from .models import (
     load_char_button_point,
     modal_ok_point,
     pause_menu_button_point,
+    death_screen_button_point,
     fishing_hook_point,
     settings_button_point,
     settings_dropdown_option_point,
@@ -249,6 +250,9 @@ class BridgeEngine(threading.Thread):
         # Navegação no Menu de Pause (COptionsMenu / Options) via D-pad
         self._pause_menu_initialized = False
         self._pause_focus = "return_to_game"
+        # Navegação na Tela de Morte / Respawn em jogo via D-pad
+        self._death_screen_initialized = False
+        self._death_screen_focus: str | None = None
         # Navegação na Tela de Carregar Personagem (state_id == 3) via D-pad
         self._load_char_initialized = False
         self._load_char_focus: str | None = None
@@ -381,6 +385,7 @@ class BridgeEngine(threading.Thread):
             char_class="",
             radial_selection=None,
             pause_menu_focus=None,
+            death_screen_focus=None,
             load_char_focus=None,
             load_char_delete_open=False,
             settings_focus=None,
@@ -537,6 +542,7 @@ class BridgeEngine(threading.Thread):
             char_create_focus=None,
             difficulty_focus=None,
             pause_menu_focus=None,
+            death_screen_focus=None,
             load_char_focus=None,
             load_char_delete_open=False,
             inventory_open=False,
@@ -1404,6 +1410,51 @@ class BridgeEngine(threading.Thread):
             self.injector.move(target_x, target_y)
             hub.rumble(0.03, 0.08, 30)
             self.shared.update(pause_menu_focus=new_focus)
+
+    # Navegação por D-pad na Tela de Morte / Respawn em jogo
+    def _handle_death_screen_navigation(
+        self,
+        state: ControllerState,
+        rect: Rect,
+        hub: ControllerHub,
+    ) -> None:
+        """Gerencia a navegação na Tela de Morte / Respawn em jogo via D-pad."""
+        if not self._death_screen_initialized:
+            self._death_screen_initialized = True
+            # Foco padrão: 'resurrect_entrance' (marcador amarelo do usuário)
+            self._death_screen_focus = "resurrect_entrance"
+            target_x, target_y = death_screen_button_point(rect, self._death_screen_focus)
+            self.injector.move(target_x, target_y)
+            self.shared.update(death_screen_focus=self._death_screen_focus)
+            return
+
+        current = self._death_screen_focus or "resurrect_entrance"
+        new_focus = current
+
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+
+        if dpad_up:
+            if current == "exit_to_title":
+                new_focus = "resurrect_town"
+            elif current == "resurrect_town":
+                new_focus = "resurrect_entrance"
+            elif current == "resurrect_entrance":
+                new_focus = "resurrect_here"
+        elif dpad_down:
+            if current == "resurrect_here":
+                new_focus = "resurrect_entrance"
+            elif current == "resurrect_entrance":
+                new_focus = "resurrect_town"
+            elif current == "resurrect_town":
+                new_focus = "exit_to_title"
+
+        if new_focus != current:
+            self._death_screen_focus = new_focus
+            target_x, target_y = death_screen_button_point(rect, new_focus)
+            self.injector.move(target_x, target_y)
+            hub.rumble(0.03, 0.08, 30)
+            self.shared.update(death_screen_focus=new_focus)
 
     # Navegação por D-pad na Tela de Carregar Personagem (state_id == 3)
     def _handle_load_char_navigation(
@@ -5252,6 +5303,18 @@ class BridgeEngine(threading.Thread):
                 self._pause_focus = None
                 self.shared.update(pause_menu_focus=None)
 
+            # Tela de Morte / Respawn em jogo
+            is_death_screen = self._memory_state.is_in_game and (
+                "Morte / Respawn" in self._memory_state.open_menus
+                or any("morte" in m.lower() or "respawn" in m.lower() for m in self._memory_state.open_menus)
+            )
+            if is_death_screen:
+                self._handle_death_screen_navigation(state, rect, hub)
+            elif self._death_screen_initialized:
+                self._death_screen_initialized = False
+                self._death_screen_focus = None
+                self.shared.update(death_screen_focus=None)
+
             # Tela de Configurações (Settings) em qualquer estado (in-game ou menu principal)
             is_settings = (
                 "Configurações" in (self._memory_state.open_menus or [])
@@ -5542,6 +5605,10 @@ class BridgeEngine(threading.Thread):
                 self._pause_menu_initialized = False
                 self._pause_focus = None
                 self.shared.update(pause_menu_focus=None)
+            if self._death_screen_initialized:
+                self._death_screen_initialized = False
+                self._death_screen_focus = None
+                self.shared.update(death_screen_focus=None)
             if self._settings_initialized:
                 if self._settings_slider_dragging:
                     self.injector.mouse_button("left", False)
