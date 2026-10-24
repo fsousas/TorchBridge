@@ -64,6 +64,8 @@ from .models import (
     title_menu_button_point,
     PAUSE_BUTTONS,
     pause_menu_button_point,
+    DEATH_SCREEN_BUTTONS,
+    death_screen_button_point,
     LOAD_CHAR_BUTTONS,
     load_char_button_point,
     fishing_hook_point,
@@ -685,6 +687,13 @@ class GameOverlay(QWidget):
         ):
             return False
 
+        # 4. TELA DE MORTE / RESPAWN (não deve exibir o HUD inferior de controle)
+        if (
+            snapshot.death_screen_focus is not None
+            or any("morte" in m or "respawn" in m for m in open_menus)
+        ):
+            return False
+
         return True
 
     def _draw_bottom_hud(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
@@ -1030,6 +1039,14 @@ class GameOverlay(QWidget):
                 for m in (snapshot.memory_open_menus or [])
             )
         )
+        is_death_screen = (
+            snapshot.death_screen_focus is not None
+            or any(
+                "morte" in m.lower()
+                or "respawn" in m.lower()
+                for m in (snapshot.memory_open_menus or [])
+            )
+        )
 
         is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading
 
@@ -1090,8 +1107,8 @@ class GameOverlay(QWidget):
                 painter.setPen(QColor(120, 220, 150, 200))
                 painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
 
-            # 4. HUD inferior (elemento fixo da interface in-game, oculto em diálogos/missões)
-            if not is_dialog and self._hud_pixmap is not None:
+            # 4. HUD inferior (elemento fixo da interface in-game, oculto em diálogos/missões e tela de morte)
+            if not is_dialog and not is_death_screen and self._hud_pixmap is not None:
                 hl, ht, hw, hh = hud_target_rect(rect)
                 target = QRectF(hl - rect.left, ht - rect.top, hw, hh)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -1131,7 +1148,7 @@ class GameOverlay(QWidget):
                 )
 
             # 4b. HUD inferior dos controles (calibração visual da área)
-            if not is_dialog:
+            if not is_dialog and not is_death_screen:
                 overlay_cfg = cfg.get("overlay", {})
                 offset_y = float(overlay_cfg.get("bottom_hud_offset_y_percent", BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION))
                 scale_hud = float(overlay_cfg.get("bottom_hud_scale", 1.0))
@@ -1317,6 +1334,28 @@ class GameOverlay(QWidget):
                     else:
                         painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
                         painter.setBrush(QColor(46, 204, 113, 90))
+                    painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3.0 * scale, 3.0 * scale)
+
+            # 8b. Alvos da Tela de Morte / Respawn em modo calibração
+            # Segue o padrão de assets/images/sreensXcursor/death-screen.png:
+            # Amarelo para o foco ativo (default: resurrect_entrance) e verde para as possibilidades.
+            is_death_screen = (
+                "Morte / Respawn" in (snapshot.memory_open_menus or [])
+                or any("morte" in m.lower() or "respawn" in m.lower() for m in (snapshot.memory_open_menus or []))
+            )
+            if is_death_screen:
+                box_size = 20.0 * scale * (rect.height / 768.0)
+                for btn_name in DEATH_SCREEN_BUTTONS:
+                    bx, by = death_screen_button_point(rect, btn_name)
+                    lx = bx - rect.left - box_size / 2.0
+                    ly = by - rect.top - box_size / 2.0
+                    is_focus = (snapshot.death_screen_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(230, 193, 42, 240), 2.0 * scale))
+                        painter.setBrush(QColor(230, 193, 42, 160))
+                    else:
+                        painter.setPen(QPen(QColor(9, 178, 0, 230), 1.5 * scale))
+                        painter.setBrush(QColor(9, 178, 0, 90))
                     painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3.0 * scale, 3.0 * scale)
 
             # 9. Alvos do Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
