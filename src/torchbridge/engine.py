@@ -155,10 +155,8 @@ class BridgeEngine(threading.Thread):
         # Estado do combo Back+Start (calibração): visto?, desde quando?, já disparou?
         # Setor da roda selecionado enquanto LB estiver segurado.
         self._radial_selection: int | None = None
-        # Latch de "roda confirmada pelo A": o jogador aperta A com o polegar esquerdo
-        # ainda segurando o LB, então a roda precisa ficar fechada mesmo com o LB
-        # pressionado. Rearma na borda de subida do LB (próximo aperto reabre).
         self._radial_dismissed: bool = False
+        self._rescan_requested: bool = False
         # Modo de configuração de atalhos inferior (spotlight ativo).
         self._shortcut_config_active: bool = False
         self._shortcut_node_focus: int = 0
@@ -5957,6 +5955,10 @@ class BridgeEngine(threading.Thread):
         # B/Y decide com o estado ESTÁVEL do tick anterior (ver docstring do handler).
         self._previous_panels = (self._active_panels[0], self._active_panels[1])
 
+    def trigger_rescan(self) -> None:
+        """Solicita re-enumeração e reconexão imediata do controle (ex: evento do Windows)."""
+        self._rescan_requested = True
+
     # Loop principal da thread: lê controle → confere foco → age → espera o restante do período.
     def run(self) -> None:
         # Sobe a resolução do relógio do Windows para 1 ms (estabilidade do 120 Hz).
@@ -5972,6 +5974,12 @@ class BridgeEngine(threading.Thread):
                 dt = tick_start - last_tick
                 last_tick = tick_start
                 now = time.monotonic()
+
+                # Evento nativo do SO (WM_DEVICECHANGE) ou solicitação externa de reconexão
+                if self._rescan_requested:
+                    self._rescan_requested = False
+                    if hub is not None:
+                        hub.trigger_rescan()
 
                 # A cada 1 s tenta recarregar o perfil — edição externa vale na hora.
                 if now - self._last_reload >= 1.0:

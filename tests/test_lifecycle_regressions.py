@@ -115,6 +115,34 @@ class ControllerSelectionTests(unittest.TestCase):
         controller_quit.assert_called_once()
         controller_init.assert_called_once()
 
+    def test_windows_reconnection_reinitializes_discovery_even_with_stale_device_list(self):
+        hub = self.make_hub()
+        # Simula que um controle estava conectado previamente no cache _devices,
+        # mas foi desconectado e o dispositivo não está saudável.
+        hub._devices = [(0, "stale-pad", "Disconnected pad", 10)]
+        visible = False
+        joystick = MagicMock()
+        joystick.get_guid.return_value = "reconnected-pad"
+        joystick.get_name.return_value = "Reconnected DualSense"
+        joystick.get_instance_id.return_value = 20
+
+        def initialize_joysticks():
+            nonlocal visible
+            visible = True
+
+        with patch("torchbridge.controller.IS_WINDOWS", True), \
+                patch("torchbridge.controller.pygame.joystick.quit") as joystick_quit, \
+                patch("torchbridge.controller.sdl_controller.quit") as controller_quit, \
+                patch("torchbridge.controller.pygame.joystick.init", side_effect=initialize_joysticks), \
+                patch("torchbridge.controller.sdl_controller.init") as controller_init, \
+                patch("torchbridge.controller.pygame.joystick.get_count", side_effect=lambda: int(visible)), \
+                patch("torchbridge.controller.pygame.joystick.Joystick", return_value=joystick):
+            hub._refresh_devices()
+        self.assertEqual(hub.devices, (("reconnected-pad", "Reconnected DualSense"),))
+        joystick_quit.assert_called_once()
+        controller_quit.assert_called_once()
+        controller_init.assert_called_once()
+
     def test_transient_enumeration_error_returns_disconnected_and_recovers(self):
         hub = self.make_hub()
         joystick = MagicMock()

@@ -140,6 +140,36 @@ def main() -> int:
     shared = SharedOverlayState()
     # Motor de entrada (thread de 120 Hz).
     engine = BridgeEngine(config, shared)
+
+    # Filtro nativo do Windows: detecta conexão e desconexão de controles em tempo real (USB / Bluetooth).
+    device_filter = None
+    if sys.platform == "win32":
+        from ctypes import wintypes
+        from PySide6.QtCore import QAbstractNativeEventFilter
+
+        WM_DEVICECHANGE = 0x0219
+
+        class DeviceChangeFilter(QAbstractNativeEventFilter):
+            def __init__(self, on_change) -> None:
+                super().__init__()
+                self._on_change = on_change
+
+            def nativeEventFilter(self, event_type, message):
+                try:
+                    if event_type in (b"windows_generic_MSG", "windows_generic_MSG"):
+                        msg = wintypes.MSG.from_address(int(message))
+                        if msg.message == WM_DEVICECHANGE:
+                            self._on_change()
+                            # Bluetooth no Windows leva entre 400ms e 1000ms para concluir o handshake do HID
+                            QTimer.singleShot(600, self._on_change)
+                            QTimer.singleShot(1200, self._on_change)
+                except Exception:
+                    pass
+                return False, 0
+
+        device_filter = DeviceChangeFilter(engine.trigger_rescan)
+        app.installNativeEventFilter(device_filter)
+
     # Overlay Qt; a exibição é controlada pelo próprio _refresh conforme o jogo.
     overlay = GameOverlay(shared, config)
     # Ícone da bandeja: pausa, perfil, recarga e saída.

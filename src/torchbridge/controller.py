@@ -66,6 +66,12 @@ class ControllerHub:
     def __init__(self) -> None:
         # Inicializa o display (exigido pelo joystick/eventos do SDL em várias plataformas).
         pygame.display.init()
+        if IS_WINDOWS:
+            try:
+                if not pygame.display.get_surface():
+                    pygame.display.set_mode((1, 1), pygame.HIDDEN)
+            except pygame.error:
+                pass
         # Liga o subsistema de joystick do SDL.
         pygame.joystick.init()
         # Liga o GameController (banco de mapas SDL).
@@ -80,10 +86,19 @@ class ControllerHub:
         self._devices: list[tuple[int, str, str, int]] = []
         self._device_guid = ""
         self._instance_id: int | None = None
+        self._initial_scan_done: bool = False
+        self._rescan_requested: bool = False
 
     @property
     def devices(self) -> tuple[tuple[str, str], ...]:
         return tuple((guid, name) for _, guid, name, _ in self._devices)
+
+    def trigger_rescan(self) -> None:
+        """Força o descarte do dispositivo atual e re-enumeração imediata."""
+        self._drop_device()
+        self._devices = []
+        self._last_scan = 0.0
+        self._rescan_requested = True
 
     def close(self) -> None:
         self._drop_device()
@@ -119,7 +134,13 @@ class ControllerHub:
     def _refresh_devices(self) -> None:
         # Windows discovery needs a refresh without a pygame window receiving
         # WM_DEVICECHANGE. Restarting SDL elsewhere destroys virtual devices.
-        if IS_WINDOWS and not self._devices and not self._device_healthy():
+        # Re-inicializa apenas no arranque inicial ou quando explicitamente solicitado
+        # por um evento de hardware (trigger_rescan/WM_DEVICECHANGE), evitando o loop
+        # contínuo a cada 0.8s que corrompe o subsistema de controle do SDL no Windows.
+        needs_reinit = getattr(self, "_rescan_requested", False) or not getattr(self, "_initial_scan_done", False)
+        if IS_WINDOWS and not self._device_healthy() and needs_reinit:
+            self._rescan_requested = False
+            self._initial_scan_done = True
             try:
                 sdl_controller.quit()
                 pygame.joystick.quit()
@@ -127,6 +148,7 @@ class ControllerHub:
                 sdl_controller.init()
             except pygame.error:
                 pass
+        self._initial_scan_done = True
         devices = []
         for index in range(pygame.joystick.get_count()):
             joystick = None
