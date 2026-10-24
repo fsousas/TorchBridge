@@ -184,6 +184,49 @@ class ShortcutConfigTests(unittest.TestCase):
             finally:
                 painter.end()
 
+    def test_instruction_banner_animates_exit_slide_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, config = self._engine(directory)
+            shared = SharedOverlayState()
+            overlay = GameOverlay(shared, config)
+
+            # Modo inativo (shortcut_config_active = False), mas animando saída (progresso > 0)
+            snapshot_inactive = OverlaySnapshot(
+                game_rect=Rect(0, 0, 1280, 960),
+                shortcut_config_active=False,
+                controller_type="xbox",
+            )
+
+            overlay._shortcut_anim_progress = 0.5
+            img = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(img)
+            try:
+                overlay._draw_shortcut_instruction(painter, snapshot_inactive)
+            finally:
+                painter.end()
+
+            # Pixmap deve ter sido carregado e processado no desenho
+            if overlay._config_info_pixmap is not None:
+                # Confirma que foi desenhado algo na tela durante a saída
+                has_pixels = any(
+                    img.pixelColor(x, y).alpha() > 0
+                    for x in (640,)
+                    for y in range(0, 70)
+                )
+                self.assertTrue(has_pixels)
+
+            # Quando a animação atinge 0.0, não deve desenhar nada
+            overlay._shortcut_anim_progress = 0.0
+            img_done = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_done.fill(Qt.GlobalColor.transparent)
+            painter_done = QPainter(img_done)
+            try:
+                overlay._draw_shortcut_instruction(painter_done, snapshot_inactive)
+            finally:
+                painter_done.end()
+            self.assertEqual(img_done.pixelColor(640, 20).alpha(), 0)
+
     def test_shortcut_nodes_definitions(self):
         path = shortcut_nodes_asset_path()
         self.assertIsNotNone(path)

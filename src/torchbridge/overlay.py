@@ -2353,7 +2353,7 @@ class GameOverlay(QWidget):
         return pixmap
 
     def _draw_shortcut_instruction(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
-        if (snapshot.memory_state_desc and not snapshot.memory_is_in_game) or not snapshot.shortcut_config_active:
+        if snapshot.memory_state_desc and not snapshot.memory_is_in_game:
             return
         progress = self._shortcut_anim_progress
         if progress <= 0.0:
