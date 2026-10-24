@@ -138,7 +138,7 @@ class ControllerHub:
         # por um evento de hardware (trigger_rescan/WM_DEVICECHANGE), evitando o loop
         # contínuo a cada 0.8s que corrompe o subsistema de controle do SDL no Windows.
         needs_reinit = getattr(self, "_rescan_requested", False) or not getattr(self, "_initial_scan_done", False)
-        if IS_WINDOWS and not self._device_healthy() and needs_reinit:
+        if IS_WINDOWS and (not self._device_healthy() or getattr(self, "_rescan_requested", False)) and needs_reinit:
             self._rescan_requested = False
             self._initial_scan_done = True
             try:
@@ -336,8 +336,10 @@ class ControllerHub:
                     if event.instance_id == self._instance_id:
                         self._drop_device()
                     self._last_scan = 0.0
+                    self._rescan_requested = True
                 elif event.type in (pygame.JOYDEVICEADDED, pygame.CONTROLLERDEVICEADDED):
                     self._last_scan = 0.0
+                    self._rescan_requested = True
             self._scan(raw_config, preferred_guid)
             if self._controller is not None:
                 return self._poll_sdl()

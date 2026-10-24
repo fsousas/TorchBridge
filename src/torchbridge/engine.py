@@ -6049,12 +6049,6 @@ class BridgeEngine(threading.Thread):
                 if state.connected and (state.name != self._last_controller_name or
                                         state.instance_id != self._last_controller_instance):
                     self._release_all()
-                    if (state.device_guid and not cfg["input"]["device_guid"] and
-                            not self.config.last_error):
-                        try:
-                            self.config.select_controller(state.device_guid, apply_raw_mapping=False)
-                        except OSError:
-                            log.warning("Não foi possível salvar a preferência de controle", exc_info=True)
                     self._last_controller_name = state.name
                     self._last_controller_instance = state.instance_id
                     self.shared.toast(f"Controle conectado: {state.name}", 3.0)
