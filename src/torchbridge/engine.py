@@ -90,6 +90,7 @@ from .models import (
     quest_abandon_point,
     SHORTCUT_HUD_NODES,
     shortcut_node_point,
+    shortcut_info_node_point,
     shortcut_grid_cell_point,
 )
 
@@ -160,6 +161,7 @@ class BridgeEngine(threading.Thread):
         # Modo de configuração de atalhos inferior (spotlight ativo).
         self._shortcut_config_active: bool = False
         self._shortcut_node_focus: int = 0
+        self._shortcut_info_focus: bool = False
         self._shortcut_grid_active: bool = False
         self._shortcut_grid_row: int = 0
         self._shortcut_grid_col: int = 0
@@ -4908,7 +4910,8 @@ class BridgeEngine(threading.Thread):
                 if str(slot).lower() in ("short-cut", "shortcut"):
                     self._shortcut_config_active = True
                     self._shortcut_node_focus = 0
-                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0)
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0, shortcut_info_focus=False)
                     self._release_all()
                     target_x, target_y = shortcut_node_point(rect, 0)
                     self.injector.move(target_x, target_y)
@@ -5591,7 +5594,8 @@ class BridgeEngine(threading.Thread):
                     self._shortcut_config_active = False
                     self._shortcut_grid_active = False
                     self._shortcut_node_focus = 0
-                    self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False)
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
                     # Envia clique para fechar o pop-up nativo do jogo
                     target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
                     self.injector.move(target_x, target_y)
@@ -5603,7 +5607,8 @@ class BridgeEngine(threading.Thread):
                 # Botão Leste (B / Bolinha no PS): cancela e fecha apenas o grid, voltando para os nós da HUD
                 if state.pressed("b") and not self._previous.pressed("b"):
                     self._shortcut_grid_active = False
-                    self.shared.update(shortcut_grid_active=False)
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_grid_active=False, shortcut_info_focus=False)
                     # Retorna o cursor para o nó da HUD que estava focado
                     target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
                     self.injector.move(target_x, target_y)
@@ -5658,11 +5663,38 @@ class BridgeEngine(threading.Thread):
                     self.injector.mouse_button("left", False)
                     # O grid nativo fecha ao clicar numa opção; voltamos para a navegação de nós
                     self._shortcut_grid_active = False
-                    self.shared.update(shortcut_grid_active=False)
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_grid_active=False, shortcut_info_focus=False)
                     node_x, node_y = shortcut_node_point(rect, self._shortcut_node_focus)
                     self.injector.move(node_x, node_y)
                     hub.rumble(0.05, 0.12, 40)
 
+                return
+
+            # Sub-modo: Foco na aba superior de informações (config-info.png)
+            if self._shortcut_info_focus:
+                # Tecla ESC ou Botão Start: desarma completamente a configuração e volta para o jogo
+                if (state.pressed("start") and not self._previous.pressed("start")) or esc_edge:
+                    self._shortcut_config_active = False
+                    self._shortcut_node_focus = 0
+                    self._shortcut_grid_active = False
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
+                    hub.rumble(0.04, 0.08, 30)
+                    return
+
+                # D-pad Baixo ou Botão Leste (B / Bolinha no PS): retorna para os nós da HUD inferior
+                dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+                b_pressed = state.pressed("b") and not self._previous.pressed("b")
+                if dpad_down or b_pressed:
+                    self._shortcut_info_focus = False
+                    self.shared.update(shortcut_info_focus=False)
+                    target_x, target_y = shortcut_node_point(rect, self._shortcut_node_focus)
+                    self.injector.move(target_x, target_y)
+                    hub.rumble(0.03, 0.08, 30)
+                    return
+
+                # Suprime os outros comandos enquanto na aba superior
                 return
 
             # Modo principal de seleção de slots da HUD inferior:
@@ -5673,8 +5705,19 @@ class BridgeEngine(threading.Thread):
                 self._shortcut_config_active = False
                 self._shortcut_node_focus = 0
                 self._shortcut_grid_active = False
-                self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False)
+                self._shortcut_info_focus = False
+                self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
                 hub.rumble(0.04, 0.08, 30)
+                return
+
+            # D-pad Cima: navega para a aba superior de informações (config-info.png)
+            dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+            if dpad_up:
+                self._shortcut_info_focus = True
+                self.shared.update(shortcut_info_focus=True)
+                target_x, target_y = shortcut_info_node_point(rect)
+                self.injector.move(target_x, target_y)
+                hub.rumble(0.03, 0.08, 30)
                 return
 
             # Navegação pelos 13 nós da HUD inferior via D-pad

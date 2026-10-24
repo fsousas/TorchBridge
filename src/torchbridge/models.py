@@ -386,6 +386,44 @@ def shortcut_instruction_asset_path(controller_type: str) -> Path | None:
     return path if path.is_file() else None
 
 
+def shortcut_config_info_asset_path() -> Path | None:
+    """Retorna o caminho do asset PNG da aba superior de informações (config-info.png)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    path = base / "assets" / "hud" / "superior" / "config-info.png"
+    return path if path.is_file() else None
+
+
+SHORTCUT_CONFIG_INFO_TOOLTIP_ASSETS = {
+    "playstation": "config-info-tooltip-ps.png",
+    "nintendo": "config-info-tooltip-nintendo.png",
+    "xbox": "config-info-tooltip-xbox.png",
+}
+
+
+def shortcut_config_info_tooltip_asset_path(controller_type: str) -> Path | None:
+    """Retorna o caminho do asset PNG do tooltip de informações de atalhos por tipo de controle."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    filename = SHORTCUT_CONFIG_INFO_TOOLTIP_ASSETS.get(controller_type.lower(), "config-info-tooltip-xbox.png")
+    path = base / "assets" / "hud" / "superior" / filename
+    return path if path.is_file() else None
+
+
+def shortcut_info_node_point(rect: Rect) -> tuple[int, int]:
+    """Retorna o ponto central do cursor sobre a aba superior de informações (config-info.png)."""
+    if not rect.valid or rect.height <= 0:
+        return (0, 0)
+    scale = rect.height / 960.0
+    cx = rect.left + rect.width / 2.0
+    cy = rect.top + 34.0 * scale
+    return int(round(cx)), int(round(cy))
+
+
 # Mapeamento dos nós da HUD inferior para configuração de atalhos (assets/hud/inferior/nodes.png).
 # Coordenadas relativas ao canvas da HUD (948x171) na resolução de referência 1280x960:
 SHORTCUT_HUD_NODES: tuple[tuple[int, str, float, float], ...] = (
@@ -2351,6 +2389,7 @@ class OverlaySnapshot:
     quest_has_item_reward: bool = False
     shortcut_config_active: bool = False
     shortcut_node_focus: int = 0
+    shortcut_info_focus: bool = False
     shortcut_grid_active: bool = False
     shortcut_grid_pos: tuple[int, int] = (0, 0)
     shortcut_grid_cols: int = 8

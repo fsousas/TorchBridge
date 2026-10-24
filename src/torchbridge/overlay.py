@@ -35,6 +35,9 @@ from .models import (
     BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION,
     shortcut_mask_asset_path,
     shortcut_instruction_asset_path,
+    shortcut_config_info_asset_path,
+    shortcut_config_info_tooltip_asset_path,
+    shortcut_info_node_point,
     SHORTCUT_HUD_NODES,
     shortcut_grid_cell_point,
     virtual_keyboard_bg_asset_path,
@@ -246,6 +249,9 @@ class GameOverlay(QWidget):
         self._cached_spotlight_size: tuple[int, int] | None = None
         # Cache da imagem de instruções de atalhos e progresso da animação (fade e slide-in).
         self._shortcut_instruction_cache: dict[str, QPixmap] = {}
+        self._config_info_pixmap: QPixmap | None = None
+        self._config_info_tooltip_cache: dict[str, QPixmap] = {}
+        self._shortcut_tooltip_opacity = 0.0
         self._shortcut_anim_progress = 0.0
         self._shortcut_anim_last_time = time.monotonic()
         self._shortcut_anim_seconds = 0.35
@@ -401,20 +407,39 @@ class GameOverlay(QWidget):
             self._kb_press_anim_key = pressed_key
             self._kb_press_anim_start = now
 
-    # Avança o progresso da animação do modo de atalhos (fade do backdrop e descida do banner).
+    # Avança o progresso da animação do modo de atalhos (descida da aba superior e fade do tooltip).
     def _tick_shortcut_mode_anim(self, snapshot: OverlaySnapshot) -> None:
-        target = 1.0 if snapshot.shortcut_config_active else 0.0
         now = time.monotonic()
         dt = now - self._shortcut_anim_last_time
         self._shortcut_anim_last_time = now
+
+        # Animação de descida/subida da aba config-info
+        target = 1.0 if snapshot.shortcut_config_active else 0.0
         if abs(self._shortcut_anim_progress - target) < 1e-3:
             self._shortcut_anim_progress = target
-            return
-        step = dt / self._shortcut_anim_seconds
-        if target > self._shortcut_anim_progress:
-            self._shortcut_anim_progress = min(target, self._shortcut_anim_progress + step)
         else:
-            self._shortcut_anim_progress = max(target, self._shortcut_anim_progress - step)
+            step = dt / self._shortcut_anim_seconds
+            if target > self._shortcut_anim_progress:
+                self._shortcut_anim_progress = min(target, self._shortcut_anim_progress + step)
+            else:
+                self._shortcut_anim_progress = max(target, self._shortcut_anim_progress - step)
+
+        # Animação de fade-in/fade-out do tooltip (quando focado na aba e grid fechado)
+        tooltip_target = (
+            1.0
+            if snapshot.shortcut_config_active
+            and snapshot.shortcut_info_focus
+            and not snapshot.shortcut_grid_active
+            else 0.0
+        )
+        if abs(self._shortcut_tooltip_opacity - tooltip_target) < 1e-3:
+            self._shortcut_tooltip_opacity = tooltip_target
+        else:
+            tooltip_step = dt / 0.18
+            if tooltip_target > self._shortcut_tooltip_opacity:
+                self._shortcut_tooltip_opacity = min(tooltip_target, self._shortcut_tooltip_opacity + tooltip_step)
+            else:
+                self._shortcut_tooltip_opacity = max(tooltip_target, self._shortcut_tooltip_opacity - tooltip_step)
 
     # Acompanha o retângulo do jogo e mostra/esconde conforme o estado.
     def _refresh(self) -> None:
@@ -2302,6 +2327,31 @@ class GameOverlay(QWidget):
         self._shortcut_instruction_cache[controller_type] = pixmap
         return pixmap
 
+    def _get_config_info_pixmap(self) -> QPixmap | None:
+        if self._config_info_pixmap is not None:
+            return self._config_info_pixmap
+        path = shortcut_config_info_asset_path()
+        if path is None or not path.is_file():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._config_info_pixmap = pixmap
+        return pixmap
+
+    def _get_config_info_tooltip_pixmap(self, controller_type: str) -> QPixmap | None:
+        cached = self._config_info_tooltip_cache.get(controller_type)
+        if cached is not None:
+            return cached
+        path = shortcut_config_info_tooltip_asset_path(controller_type)
+        if path is None or not path.is_file():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        self._config_info_tooltip_cache[controller_type] = pixmap
+        return pixmap
+
     def _draw_shortcut_instruction(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
         progress = self._shortcut_anim_progress
         if progress <= 0.0:
@@ -2313,36 +2363,72 @@ class GameOverlay(QWidget):
         if w <= 0 or h <= 0:
             return
 
-        cfg = self.config.get()
-        overlay_cfg = cfg.get("overlay", {})
-        layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
-        if layout_cfg in ("xbox", "playstation", "nintendo"):
-            controller_type = layout_cfg
-        else:
-            controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
-
-        pixmap = self._get_shortcut_instruction_pixmap(controller_type)
-        if pixmap is None or pixmap.isNull():
-            return
-
         # Escala proporcional com base na resolução de referência (1280x960)
         scale = h / 960.0
-        bw = int(round(571.0 * scale))
-        bh = int(round(806.0 * scale))
 
-        bx = int(round((w - bw) / 2.0))
-        # Sobe ~40% da altura da imagem para que a placa fique bem posicionada e as correntes venham do teto
-        target_y = (h - bh) / 2.0 - bh * 0.40
-        start_y = -bh - 40
+        info_pixmap = self._get_config_info_pixmap()
+        if info_pixmap is not None and not info_pixmap.isNull():
+            bw = int(round(217.0 * scale))
+            bh = int(round(68.0 * scale))
+            bx = int(round((w - bw) / 2.0))
+            target_y = 0
+            start_y = -bh - 10
 
-        # Animação suave com desaceleração (cubic ease-out na descida, suave na subida)
-        ease = 1.0 - (1.0 - progress) ** 3
-        by = int(round(start_y + (target_y - start_y) * ease))
+            # Animação suave com desaceleração (cubic ease-out na descida, suave na subida)
+            ease = 1.0 - (1.0 - progress) ** 3
+            by = int(round(start_y + (target_y - start_y) * ease))
 
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.drawPixmap(bx, by, bw, bh, pixmap)
-        painter.restore()
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.drawPixmap(bx, by, bw, bh, info_pixmap)
+            painter.restore()
+
+            # Tooltip de layout do controle (506 x 308) - renderizado logo abaixo da aba com fade
+            if self._shortcut_tooltip_opacity > 0.0:
+                cfg = self.config.get()
+                overlay_cfg = cfg.get("overlay", {})
+                layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
+                if layout_cfg in ("xbox", "playstation", "nintendo"):
+                    controller_type = layout_cfg
+                else:
+                    controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+
+                tooltip_pixmap = self._get_config_info_tooltip_pixmap(controller_type)
+                if tooltip_pixmap is not None and not tooltip_pixmap.isNull():
+                    tw = int(round(506.0 * scale))
+                    th = int(round(308.0 * scale))
+                    tx = int(round((w - tw) / 2.0))
+                    ty = by + bh  # Posicionado logo abaixo da aba
+
+                    painter.save()
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                    painter.setOpacity(self._shortcut_tooltip_opacity)
+                    painter.drawPixmap(tx, ty, tw, th, tooltip_pixmap)
+                    painter.restore()
+        else:
+            # Fallback para o banner de instruções antigo caso config-info.png não exista
+            cfg = self.config.get()
+            overlay_cfg = cfg.get("overlay", {})
+            layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
+            if layout_cfg in ("xbox", "playstation", "nintendo"):
+                controller_type = layout_cfg
+            else:
+                controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+
+            pixmap = self._get_shortcut_instruction_pixmap(controller_type)
+            if pixmap is not None and not pixmap.isNull():
+                bw = int(round(571.0 * scale))
+                bh = int(round(806.0 * scale))
+                bx = int(round((w - bw) / 2.0))
+                target_y = (h - bh) / 2.0 - bh * 0.40
+                start_y = -bh - 40
+                ease = 1.0 - (1.0 - progress) ** 3
+                by = int(round(start_y + (target_y - start_y) * ease))
+
+                painter.save()
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                painter.drawPixmap(bx, by, bw, bh, pixmap)
+                painter.restore()
 
     def _draw_shortcut_nodes(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
         cfg = self.config.get()
@@ -2401,12 +2487,25 @@ class GameOverlay(QWidget):
         painter.setOpacity(progress)
         box_sz = 15.0 * scale
 
+        # Nó da aba superior de informações (config-info.png)
+        top_cx, top_cy = shortcut_info_node_point(rect)
+        top_lx = top_cx - rect.left
+        top_ly = top_cy - rect.top
+        top_rect = QRectF(top_lx - box_sz / 2.0, top_ly - box_sz / 2.0, box_sz, box_sz)
+        if snapshot.shortcut_info_focus:
+            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+            painter.setBrush(QColor(230, 193, 42, 230))
+        else:
+            painter.setPen(QPen(c_verde, 1.5 * scale))
+            painter.setBrush(QColor(c_verde.red(), c_verde.green(), c_verde.blue(), 170))
+        painter.drawRoundedRect(top_rect, 2.0 * scale, 2.0 * scale)
+
         for idx, col_name, base_x, base_y in SHORTCUT_HUD_NODES:
             lx = mx + base_x * scale
             ly = my + base_y * scale
             node_rect = QRectF(lx - box_sz / 2.0, ly - box_sz / 2.0, box_sz, box_sz)
 
-            is_focus = (snapshot.shortcut_node_focus == idx)
+            is_focus = (snapshot.shortcut_node_focus == idx and not snapshot.shortcut_info_focus)
             base_col = c_amarelo if col_name == "yellow" else c_verde
 
             if is_focus:

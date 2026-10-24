@@ -21,21 +21,30 @@ Referente à configuração dos atalhos na parte inferior da tela.
     - `assets\hud\inferior\hud-nintendo-shortcut-config-active.png` (Nintendo)
   - Nessa variante, o ícone do menu radial fica quase opaco/desbotado, garantindo visibilidade limpa dos itens do grid sobre a barra.
   - Ao sair da configuração e retornar ao jogo, a HUD inferior padrão com o ícone nítido é restaurada instantaneamente.
-- **Banner de Instruções:**
-  - Elemento em pergaminho posicionado no topo/centro, carregando dinamicamente a arte correspondente ao controle ativo:
-    - `assets\images\instructions\shortcut-instruction-ps.png` (PlayStation)
-    - `assets\images\instructions\shortcut-instruction-xbox.png` (Xbox)
-    - `assets\images\instructions\shortcut-instruction-nintendo.png` (Nintendo)
+- **Aba Superior Compacta de Informações (`config-info.png`):**
+  - Substitui o banner grande antigo por uma aba compacta no topo central (`y = 0`):
+    - `assets\hud\superior\config-info.png` (217 × 68 px na base 1280x960)
   - **Animação de Descida / Subida:**
-    - Ao entrar: desce do topo (fora da tela) e para suavemente no centro com desaceleração (*cubic ease-out*).
-    - Ao sair: sobe de volta para fora da tela (*slide-up*).
+    - Ao entrar na configuração de atalhos: faz slide-down vindo do topo até `y = 0` com desaceleração suave (*cubic ease-out*).
+    - Ao sair: desliza de volta para fora da tela (*slide-up*).
+  - **Nó de Navegação e Foco com D-pad:**
+    - Enquanto o grid de opções estiver fechado (`shortcut_grid_active == False`):
+      - Pressionar **D-pad CIMA** a partir de qualquer nó da HUD inferior transfere o foco para a aba superior (`shortcut_info_focus = True`) e posiciona o cursor no centro dela.
+      - Pressionar **D-pad BAIXO** (ou o botão **B / Bolinha**) na aba de informações retorna o cursor e o foco para os nós da HUD inferior (`shortcut_info_focus = False`).
+  - **Tooltip de Layout do Controle com Fade (`config-info-tooltip-{controle}.png`):**
+    - Quando o foco está na aba superior (`shortcut_info_focus == True`), o tooltip detalhado com os botões do controle faz **fade-in** suave diretamente abaixo da aba (`y = by + bh`, 506 × 308 px):
+      - `assets\hud\superior\config-info-tooltip-ps.png` (PlayStation)
+      - `assets\hud\superior\config-info-tooltip-xbox.png` (Xbox)
+      - `assets\hud\superior\config-info-tooltip-nintendo.png` (Nintendo)
+    - Ao retornar o foco para os nós inferiores com D-pad BAIXO / B, o tooltip faz **fade-out** suave.
+  - **Supressão Durante o Grid Ativo:**
+    - Enquanto o grid de opções estiver aberto (`shortcut_grid_active == True`), a navegação para a aba superior de info fica **100% suprimida/bloqueada**, evitando poluição ou sobreposição visual.
 
 ## SAÍDA DO MODO DE ATALHOS (DESARME COM ESC / START)
 - **Tecla ESC (Teclado) e Botão Start (Controle):**
-  - Desarmam imediatamente e por completo o estado de configuração de atalhos, retornando diretamente para em jogo:
-    - Se estiver dentro do grid de opções (`shortcut_grid_active = True`): fecha o pop-up nativo do jogo e cancela todo o modo de configuração, voltando para o jogo.
-    - Se estiver na seleção de nós da HUD (`shortcut_config_active = True`): cancela imediatamente e devolve o controle ao jogo.
+  - Desarmam imediatamente e por completo o estado de configuração de atalhos em qualquer ponto (grid, nós inferiores ou aba superior de info), retornando diretamente para em jogo.
 - **Botão B / Bolinha (Controle):**
+  - Se estiver na aba superior de info: retorna o foco para os nós inferiores da HUD.
   - Se estiver no grid: cancela e fecha apenas o grid de opções, voltando o cursor para a seleção de nós da HUD.
   - Se estiver na seleção de nós da HUD: fecha o modo de atalhos e retorna para o jogo.
 

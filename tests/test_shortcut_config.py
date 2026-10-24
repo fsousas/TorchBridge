@@ -18,6 +18,9 @@ from torchbridge.models import (
     shortcut_nodes_asset_path,
     shortcut_mask_asset_path,
     shortcut_instruction_asset_path,
+    shortcut_config_info_asset_path,
+    shortcut_config_info_tooltip_asset_path,
+    shortcut_info_node_point,
 )
 from torchbridge.overlay import GameOverlay
 
@@ -576,6 +579,147 @@ class ShortcutConfigTests(unittest.TestCase):
                 painter2.end()
             self.assertIn("playstation", overlay._bottom_hud_cache)
             self.assertNotIn("playstation_shortcut", overlay._bottom_hud_cache)
+
+    def test_config_info_and_tooltip_assets_exist(self):
+        info_path = shortcut_config_info_asset_path()
+        self.assertIsNotNone(info_path)
+        self.assertTrue(info_path.is_file(), f"Arquivo {info_path} não existe")
+
+        for ctrl in ("playstation", "xbox", "nintendo"):
+            tt_path = shortcut_config_info_tooltip_asset_path(ctrl)
+            self.assertIsNotNone(tt_path, f"Tooltip para {ctrl} não encontrado")
+            self.assertTrue(tt_path.is_file(), f"Arquivo {tt_path} não existe")
+
+    def test_shortcut_info_node_point_calculation(self):
+        rect = Rect(100, 50, 1280, 960)
+        cx, cy = shortcut_info_node_point(rect)
+        self.assertEqual(cx, 100 + 640)
+        self.assertEqual(cy, 50 + 34)
+
+    def test_dpad_up_navigates_to_shortcut_info_focus_and_down_returns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # Ativa modo de atalhos e solta botões
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            engine.injector.events.clear()
+
+            self.assertTrue(shared.get().shortcut_config_active)
+            self.assertFalse(shared.get().shortcut_info_focus)
+
+            # D-pad Cima: move o foco para a aba superior de informações
+            self._tick(engine, self._state(("dpad_up",)), now=0.15)
+            self.assertTrue(engine._shortcut_info_focus)
+            self.assertTrue(shared.get().shortcut_info_focus)
+            info_x, info_y = shortcut_info_node_point(rect)
+            self.assertIn(("move", info_x, info_y), engine.injector.events)
+
+            # Solta D-pad
+            self._tick(engine, self._state(), now=0.20)
+            engine.injector.events.clear()
+
+            # D-pad Baixo: retorna foco para os nós da HUD inferior
+            self._tick(engine, self._state(("dpad_down",)), now=0.25)
+            self.assertFalse(engine._shortcut_info_focus)
+            self.assertFalse(shared.get().shortcut_info_focus)
+            node_x, node_y = shortcut_node_point(rect, engine._shortcut_node_focus)
+            self.assertIn(("move", node_x, node_y), engine.injector.events)
+
+    def test_button_b_returns_from_shortcut_info_focus_to_hud(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # Ativa modo de atalhos
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+
+            # D-pad Cima entra na aba de informações
+            self._tick(engine, self._state(("dpad_up",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(shared.get().shortcut_info_focus)
+            engine.injector.events.clear()
+
+            # Botão B retorna foco para a HUD inferior sem fechar o modo de atalhos
+            self._tick(engine, self._state(("b",)), now=0.25)
+            self.assertTrue(engine._shortcut_config_active)
+            self.assertFalse(engine._shortcut_info_focus)
+            self.assertFalse(shared.get().shortcut_info_focus)
+            node_x, node_y = shortcut_node_point(rect, engine._shortcut_node_focus)
+            self.assertIn(("move", node_x, node_y), engine.injector.events)
+
+    def test_start_or_esc_from_shortcut_info_focus_disarms_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Ativa modo de atalhos e sobe para aba de informações
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+            self._tick(engine, self._state(("dpad_up",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(shared.get().shortcut_info_focus)
+
+            # Botão Start desarma completamente o modo
+            self._tick(engine, self._state(("start",)), now=0.25)
+            self.assertFalse(engine._shortcut_config_active)
+            self.assertFalse(engine._shortcut_info_focus)
+            self.assertFalse(shared.get().shortcut_config_active)
+            self.assertFalse(shared.get().shortcut_info_focus)
+
+    def test_grid_active_suppresses_shortcut_info_navigation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Ativa modo de atalhos
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(), now=0.10)
+
+            # Pressiona A no nó 0 para abrir o grid de opções
+            self._tick(engine, self._state(("a",)), now=0.15)
+            self._tick(engine, self._state(), now=0.20)
+            self.assertTrue(engine._shortcut_grid_active)
+            self.assertTrue(shared.get().shortcut_grid_active)
+
+            # Enquanto o grid estiver aberto, D-pad Cima não navega para a aba de informações
+            self._tick(engine, self._state(("dpad_up",)), now=0.25)
+            self.assertFalse(engine._shortcut_info_focus)
+            self.assertFalse(shared.get().shortcut_info_focus)
+            self.assertTrue(engine._shortcut_grid_active)
+
+    def test_overlay_animates_config_info_and_tooltip_fade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, config = self._engine(directory)
+            shared = SharedOverlayState()
+            overlay = GameOverlay(shared, config)
+
+            snapshot = OverlaySnapshot(
+                game_rect=Rect(0, 0, 1280, 960),
+                shortcut_config_active=True,
+                shortcut_info_focus=True,
+                controller_type="xbox",
+            )
+
+            overlay._shortcut_anim_last_time = 0.0
+            overlay._shortcut_anim_progress = 1.0
+            overlay._tick_shortcut_mode_anim(snapshot)
+            self.assertGreater(overlay._shortcut_tooltip_opacity, 0.0)
+
+            img = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(img)
+            try:
+                overlay._draw_shortcut_instruction(painter, snapshot)
+            finally:
+                painter.end()
+
+            self.assertIsNotNone(overlay._config_info_pixmap)
+            self.assertIn("xbox", overlay._config_info_tooltip_cache)
 
 
 if __name__ == "__main__":
