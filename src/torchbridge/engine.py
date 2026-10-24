@@ -677,6 +677,20 @@ class BridgeEngine(threading.Thread):
         if not isinstance(value, str) or not value.strip():
             return
         normalized = value.strip().upper()
+        if normalized in {"MOUSE_LEFT", "LEFT_CLICK", "LMB", "CLICK", "MOUSE1"}:
+            if "left" in self._held_mouse:
+                self.injector.mouse_button("left", False)
+                self._held_mouse.discard("left")
+            self.injector.mouse_button("left", True)
+            self.injector.mouse_button("left", False)
+            return
+        if normalized in {"MOUSE_RIGHT", "RIGHT_CLICK", "RMB", "MOUSE2"}:
+            if "right" in self._held_mouse:
+                self.injector.mouse_button("right", False)
+                self._held_mouse.discard("right")
+            self.injector.mouse_button("right", True)
+            self.injector.mouse_button("right", False)
+            return
         temporarily_released: list[str] = []
         modifiers = ["ALT"]
         # Para TAB/ESC, libera também o SHIFT retido: senão o toque viraria Shift+Tab ou Shift+Esc.
@@ -758,23 +772,32 @@ class BridgeEngine(threading.Thread):
             self._center_combo_started = None
             self._center_combo_triggered = False
 
-    # Botões discretos do overworld (mapa docs/REMAP-BOTOES): R3 continua tocando seu
-    # binding (TAB). O d-pad NÃO dispara no overworld (vazio por padrão; a tela inicial
-    # usará, mas o rastreamento dela ainda não existe). B/Y e os gatilhos têm tratamento
+    # Botões discretos do overworld (mapa docs/REMAP-BOTOES): R3 toca seu binding
+    # (MOUSE_LEFT por padrão). Só opera estritamente no modo EM JOGO (is_in_game=True).
+    # O d-pad NÃO dispara no overworld (vazio por padrão; a tela inicial usará,
+    # mas o rastreamento dela ainda não existe). B/Y e os gatilhos têm tratamento
     # próprio — ver _handle_overworld_remap e _handle_trigger_combos. Com a roda ABERTA
-    # (LB segurado) a supressão inteira vale: nenhum toque de tecla pode vazar.
+    # (LB segurado) ou configuração de atalhos aberta a supressão inteira vale.
     def _handle_discrete_bindings(
         self,
         state: ControllerState,
         bindings: dict[str, Any],
     ) -> None:
+        # Só opera estritamente no modo EM JOGO
+        if self._memory_state.is_connected and not self._memory_state.is_in_game:
+            return
+        if self._shortcut_config_active:
+            return
         # Roda aberta: a roda é o mundo — nenhum toque de tecla dispara enquanto ela
         # estiver de pé (o d-pad controla a sublinha de pet actions lá dentro).
         if state.pressed("lb") and self._is_radial_allowed() and not self._radial_dismissed:
             return
         # R3: borda de subida, um toque por pressionamento, sem auto-repeat.
         if state.pressed("r3") and not self._previous.pressed("r3"):
-            self._tap_binding(bindings.get("r3"))
+            r3_action = bindings.get("r3")
+            if not r3_action or r3_action == "TAB":
+                r3_action = "MOUSE_LEFT"
+            self._tap_binding(r3_action)
 
     # Navegação por D-pad na Tela Inicial (Title Screen, state_id == 0)
     def _handle_title_menu_navigation(

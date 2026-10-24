@@ -2386,3 +2386,104 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             self.assertIn(("mouse", "left", True), injector.events)
 
 
+class DiscreteBindingsR3Tests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def test_r3_in_game_triggers_simple_left_click(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # 1. Pressiona R3 no modo em jogo
+            state_r3 = ControllerState(connected=True, buttons=frozenset({"r3"}))
+            engine._process_active(hub, state_r3, rect, cfg, 0.0, 0.05)
+
+            # Deve registrar clique esquerdo simples (down seguido de up)
+            mouse_events = [e for e in injector.events if e[0] == "mouse" and e[1] == "left"]
+            self.assertIn(("mouse", "left", True), mouse_events)
+            self.assertIn(("mouse", "left", False), mouse_events)
+
+            # 2. Próximo tick mantendo R3 pressionado não deve gerar novo clique (sem auto-repeat)
+            engine._previous = state_r3
+            injector.events.clear()
+            engine._process_active(hub, state_r3, rect, cfg, 0.05, 0.05)
+            r3_mouse_events = [e for e in injector.events if e[0] == "mouse" and e[1] == "left"]
+            self.assertEqual(len(r3_mouse_events), 0)
+
+            # 3. Solta e pressiona novamente R3 -> dispara novo clique
+            state_rel = ControllerState(connected=True)
+            engine._previous = state_r3
+            engine._process_active(hub, state_rel, rect, cfg, 0.10, 0.05)
+            injector.events.clear()
+
+            engine._previous = state_rel
+            engine._process_active(hub, state_r3, rect, cfg, 0.15, 0.05)
+            new_events = [e for e in injector.events if e[0] == "mouse" and e[1] == "left"]
+            self.assertIn(("mouse", "left", True), new_events)
+            self.assertIn(("mouse", "left", False), new_events)
+
+    def test_r3_ignored_when_not_in_game(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            # Conectado mas na Tela Inicial (state_id == 0, is_in_game == False)
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=False,
+                state_id=0,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            state_r3 = ControllerState(connected=True, buttons=frozenset({"r3"}))
+            engine._process_active(hub, state_r3, rect, cfg, 0.0, 0.05)
+
+            # Nenhum clique deve ter sido disparado
+            mouse_events = [e for e in injector.events if e[0] == "mouse"]
+            self.assertEqual(len(mouse_events), 0)
+
+    def test_r3_ignored_when_shortcut_config_active_or_radial_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Com shortcut_config_active == True
+            engine._shortcut_config_active = True
+            state_r3 = ControllerState(connected=True, buttons=frozenset({"r3"}))
+            engine._process_active(hub, state_r3, rect, cfg, 0.0, 0.05)
+            mouse_events = [e for e in injector.events if e[0] == "mouse"]
+            self.assertEqual(len(mouse_events), 0)
+
+            # Com radial / LB held
+            engine._shortcut_config_active = False
+            state_lb_r3 = ControllerState(connected=True, buttons=frozenset({"r3", "lb"}))
+            injector.events.clear()
+            engine._process_active(hub, state_lb_r3, rect, cfg, 0.05, 0.05)
+            mouse_events = [e for e in injector.events if e[0] == "mouse"]
+            self.assertEqual(len(mouse_events), 0)
+
+
+

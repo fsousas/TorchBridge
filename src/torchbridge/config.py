@@ -76,7 +76,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "dpad_right": "",
         "dpad_down": "",
         "dpad_left": "",
-        "r3": "TAB",
+        "r3": "MOUSE_LEFT",
         "start": "ESC",
         # Ombros/gatilhos: toques na borda de subida (RB=3, RT=4).
         "rb": "3",
