@@ -4931,10 +4931,31 @@ class BridgeEngine(threading.Thread):
             if not self._pet_submenu:
                 slot = slots[self._radial_selection - 1]
                 if str(slot).lower() in ("short-cut", "shortcut"):
+                    has_open_menu = bool(
+                        self._memory_state.is_menu_open
+                        or any(self._active_panels)
+                        or getattr(self, "_skill_menu_open", False)
+                        or getattr(self, "_quest_menu_initialized", False)
+                        or getattr(self, "_dialog_initialized", False)
+                    )
+                    if has_open_menu:
+                        self.injector.tap("ESC")
+                        self._reset_active_panels()
+                        if getattr(self, "_skill_menu_open", False):
+                            self._skill_menu_open = False
+                            self._skill_in_spells = False
+                            self._skill_spell_idx = 0
+                        if getattr(self, "_quest_menu_initialized", False):
+                            self._quest_menu_initialized = False
+                            self._quest_b_consumed = False
+                        if getattr(self, "_dialog_initialized", False):
+                            self._dialog_initialized = False
+                            self._dialog_focus = None
+
                     self._shortcut_config_active = True
                     self._shortcut_node_focus = 0
                     self._shortcut_info_focus = False
-                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0, shortcut_info_focus=False)
+                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0, shortcut_info_focus=False, active_panels=list(self._active_panels))
                     self._release_all()
                     target_x, target_y = shortcut_node_point(rect, 0)
                     self.injector.move(target_x, target_y)

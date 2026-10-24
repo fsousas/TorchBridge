@@ -640,8 +640,9 @@ class GameOverlay(QWidget):
 
         Regras (assets/hud/inferior/descrição.md):
         - A HUD deve ser aplicada de forma absoluta enquanto o ESTADO for igual a EM JOGO.
-        - A HUD NÃO deve ser aplicada em: DIALOG, QUEST, TITLE MENU, CHARACTER SELECT,
+        - A HUD NÃO deve ser aplicada em: DIALOG, TITLE MENU, CHARACTER SELECT,
           CUTSCENES, CHARACTER CREATE, LOADING SCREEN, OPTIONS SCREEN.
+        - Menus em jogo (Inventário, Habilidades, Journal/Missões, etc.) mantêm a HUD visível.
         """
         if not snapshot.controller_connected:
             return False
@@ -677,14 +678,7 @@ class GameOverlay(QWidget):
         ):
             return False
 
-        # 3. QUEST (Menu de missões / diário)
-        if (
-            snapshot.quest_menu_open
-            or any("missão" in m or "missao" in m or "quest" in m for m in open_menus)
-        ):
-            return False
-
-        # 4. TITLE MENU, CHARACTER SELECT, CHARACTER CREATE, CUTSCENES
+        # 3. TITLE MENU, CHARACTER SELECT, CHARACTER CREATE, CUTSCENES
         if any(
             k in state_desc
             for k in ("inicial", "criar", "dificuldade", "carregar", "cutscene", "cinematica")

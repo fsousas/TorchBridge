@@ -256,7 +256,7 @@ class BottomHudTests(unittest.TestCase):
             )
             self.assertFalse(overlay._should_show_bottom_hud(snap_dialog))
 
-            # 8. Oculto em QUEST
+            # 8. Visível em QUEST / Journal (J) (assim como nos outros menus em jogo como Inventário e Skills)
             snap_quest = OverlaySnapshot(
                 game_found=True,
                 game_active=True,
@@ -265,8 +265,9 @@ class BottomHudTests(unittest.TestCase):
                 memory_is_in_game=True,
                 memory_state_desc="Em Jogo",
                 quest_menu_open=True,
+                memory_open_menus=["Missões (Quests)"],
             )
-            self.assertFalse(overlay._should_show_bottom_hud(snap_quest))
+            self.assertTrue(overlay._should_show_bottom_hud(snap_quest))
 
             # 9. Visível em PAUSE (ESC em jogo não fecha a barra nativa nem o HUD)
             snap_pause = OverlaySnapshot(

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 from torchbridge.config import ConfigManager
 from torchbridge.controller import ControllerState
 from torchbridge.engine import BridgeEngine
+from torchbridge.memory import GameMemoryState
 from torchbridge.models import (
     OverlaySnapshot,
     Rect,
@@ -114,6 +115,25 @@ class ShortcutConfigTests(unittest.TestCase):
             self.assertTrue(snap.shortcut_config_active)
             # Não deve ter acionado nenhuma tecla do teclado
             self.assertEqual(engine.injector.tapped, [])
+
+    def test_entering_shortcut_mode_closes_open_menus(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._engine(directory)
+
+            # Simula menu/painel aberto (ex.: Inventário)
+            engine._active_panels = ["I", ""]
+            engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True, is_menu_open=True)
+
+            # Seleciona shortcut no radial e confirma com A
+            self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
+            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+
+            # O menu foi fechado enviando ESC e resetando os painéis ativos
+            self.assertIn("ESC", engine.injector.tapped)
+            self.assertEqual(engine._active_panels, ["", ""])
+            self.assertEqual(shared.get().active_panels, ["", ""])
+            self.assertTrue(engine._shortcut_config_active)
+            self.assertTrue(shared.get().shortcut_config_active)
 
     def test_east_button_b_exits_shortcut_mode(self):
         with tempfile.TemporaryDirectory() as directory:
