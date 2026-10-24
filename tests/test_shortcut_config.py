@@ -130,9 +130,10 @@ class ShortcutConfigTests(unittest.TestCase):
             # Aperta B (Bolinha no PS / Leste) para sair
             self._tick(engine, self._state(("b",)), now=0.15)
 
-            # Modo foi desativado
+            # Modo foi desativado e cursor movido para o meio da tela
             self.assertFalse(engine._shortcut_config_active)
             self.assertFalse(shared.get().shortcut_config_active)
+            self.assertEqual(engine.injector.moves[-1], (960, 540))
 
     def test_spotlight_backdrop_removed_keeps_transparency(self):
         """Valida que o backdrop escuro foi removido e não escurece a tela."""
@@ -446,6 +447,7 @@ class ShortcutConfigTests(unittest.TestCase):
             snap = shared.get()
             self.assertFalse(snap.shortcut_grid_active)
             self.assertFalse(snap.shortcut_config_active)
+            self.assertEqual(engine.injector.moves[-1], (960, 540))
 
             # 2. Entra no modo de atalhos (apenas nós da HUD) e pressiona Start: desarma para o jogo
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.35)
@@ -459,6 +461,7 @@ class ShortcutConfigTests(unittest.TestCase):
             snap2 = shared.get()
             self.assertFalse(snap2.shortcut_config_active)
             self.assertFalse(snap2.shortcut_grid_active)
+            self.assertEqual(engine.injector.moves[-1], (960, 540))
 
     def test_backdrop_completely_removed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -745,6 +748,7 @@ class ShortcutConfigTests(unittest.TestCase):
             self.assertFalse(engine._shortcut_info_focus)
             self.assertFalse(shared.get().shortcut_config_active)
             self.assertFalse(shared.get().shortcut_info_focus)
+            self.assertEqual(engine.injector.moves[-1], (960, 540))
 
     def test_grid_active_suppresses_shortcut_info_navigation(self):
         with tempfile.TemporaryDirectory() as directory:

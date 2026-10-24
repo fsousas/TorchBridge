@@ -5624,6 +5624,9 @@ class BridgeEngine(threading.Thread):
                     self.injector.move(target_x, target_y)
                     self.injector.mouse_button("left", True)
                     self.injector.mouse_button("left", False)
+                    center_x = rect.left + rect.width // 2
+                    center_y = rect.top + rect.height // 2
+                    self.injector.move(center_x, center_y)
                     hub.rumble(0.04, 0.08, 30)
                     return
 
@@ -5703,6 +5706,9 @@ class BridgeEngine(threading.Thread):
                     self._shortcut_grid_active = False
                     self._shortcut_info_focus = False
                     self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
+                    center_x = rect.left + rect.width // 2
+                    center_y = rect.top + rect.height // 2
+                    self.injector.move(center_x, center_y)
                     hub.rumble(0.04, 0.08, 30)
                     return
 
@@ -5730,6 +5736,9 @@ class BridgeEngine(threading.Thread):
                 self._shortcut_grid_active = False
                 self._shortcut_info_focus = False
                 self.shared.update(shortcut_config_active=False, shortcut_node_focus=0, shortcut_grid_active=False, shortcut_info_focus=False)
+                center_x = rect.left + rect.width // 2
+                center_y = rect.top + rect.height // 2
+                self.injector.move(center_x, center_y)
                 hub.rumble(0.04, 0.08, 30)
                 return
 
