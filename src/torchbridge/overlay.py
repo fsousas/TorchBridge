@@ -2353,6 +2353,8 @@ class GameOverlay(QWidget):
         return pixmap
 
     def _draw_shortcut_instruction(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
+        if (snapshot.memory_state_desc and not snapshot.memory_is_in_game) or not snapshot.shortcut_config_active:
+            return
         progress = self._shortcut_anim_progress
         if progress <= 0.0:
             return
@@ -2433,6 +2435,10 @@ class GameOverlay(QWidget):
     def _draw_shortcut_nodes(self, painter: QPainter, snapshot: OverlaySnapshot) -> None:
         cfg = self.config.get()
         if not cfg.get("overlay", {}).get("show_calibration", False):
+            return
+        # Os nós de calibração da HUD de atalhos só devem aparecer no modo EM JOGO
+        # e estritamente quando o modo de configuração de teclas de atalho estiver ativo.
+        if (snapshot.memory_state_desc and not snapshot.memory_is_in_game) or not snapshot.shortcut_config_active:
             return
         rect = snapshot.game_rect
         w = int(rect.width) if rect.valid and rect.width > 0 else self.width()

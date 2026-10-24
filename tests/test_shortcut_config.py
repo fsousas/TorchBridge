@@ -463,8 +463,40 @@ class ShortcutConfigTests(unittest.TestCase):
             p0_x, p0_y = shortcut_node_point(rect, 0)
             self.assertEqual(img.pixelColor(p0_x, p0_y).alpha(), 0)
 
-            # 2. Modo calibração ligado: os nós DEVEM ser desenhados
+            # 2. Modo calibração ligado, mas shortcut_config_active=False: NÃO deve desenhar
             config.set_show_calibration(True)
+            snap_inactive = OverlaySnapshot(
+                game_rect=rect,
+                shortcut_config_active=False,
+                shortcut_node_focus=0,
+            )
+            img_inact = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_inact.fill(Qt.GlobalColor.transparent)
+            painter_inact = QPainter(img_inact)
+            try:
+                overlay._draw_shortcut_nodes(painter_inact, snap_inactive)
+            finally:
+                painter_inact.end()
+            self.assertEqual(img_inact.pixelColor(p0_x, p0_y).alpha(), 0)
+
+            # 3. Na Tela Inicial (mesmo com calibração ligada): NÃO deve desenhar
+            snap_title = OverlaySnapshot(
+                game_rect=rect,
+                memory_state_desc="Tela Inicial",
+                memory_is_in_game=False,
+                shortcut_config_active=True,
+                shortcut_node_focus=0,
+            )
+            img_title = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
+            img_title.fill(Qt.GlobalColor.transparent)
+            painter_title = QPainter(img_title)
+            try:
+                overlay._draw_shortcut_nodes(painter_title, snap_title)
+            finally:
+                painter_title.end()
+            self.assertEqual(img_title.pixelColor(p0_x, p0_y).alpha(), 0)
+
+            # 4. Modo calibração ligado + shortcut_config_active=True + em jogo: DEVEM ser desenhados
             img_cal = QImage(1280, 960, QImage.Format.Format_ARGB32_Premultiplied)
             img_cal.fill(Qt.GlobalColor.transparent)
             painter_cal = QPainter(img_cal)

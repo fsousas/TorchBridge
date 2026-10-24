@@ -145,6 +145,7 @@ def main() -> int:
     device_filter = None
     device_receiver = None
     if sys.platform == "win32":
+        import ctypes
         from ctypes import wintypes
         from PySide6.QtCore import QAbstractNativeEventFilter, QTimer
         from PySide6.QtWidgets import QWidget
@@ -180,7 +181,25 @@ def main() -> int:
 
         # Garante que a aplicação possua um HWND Win32 ativo para receber broadcasts do sistema
         device_receiver = QWidget()
-        _ = device_receiver.winId()
+        hwnd = int(device_receiver.winId())
+
+        class DEV_BROADCAST_DEVICEINTERFACE(ctypes.Structure):
+            _fields_ = [
+                ("dbcc_size", wintypes.DWORD),
+                ("dbcc_devicetype", wintypes.DWORD),
+                ("dbcc_reserved", wintypes.DWORD),
+                ("dbcc_classguid", ctypes.c_byte * 16),
+                ("dbcc_name", ctypes.c_wchar * 1),
+            ]
+
+        try:
+            notification_filter = DEV_BROADCAST_DEVICEINTERFACE()
+            notification_filter.dbcc_size = ctypes.sizeof(DEV_BROADCAST_DEVICEINTERFACE)
+            notification_filter.dbcc_devicetype = 5  # DBT_DEVTYP_DEVICEINTERFACE
+            # DEVICE_NOTIFY_WINDOW_HANDLE (0x0) | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES (0x4)
+            ctypes.windll.user32.RegisterDeviceNotificationW(hwnd, ctypes.byref(notification_filter), 4)
+        except Exception:
+            pass
 
         device_filter = DeviceChangeFilter(engine.trigger_rescan)
         app.installNativeEventFilter(device_filter)

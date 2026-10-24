@@ -182,6 +182,30 @@ class ControllerSelectionTests(unittest.TestCase):
             hub._devices = [(0, "wanted", "Wanted", 30), (1, "other", "Other", 10)]
             self.assertEqual(hub.poll(DEFAULT_CONFIG["raw_controller"], "wanted").instance_id, 30)
 
+    def test_controller_device_removed_uses_which_attribute_safely(self):
+        hub = self.make_hub()
+        hub._instance_id = 42
+        hub._controller = MagicMock()
+        hub._controller.attached.return_value = True
+        hub._devices = [(0, "guid", "Name", 42)]
+        remove_event = pygame.event.Event(pygame.CONTROLLERDEVICEREMOVED, {"which": 42})
+        with patch("torchbridge.controller.pygame.event.get", return_value=[remove_event]), \
+                patch.object(hub, "_scan"):
+            hub.poll(DEFAULT_CONFIG["raw_controller"])
+        self.assertIsNone(hub._instance_id)
+        self.assertIsNone(hub._controller)
+
+    def test_trigger_rescan_preserves_healthy_controller(self):
+        hub = self.make_hub()
+        hub._instance_id = 99
+        hub._controller = MagicMock()
+        hub._controller.attached.return_value = True
+        hub._devices = [(0, "guid", "Name", 99)]
+        hub.trigger_rescan()
+        self.assertEqual(hub._instance_id, 99)
+        self.assertIsNotNone(hub._controller)
+        self.assertFalse(hub._rescan_requested)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Uses the bundled Linux SDL shared library")
     def test_real_sdl_raw_disconnect_reconnect_uses_new_instance(self):
         library = next(Path(pygame.__file__).parent.parent.glob("pygame_ce.libs/libSDL2-2*.so*"), None)
