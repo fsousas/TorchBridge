@@ -164,9 +164,14 @@ class ControllerHub:
                 pygame.joystick.quit()
                 pygame.joystick.init()
                 sdl_controller.init()
+                pygame.event.pump()
             except pygame.error:
                 pass
         self._initial_scan_done = True
+        try:
+            pygame.event.pump()
+        except pygame.error:
+            pass
         devices = []
         for index in range(pygame.joystick.get_count()):
             joystick = None
