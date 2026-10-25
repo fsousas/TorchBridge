@@ -430,10 +430,10 @@ class HudClickPanelResetTests(unittest.TestCase):
 class PetSubmenuTests(unittest.TestCase):
     # Sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad BAIXO abre, CIMA fecha,
     # e o d-pad inteiro deixa de disparar toques de tecla enquanto a roda (LB) está aberta.
-    # Slots do perfil: ["I", "S", "Q", "J", "P", "C", "A"] — setor 5 = P, setor 6 = C.
+    # Slots do perfil: ["I", "S", "Q", "J", "short-cut", "P", "C", "A"] — setor 6 = P, setor 7 = C.
     # Vetores que resolvem em cada setor (radial_slot: atan2(rx, -ry) a partir do topo):
-    #   P (centro 205,7°): rx=-0.6, ry=0.8  → 216,9° → setor 5
-    #   C (centro 257,1°): rx=-0.9, ry=0.2  → 257,4° → setor 6
+    #   P (centro 225°): rx=-0.6, ry=0.8  → 216,9° → setor 6
+    #   C (centro 270°): rx=-0.9, ry=0.2  → 257,4° → setor 7
 
     @staticmethod
     def _state(buttons: tuple[str, ...] = (), **kw) -> ControllerState:
@@ -470,7 +470,7 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             snap = shared.get()
-            self.assertEqual(snap.radial_selection, 5)
+            self.assertEqual(snap.radial_selection, 6)
             self.assertTrue(snap.pet_submenu_open)
 
     # Com a sublinha aberta, d-pad BAIXO não dispara o binding de tecla (7): o d-pad é da sublinha.
@@ -495,7 +495,7 @@ class PetSubmenuTests(unittest.TestCase):
             engine, shared = self._engine(directory)
             self._tick(engine, directory, self._state(("lb",), rx=-0.9, ry=0.2))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.9, ry=0.2))
-            self.assertEqual(shared.get().radial_selection, 6)
+            self.assertEqual(shared.get().radial_selection, 7)
             self.assertFalse(shared.get().pet_submenu_open)
             # E o toque de tecla do d-pad continua suprimido com a roda aberta.
             self.assertNotIn("7", engine.injector.tapped)
@@ -529,9 +529,9 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self.assertTrue(shared.get().pet_submenu_open)
-            # Gira para o setor C (índice 6): a sublinha some.
+            # Gira para o setor C (índice 7): a sublinha some.
             self._tick(engine, directory, self._state(("lb",), rx=-0.9, ry=0.2))
-            self.assertEqual(shared.get().radial_selection, 6)
+            self.assertEqual(shared.get().radial_selection, 7)
             self.assertFalse(shared.get().pet_submenu_open)
 
     # Soltar LB fecha a roda SEM disparar nada (confirmação é do A): sublinha aberta,
@@ -656,7 +656,7 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(rx=-0.6, ry=0.8))  # fecha a roda
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))  # reabre no P
-            self.assertEqual(shared.get().radial_selection, 5)
+            self.assertEqual(shared.get().radial_selection, 6)
             self.assertFalse(shared.get().pet_submenu_open)
 
     def test_radial_blocked_outside_game(self):
@@ -735,7 +735,7 @@ class PetSubmenuTests(unittest.TestCase):
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             # Alavanca relaxa para o centro (rx=ry=0): o P segue selecionado.
             self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=0.0))
-            self.assertEqual(shared.get().radial_selection, 5)
+            self.assertEqual(shared.get().radial_selection, 6)
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=0.0, ry=0.0))
             self.assertTrue(shared.get().pet_submenu_open)
 
@@ -2384,5 +2384,106 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             engine._process_active(hub, state_rel, rect, cfg, 0.15, 0.05)
             self.assertIn("left", engine._held_mouse)
             self.assertIn(("mouse", "left", True), injector.events)
+
+
+class DiscreteBindingsR3Tests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def test_r3_in_game_triggers_simple_left_click(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # 1. Pressiona R3 no modo em jogo
+            state_r3 = ControllerState(connected=True, buttons=frozenset({"r3"}))
+            engine._process_active(hub, state_r3, rect, cfg, 0.0, 0.05)
+
+            # Deve registrar clique esquerdo simples (down seguido de up)
+            mouse_events = [e for e in injector.events if e[0] == "mouse" and e[1] == "left"]
+            self.assertIn(("mouse", "left", True), mouse_events)
+            self.assertIn(("mouse", "left", False), mouse_events)
+
+            # 2. Próximo tick mantendo R3 pressionado não deve gerar novo clique (sem auto-repeat)
+            engine._previous = state_r3
+            injector.events.clear()
+            engine._process_active(hub, state_r3, rect, cfg, 0.05, 0.05)
+            r3_mouse_events = [e for e in injector.events if e[0] == "mouse" and e[1] == "left"]
+            self.assertEqual(len(r3_mouse_events), 0)
+
+            # 3. Solta e pressiona novamente R3 -> dispara novo clique
+            state_rel = ControllerState(connected=True)
+            engine._previous = state_r3
+            engine._process_active(hub, state_rel, rect, cfg, 0.10, 0.05)
+            injector.events.clear()
+
+            engine._previous = state_rel
+            engine._process_active(hub, state_r3, rect, cfg, 0.15, 0.05)
+            new_events = [e for e in injector.events if e[0] == "mouse" and e[1] == "left"]
+            self.assertIn(("mouse", "left", True), new_events)
+            self.assertIn(("mouse", "left", False), new_events)
+
+    def test_r3_ignored_when_not_in_game(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            # Conectado mas na Tela Inicial (state_id == 0, is_in_game == False)
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=False,
+                state_id=0,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            state_r3 = ControllerState(connected=True, buttons=frozenset({"r3"}))
+            engine._process_active(hub, state_r3, rect, cfg, 0.0, 0.05)
+
+            # Nenhum clique deve ter sido disparado
+            mouse_events = [e for e in injector.events if e[0] == "mouse"]
+            self.assertEqual(len(mouse_events), 0)
+
+    def test_r3_ignored_when_shortcut_config_active_or_radial_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, injector = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=True,
+                state_id=6,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Com shortcut_config_active == True
+            engine._shortcut_config_active = True
+            state_r3 = ControllerState(connected=True, buttons=frozenset({"r3"}))
+            engine._process_active(hub, state_r3, rect, cfg, 0.0, 0.05)
+            mouse_events = [e for e in injector.events if e[0] == "mouse"]
+            self.assertEqual(len(mouse_events), 0)
+
+            # Com radial / LB held
+            engine._shortcut_config_active = False
+            state_lb_r3 = ControllerState(connected=True, buttons=frozenset({"r3", "lb"}))
+            injector.events.clear()
+            engine._process_active(hub, state_lb_r3, rect, cfg, 0.05, 0.05)
+            mouse_events = [e for e in injector.events if e[0] == "mouse"]
+            self.assertEqual(len(mouse_events), 0)
+
 
 

@@ -140,6 +140,70 @@ def main() -> int:
     shared = SharedOverlayState()
     # Motor de entrada (thread de 120 Hz).
     engine = BridgeEngine(config, shared)
+
+    # Filtro nativo do Windows: detecta conexão e desconexão de controles em tempo real (USB / Bluetooth).
+    device_filter = None
+    device_receiver = None
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        from PySide6.QtCore import QAbstractNativeEventFilter, QTimer
+        from PySide6.QtWidgets import QWidget
+
+        WM_DEVICECHANGE = 0x0219
+
+        class DeviceChangeFilter(QAbstractNativeEventFilter):
+            def __init__(self, on_change) -> None:
+                super().__init__()
+                self._on_change = on_change
+                self._debounce_timer = QTimer()
+                self._debounce_timer.setSingleShot(True)
+                self._debounce_timer.timeout.connect(self._fire)
+                self._handshake_timer = QTimer()
+                self._handshake_timer.setSingleShot(True)
+                self._handshake_timer.timeout.connect(self._fire)
+
+            def _fire(self) -> None:
+                self._on_change()
+
+            def nativeEventFilter(self, event_type, message):
+                try:
+                    if event_type in (b"windows_generic_MSG", "windows_generic_MSG"):
+                        msg = wintypes.MSG.from_address(int(message))
+                        if msg.message == WM_DEVICECHANGE:
+                            # Debounce de 250ms para evitar tempestade de mensagens ao espetar USB
+                            self._debounce_timer.start(250)
+                            # Segundo disparo a 900ms para aguardar o handshake do Bluetooth
+                            self._handshake_timer.start(900)
+                except Exception:
+                    pass
+                return False, 0
+
+        # Garante que a aplicação possua um HWND Win32 ativo para receber broadcasts do sistema
+        device_receiver = QWidget()
+        hwnd = int(device_receiver.winId())
+
+        class DEV_BROADCAST_DEVICEINTERFACE(ctypes.Structure):
+            _fields_ = [
+                ("dbcc_size", wintypes.DWORD),
+                ("dbcc_devicetype", wintypes.DWORD),
+                ("dbcc_reserved", wintypes.DWORD),
+                ("dbcc_classguid", ctypes.c_byte * 16),
+                ("dbcc_name", ctypes.c_wchar * 1),
+            ]
+
+        try:
+            notification_filter = DEV_BROADCAST_DEVICEINTERFACE()
+            notification_filter.dbcc_size = ctypes.sizeof(DEV_BROADCAST_DEVICEINTERFACE)
+            notification_filter.dbcc_devicetype = 5  # DBT_DEVTYP_DEVICEINTERFACE
+            # DEVICE_NOTIFY_WINDOW_HANDLE (0x0) | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES (0x4)
+            ctypes.windll.user32.RegisterDeviceNotificationW(hwnd, ctypes.byref(notification_filter), 4)
+        except Exception:
+            pass
+
+        device_filter = DeviceChangeFilter(engine.trigger_rescan)
+        app.installNativeEventFilter(device_filter)
+
     # Overlay Qt; a exibição é controlada pelo próprio _refresh conforme o jogo.
     overlay = GameOverlay(shared, config)
     # Ícone da bandeja: pausa, perfil, recarga e saída.

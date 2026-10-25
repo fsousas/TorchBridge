@@ -78,6 +78,23 @@ class BottomHudTests(unittest.TestCase):
         self.assertTrue(nintendo_path.is_file(), f"Arquivo não encontrado: {nintendo_path}")
         self.assertEqual(nintendo_path.name, "hud-nitendo.png")
 
+    def test_bottom_hud_shortcut_active_asset_paths_exist(self):
+        """Verifica se os arquivos PNG variantes com menu radial opaco existem no disco."""
+        xbox_path = bottom_hud_asset_path("xbox", shortcut_active=True)
+        self.assertIsNotNone(xbox_path)
+        self.assertTrue(xbox_path.is_file(), f"Arquivo não encontrado: {xbox_path}")
+        self.assertEqual(xbox_path.name, "hud-xbox-shortcut-config-active.png")
+
+        ps_path = bottom_hud_asset_path("playstation", shortcut_active=True)
+        self.assertIsNotNone(ps_path)
+        self.assertTrue(ps_path.is_file(), f"Arquivo não encontrado: {ps_path}")
+        self.assertEqual(ps_path.name, "hud-playstation-shortcut-config-active.png")
+
+        nintendo_path = bottom_hud_asset_path("nintendo", shortcut_active=True)
+        self.assertIsNotNone(nintendo_path)
+        self.assertTrue(nintendo_path.is_file(), f"Arquivo não encontrado: {nintendo_path}")
+        self.assertEqual(nintendo_path.name, "hud-nitendo-shortcut-config-active.png")
+
     def test_bottom_hud_target_rect_1080p(self):
         """Valida coordenadas e proporção do HUD inferior em resolução 1080p (1920x1080) com redução de 27% e offset 2%."""
         rect = Rect(0, 0, 1920, 1080)
@@ -239,7 +256,7 @@ class BottomHudTests(unittest.TestCase):
             )
             self.assertFalse(overlay._should_show_bottom_hud(snap_dialog))
 
-            # 8. Oculto em QUEST
+            # 8. Visível em QUEST / Journal (J) (assim como nos outros menus em jogo como Inventário e Skills)
             snap_quest = OverlaySnapshot(
                 game_found=True,
                 game_active=True,
@@ -248,8 +265,9 @@ class BottomHudTests(unittest.TestCase):
                 memory_is_in_game=True,
                 memory_state_desc="Em Jogo",
                 quest_menu_open=True,
+                memory_open_menus=["Missões (Quests)"],
             )
-            self.assertFalse(overlay._should_show_bottom_hud(snap_quest))
+            self.assertTrue(overlay._should_show_bottom_hud(snap_quest))
 
             # 9. Visível em PAUSE (ESC em jogo não fecha a barra nativa nem o HUD)
             snap_pause = OverlaySnapshot(
@@ -275,6 +293,19 @@ class BottomHudTests(unittest.TestCase):
                 memory_open_menus=["Configurações"],
             )
             self.assertFalse(overlay._should_show_bottom_hud(snap_settings))
+
+            # 11. Oculto na TELA DE MORTE / RESPAWN
+            snap_death = OverlaySnapshot(
+                game_found=True,
+                game_active=True,
+                game_rect=rect,
+                controller_connected=True,
+                memory_is_in_game=True,
+                memory_state_desc="Em Jogo",
+                death_screen_focus="resurrect_entrance",
+                memory_open_menus=["Morte / Respawn"],
+            )
+            self.assertFalse(overlay._should_show_bottom_hud(snap_death))
 
     def test_bottom_hud_render_all_layouts(self):
         """Valida que o desenho do HUD funciona para cada marca de controle sem exceções."""

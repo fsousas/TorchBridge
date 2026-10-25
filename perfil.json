@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "target": {
+    "process_names": [
+      "Torchlight.exe"
+    ],
+    "window_titles": [
+      "Torchlight"
+    ]
+  },
+  "input": {
+    "device_guid": "",
+    "poll_hz": 120,
+    "deadzone": 0.18,
+    "response_curve": 1.6
+  },
+  "movement": {
+    "initial_mode": "direct",
+    "anchor_x": 0.5,
+    "anchor_y": 0.47,
+    "movement_radius_percent": 0.16,
+    "click_center_fraction": 0.15
+  },
+  "cursor": {
+    "speed_pixels_per_second": 1450
+  },
+  "overlay": {
+    "enabled": true,
+    "scale": 1.0,
+    "show_aim_marker": true,
+    "show_mode_badge": true,
+    "show_calibration": false,
+    "show_bottom_hud": true,
+    "bottom_hud_offset_y_percent": 0.015,
+    "bottom_hud_scale": 1.0,
+    "controller_layout": "auto"
+  },
+  "bindings": {
+    "a": "",
+    "b": "2",
+    "x": "",
+    "y": "1",
+    "dpad_up": "",
+    "dpad_right": "",
+    "dpad_down": "",
+    "dpad_left": "",
+    "r3": "MOUSE_LEFT",
+    "start": "ESC",
+    "rb": "3",
+    "rt": "4",
+    "lt_a": "5",
+    "lt_x": "6",
+    "lt_y": "7",
+    "lt_b": "8",
+    "lt_rb": "9",
+    "lt_rt": "0",
+    "radial_slots": [
+      "I",
+      "S",
+      "Q",
+      "J",
+      "short-cut",
+      "P",
+      "C",
+      "A"
+    ]
+  },
+  "raw_controller": {
+    "force_raw": false,
+    "axes": {
+      "left_x": {
+        "index": 0,
+        "invert": false
+      },
+      "left_y": {
+        "index": 1,
+        "invert": false
+      },
+      "right_x": {
+        "index": 2,
+        "invert": false
+      },
+      "right_y": {
+        "index": 3,
+        "invert": false
+      }
+    },
+    "triggers": {
+      "left": {
+        "type": "axis",
+        "index": 4,
+        "rest": -1.0,
+        "active": 1.0
+      },
+      "right": {
+        "type": "axis",
+        "index": 5,
+        "rest": -1.0,
+        "active": 1.0
+      }
+    },
+    "buttons": {
+      "a": {
+        "type": "button",
+        "index": 0
+      },
+      "b": {
+        "type": "button",
+        "index": 1
+      },
+      "x": {
+        "type": "button",
+        "index": 2
+      },
+      "y": {
+        "type": "button",
+        "index": 3
+      },
+      "lb": {
+        "type": "button",
+        "index": 4
+      },
+      "rb": {
+        "type": "button",
+        "index": 5
+      },
+      "back": {
+        "type": "button",
+        "index": 6
+      },
+      "start": {
+        "type": "button",
+        "index": 7
+      },
+      "l3": {
+        "type": "button",
+        "index": 8
+      },
+      "r3": {
+        "type": "button",
+        "index": 9
+      },
+      "dpad_up": {
+        "type": "hat",
+        "index": 0,
+        "value": [
+          0,
+          1
+        ]
+      },
+      "dpad_right": {
+        "type": "hat",
+        "index": 0,
+        "value": [
+          1,
+          0
+        ]
+      },
+      "dpad_down": {
+        "type": "hat",
+        "index": 0,
+        "value": [
+          0,
+          -1
+        ]
+      },
+      "dpad_left": {
+        "type": "hat",
+        "index": 0,
+        "value": [
+          -1,
+          0
+        ]
+      }
+    }
+  }
+}
