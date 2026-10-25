@@ -294,6 +294,19 @@ class BottomHudTests(unittest.TestCase):
             )
             self.assertFalse(overlay._should_show_bottom_hud(snap_settings))
 
+            # 11. Oculto na TELA DE MORTE / RESPAWN
+            snap_death = OverlaySnapshot(
+                game_found=True,
+                game_active=True,
+                game_rect=rect,
+                controller_connected=True,
+                memory_is_in_game=True,
+                memory_state_desc="Em Jogo",
+                death_screen_focus="resurrect_entrance",
+                memory_open_menus=["Morte / Respawn"],
+            )
+            self.assertFalse(overlay._should_show_bottom_hud(snap_death))
+
     def test_bottom_hud_render_all_layouts(self):
         """Valida que o desenho do HUD funciona para cada marca de controle sem exceções."""
         with tempfile.TemporaryDirectory() as directory:
