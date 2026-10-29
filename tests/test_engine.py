@@ -534,56 +534,87 @@ class PetSubmenuTests(unittest.TestCase):
             self.assertEqual(shared.get().radial_selection, 7)
             self.assertFalse(shared.get().pet_submenu_open)
 
-    # Soltar LB fecha a roda SEM disparar nada (confirmação é do A): sublinha aberta,
-    # soltar LB = desistência pura.
-    def test_releasing_lb_closes_without_firing(self):
-        with tempfile.TemporaryDirectory() as directory:
-            engine, shared = self._engine(directory)
-            self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
-            self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
-            self.assertTrue(shared.get().pet_submenu_open)
-            # Solta LB no setor P com a sublinha aberta: fecha tudo, NÃO dispara o atalho.
-            self._tick(engine, directory, self._state(rx=-0.6, ry=0.8))
-            self.assertNotIn("P", engine.injector.tapped)
-            self.assertFalse(shared.get().pet_submenu_open)
-            self.assertFalse(shared.get().radial_active)
-
-    # Botão A com a roda aberta (sem sublinha) confirma: dispara o atalho do setor,
-    # alterna o painel e fecha a roda — com o LB AINDA segurado (latch).
-    def test_a_confirms_slot_and_closes_wheel(self):
+    # Soltar LB com setor selecionado confirma o atalho, alterna o painel e fecha a roda.
+    def test_releasing_lb_confirms_slot_and_closes_wheel(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared = self._engine(directory)
             # Setor 1 (topo) = I: rx=0, ry negativo.
             self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
             self.assertEqual(shared.get().radial_selection, 1)
-            # A com o LB ainda segurado: confirma o I.
-            self._tick(engine, directory, self._state(("lb", "a"), rx=0.0, ry=-0.6))
+            # Solta o LB: confirma o I e fecha a roda.
+            self._tick(engine, directory, self._state(rx=0.0, ry=-0.6))
             self.assertIn("I", engine.injector.tapped)
             self.assertIn("I", shared.get().active_panels)
-            # Roda fechou (latch) mesmo com o LB pressionado.
             self.assertFalse(shared.get().radial_active)
             self.assertIsNone(shared.get().radial_selection)
-            # E o clique esquerdo NÃO seguiu junto (A confirma, não clica).
-            self.assertFalse(engine.injector.buttons.get("left", False))
 
-    # A com a sublinha ABERTA: fecha a sublinha E a roda, sem disparar o atalho do P.
-    def test_a_with_submenu_closes_wheel_without_firing(self):
+    # Soltar LB sem nenhuma seleção feita fecha a roda sem disparar nada.
+    def test_releasing_lb_without_selection_closes_without_firing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared = self._engine(directory)
+            # Abre a roda mas analógico no centro (sem seleção)
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=0.0))
+            self.assertTrue(shared.get().radial_active)
+            self.assertIsNone(shared.get().radial_selection)
+            # Solta o LB
+            self._tick(engine, directory, self._state(rx=0.0, ry=0.0))
+            self.assertEqual(engine.injector.tapped, [])
+            self.assertFalse(shared.get().radial_active)
+
+    # Botão Leste (B) cancela a seleção do analógico e retorna a roda para o estado
+    # inicial (aberto, mas nada selecionado).
+    def test_b_cancels_selection_returns_to_initial_open_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared = self._engine(directory)
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertEqual(shared.get().radial_selection, 1)
+            self.assertTrue(shared.get().radial_active)
+            # B cancela a seleção
+            self._tick(engine, directory, self._state(("lb", "b"), rx=0.0, ry=-0.6))
+            self.assertTrue(shared.get().radial_active)
+            self.assertIsNone(shared.get().radial_selection)
+            self.assertEqual(engine.injector.tapped, [])
+            # Soltar o LB após cancelar fecha a roda sem disparar nada
+            self._tick(engine, directory, self._state(rx=0.0, ry=-0.6))
+            self.assertEqual(engine.injector.tapped, [])
+            self.assertFalse(shared.get().radial_active)
+
+    # Botão Leste (B) com sublinha de pet aberta: fecha a sublinha e desmarca o setor,
+    # mantendo a roda aberta no estado inicial (nada selecionado).
+    def test_b_closes_pet_submenu_returns_to_initial_open_state(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared = self._engine(directory)
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self.assertTrue(shared.get().pet_submenu_open)
-            self._tick(engine, directory, self._state(("lb", "a"), rx=-0.6, ry=0.8))
-            self.assertNotIn("P", engine.injector.tapped)
+            self.assertEqual(shared.get().radial_selection, 6)
+            # B fecha a sublinha e cancela a seleção
+            self._tick(engine, directory, self._state(("lb", "b"), rx=-0.6, ry=0.8))
             self.assertFalse(shared.get().pet_submenu_open)
+            self.assertIsNone(shared.get().radial_selection)
+            self.assertTrue(shared.get().radial_active)
+            self.assertEqual(engine.injector.tapped, [])
+            # Soltar o LB não dispara ação do pet
+            self._tick(engine, directory, self._state(rx=-0.6, ry=0.8))
+            self.assertNotIn("P", engine.injector.tapped)
+            self.assertIsNone(engine._pet_click_seq)
             self.assertFalse(shared.get().radial_active)
-            self.assertNotIn("1", engine.injector.tapped)
 
-    # A com a sublinha aberta E painel ESQUERDO aberto: a letra do painel dispara NA
-    # HORA da confirmação (fecha o painel no jogo) e o clique do pet só sai DEPOIS dos
-    # 500 ms de espera da animação (testado em PetClickSequenceTests). O índice 0 já
-    # zera na confirmação.
-    def test_a_with_submenu_closes_open_left_panel_first(self):
+    # Botão Leste (B) com a roda aberta e nada selecionado não faz nada (não vaza para o jogo).
+    def test_b_without_selection_is_noop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared = self._engine(directory)
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=0.0))
+            self.assertTrue(shared.get().radial_active)
+            self.assertIsNone(shared.get().radial_selection)
+            self._tick(engine, directory, self._state(("lb", "b"), rx=0.0, ry=0.0))
+            self.assertTrue(shared.get().radial_active)
+            self.assertIsNone(shared.get().radial_selection)
+            self.assertEqual(engine.injector.tapped, [])
+
+    # Soltar LB com a sublinha aberta E painel ESQUERDO aberto: confirma a ação do pet,
+    # fecha o painel esquerdo na hora e arma a sequência de clique do pet.
+    def test_releasing_lb_with_submenu_closes_open_left_panel_first(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared = self._engine(directory)
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8), now=0.0)
@@ -591,61 +622,67 @@ class PetSubmenuTests(unittest.TestCase):
             # Painel esquerdo (C) está aberto antes da confirmação.
             engine._active_panels = ["C", ""]
             shared.update(active_panels=["C", ""])
-            # A confirma: a sequência arma, o índice 0 zera e a letra "C" sai NA HORA.
-            self._tick(engine, directory, self._state(("lb", "a"), rx=-0.6, ry=0.8), now=0.10)
+            # Soltar LB confirma
+            self._tick(engine, directory, self._state(rx=-0.6, ry=0.8), now=0.10)
             self.assertEqual(engine._active_panels[0], "")
             self.assertEqual(shared.get().active_panels[0], "")
             self.assertNotIn("P", engine.injector.tapped)
             self.assertFalse(shared.get().pet_submenu_open)
             self.assertFalse(shared.get().radial_active)
             self.assertIn("C", engine.injector.tapped)
-            # A sequência segue viva (fase de espera de 500 ms) e o cursor não se mexe
-            # até a animação de fechamento terminar.
             self.assertIsNotNone(engine._pet_click_seq)
             self.assertEqual(engine.injector.moved, [])
-            # Encerra a sequência (fim do caminho com painel em t=0,74): retorno ao centro.
+            # Encerra a sequência
             self._tick(engine, directory, self._state(), now=0.85)
             self.assertIsNone(engine._pet_click_seq)
 
-    # A com a sublinha aberta E painel esquerdo FECHADO: nenhum toque extra, só fecha tudo.
-    def test_a_with_submenu_no_left_panel_no_extra_tap(self):
+    # Soltar LB com a sublinha aberta e painel esquerdo fechado: confirma ação do pet diretamente.
+    def test_releasing_lb_with_submenu_no_left_panel_no_extra_tap(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared = self._engine(directory)
             self._tick(engine, directory, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, directory, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self.assertEqual(engine._active_panels, ["", ""])
-            self._tick(engine, directory, self._state(("lb", "a"), rx=-0.6, ry=0.8))
-            # Só o A confirmou; nada extra foi disparado.
+            self._tick(engine, directory, self._state(rx=-0.6, ry=0.8), now=0.10)
             self.assertEqual(engine.injector.tapped, [])
             self.assertEqual(engine._active_panels, ["", ""])
-            # E a sequência termina sem tocar em tecla (painel pendente = None).
-            self._tick(engine, directory, self._state(), now=0.41)
+            self.assertFalse(shared.get().radial_active)
+            # Sequência termina
+            self._tick(engine, directory, self._state(), now=0.45)
             self.assertEqual(engine.injector.tapped, [])
             self.assertIsNone(engine._pet_click_seq)
 
-    # A com a roda aberta NÃO segura o clique esquerdo: o toque é da confirmação.
-    def test_a_key_tap_suppressed_when_wheel_open(self):
-        with tempfile.TemporaryDirectory() as directory:
-            engine, _ = self._engine(directory)
-            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
-            self._tick(engine, directory, self._state(("lb", "a"), rx=0.0, ry=-0.6))
-            self.assertFalse(engine.injector.buttons.get("left", False))
-
-    # Após confirmar com o A (roda fechada via latch, LB ainda segurado), o stick NÃO
-    # ressuscita a seleção; soltar o LB e apertar de novo reabre a roda do zero.
-    def test_wheel_stays_closed_while_lb_held_after_confirm(self):
+    # Botão A não confirma a roda e não segura clique de mouse.
+    def test_a_button_ignored_while_wheel_open(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared = self._engine(directory)
             self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertEqual(shared.get().radial_selection, 1)
+            # Pressionar A com roda aberta é ignorado
             self._tick(engine, directory, self._state(("lb", "a"), rx=0.0, ry=-0.6))
-            # LB continua segurado apontando no setor I: roda segue fechada, sem seleção.
-            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
-            self.assertFalse(shared.get().radial_active)
-            self.assertIsNone(shared.get().radial_selection)
-            # Solta e aperta de novo: reabre normalmente.
-            self._tick(engine, directory, self._state(rx=0.0, ry=-0.6))
-            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertEqual(shared.get().radial_selection, 1)
             self.assertTrue(shared.get().radial_active)
+            self.assertEqual(engine.injector.tapped, [])
+            self.assertFalse(engine.injector.buttons.get("left", False))
+
+    # Ao cancelar com B enquanto o stick ainda está inclinado, o mesmo setor não é
+    # re-selecionado de imediato até que o stick volte à deadzone ou mude de setor.
+    def test_cancel_lock_prevents_immediate_reselection_until_stick_released(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared = self._engine(directory)
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertEqual(shared.get().radial_selection, 1)
+            # Pressiona B para cancelar enquanto o stick ainda está inclinado
+            self._tick(engine, directory, self._state(("lb", "b"), rx=0.0, ry=-0.6))
+            self.assertIsNone(shared.get().radial_selection)
+            # Próximo tick: stick ainda inclinado para o setor 1, continua sem seleção
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertIsNone(shared.get().radial_selection)
+            # Stick volta ao centro (deadzone)
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=0.0))
+            self.assertIsNone(shared.get().radial_selection)
+            # Agora inclina novamente: seleciona o setor 1 normalmente
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
             self.assertEqual(shared.get().radial_selection, 1)
 
     # Reabrir a roda no P depois de fechada: a sublinha começa FECHADA (nada gruda).
@@ -893,7 +930,7 @@ class PetClickSequenceTests(unittest.TestCase):
             rect = Rect(0, 0, 1920, 1080)
             target = pet_click_point(rect, 4)
             # A confirma (t0=0,10): movimento até o botão já sai neste tick.
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             self.assertEqual(engine.injector.moved[0], target)
             # Desce o clique (fase down, now=0,25).
             self._tick(engine, self._state(), 0.25)
@@ -925,7 +962,7 @@ class PetClickSequenceTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 engine, _ = self._engine(directory)
                 self._prep(engine, directory, square=square, anchor=(960, 500))
-                self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+                self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
                 self.assertEqual(engine.injector.moved[0], pet_click_point(rect, square))
 
     # Durante a sequência os sticks NÃO movem o cursor: o único movimento até o fim é o
@@ -937,7 +974,7 @@ class PetClickSequenceTests(unittest.TestCase):
             self._prep(engine, directory, square=4, anchor=anchor)
             rect = Rect(0, 0, 1920, 1080)
             target = pet_click_point(rect, 4)
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             # Nos ticks seguintes o stick esquerdo está inclinado (lmag > 0) — se o
             # bloqueio falhasse, o movimento direto moveria o cursor de novo.
             for t in (0.15, 0.18, 0.25, 0.32):
@@ -960,7 +997,7 @@ class PetClickSequenceTests(unittest.TestCase):
             rect = Rect(0, 0, 1920, 1080)
             target = pet_click_point(rect, 4)
             engine._active_panels = ["C", ""]
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             # A letra "C" saiu NA HORA e zerou o índice 0 (o jogo fecha o painel)...
             self.assertIn("C", engine.injector.tapped)
             self.assertEqual(engine._active_panels[0], "")
@@ -1000,7 +1037,7 @@ class PetClickSequenceTests(unittest.TestCase):
             self._prep(engine, directory, square=4, anchor=(960, 500))
             rect = Rect(0, 0, 1920, 1080)
             target = pet_click_point(rect, 4)
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             self.assertEqual(engine.injector.moved[0], target)  # ida já no armar
             self._tick(engine, self._state(), 0.22)  # t=0,12: down
             self.assertIn(("mouse", "left", True), engine.injector.events)
@@ -1015,7 +1052,7 @@ class PetClickSequenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             engine, _ = self._engine(directory)
             self._prep(engine, directory, square=4, anchor=(960, 500))
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             self._tick(engine, self._state(), 0.25)  # botão já baixado
             self.assertTrue(engine._pet_click_down)
             engine._release_all()
@@ -1031,7 +1068,7 @@ class PetClickSequenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared = self._engine(directory)
             self._prep(engine, directory, square=4, anchor=(960, 500))
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             self._tick(engine, self._state(), 0.25)  # down
             self._tick(engine, self._state(), 0.41)  # fim
             self.assertIsNone(engine._pet_click_seq)
@@ -1039,7 +1076,7 @@ class PetClickSequenceTests(unittest.TestCase):
             self._tick(engine, self._state(("lb",), rx=-0.6, ry=0.8), 0.45)
             self._tick(engine, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8), 0.50)
             events_before = len(engine.injector.events)
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.55)
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.55)
             self._tick(engine, self._state(), 0.70)  # down da segunda sequência
             self._tick(engine, self._state(), 0.86)  # fim da segunda
             # Houve mais um ciclo completo de clique (down + up) depois do primeiro.
@@ -1109,22 +1146,24 @@ class FaceButtonsMouseTests(unittest.TestCase):
             self.assertFalse(injector.buttons.get("left", False))
             self.assertFalse(injector.buttons.get("right", False))
 
-    # A com a roda aberta no setor P: confirma o slot (tapa "P", abre o painel) e
-    # NÃO aperta o botão esquerdo do mouse.
+    # A com a roda aberta é ignorado; soltar LB confirma o slot (tapa "P", abre o painel).
     def test_a_confirms_slot_without_left_click(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, _, injector = self._engine(directory)
-            # Setor P (slot 5, "P" = painel esquerdo): vetor rx=-0.6, ry=0.8.
+            # Setor P (slot 6, "P" = painel esquerdo): vetor rx=-0.6, ry=0.8.
             self._tick(engine, self._state(("lb",), rx=-0.6, ry=0.8))
             self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8))
+            self.assertEqual(injector.tapped, [])
+            self.assertFalse(injector.buttons.get("left", False))
+            # Soltar LB confirma
+            self._tick(engine, self._state(rx=-0.6, ry=0.8))
             self.assertEqual(injector.tapped, ["P"])
             self.assertEqual(engine._active_panels, ["P", ""])
             self.assertFalse(injector.buttons.get("left", False))
             self.assertFalse(injector.buttons.get("right", False))
 
-    # A confirmando o quadrado do pet: o ÚNICO clique esquerdo é o da sequência no
-    # botão do pet — o botão esquerdo do cursor nunca é retido (LB ainda segurado
-    # na confirmação e a sequência injeta o clique direto, fora de _held_mouse).
+    # Confirmando o quadrado do pet ao soltar LB: o ÚNICO clique esquerdo é o da sequência no
+    # botão do pet — o botão esquerdo do cursor nunca é retido.
     def test_pet_confirm_does_not_leak_cursor_click(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, _, injector = self._engine(directory)
@@ -1132,8 +1171,8 @@ class FaceButtonsMouseTests(unittest.TestCase):
             self._tick(engine, self._state(("lb", "dpad_down"), rx=-0.6, ry=0.8))
             self.assertTrue(engine._pet_submenu)
             events_before = len(injector.events)
-            # Confirma o quadrado com o A (t0=0,10).
-            self._tick(engine, self._state(("lb", "a"), rx=-0.6, ry=0.8), 0.10)
+            # Confirma o quadrado soltando o LB (t0=0,10).
+            self._tick(engine, self._state(rx=-0.6, ry=0.8), 0.10)
             self.assertFalse(injector.buttons.get("left", False))
             self.assertFalse(injector.buttons.get("right", False))
             # Fase down (0,22..0,31) e fim (>= 0,40).
