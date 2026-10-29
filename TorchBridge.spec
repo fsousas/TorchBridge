@@ -11,6 +11,7 @@ analysis = Analysis(
     datas=[
         ("assets/images/radial-menu-icons", "assets/images/radial-menu-icons"),
         ("assets/images/app", "assets/images/app"),
+        ("assets/images/instructions", "assets/images/instructions"),
         ("assets/hud", "assets/hud"),
         ("assets/keyboard", "assets/keyboard"),
     ] + native_datas,
@@ -49,4 +50,3 @@ collection = COLLECT(
     upx_exclude=[],
     name="TorchBridge",
 )
-
