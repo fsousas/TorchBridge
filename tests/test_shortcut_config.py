@@ -106,7 +106,7 @@ class ShortcutConfigTests(unittest.TestCase):
             self.assertTrue(snap.radial_active)
 
             # Confirma com botão A
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
 
             # Menu radial fecha e modo de atalhos ativa
             snap = shared.get()
@@ -126,7 +126,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Seleciona shortcut no radial e confirma com A
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
 
             # O menu foi fechado enviando ESC e resetando os painéis ativos
             self.assertIn("ESC", engine.injector.tapped)
@@ -140,7 +140,7 @@ class ShortcutConfigTests(unittest.TestCase):
             engine, shared, _ = self._engine(directory)
             # Ativa o modo de atalhos
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self.assertTrue(shared.get().shortcut_config_active)
 
             # Solta botões
@@ -264,7 +264,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Ativa o modo de atalhos a partir da confirmação do radial (South / Slot 5)
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self.assertTrue(shared.get().shortcut_config_active)
             self.assertEqual(shared.get().shortcut_node_focus, 0)
             self.assertEqual(engine._shortcut_node_focus, 0)
@@ -280,7 +280,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             engine.injector.events.clear()
 
@@ -316,7 +316,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             engine.injector.events.clear()
 
@@ -337,7 +337,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             engine.injector.events.clear()
 
@@ -371,7 +371,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos e abre o grid
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("a",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -403,7 +403,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos e abre o grid
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("a",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -433,7 +433,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos e abre o grid
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("a",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -454,7 +454,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # 1. Abre o grid e pressiona Start: deve desarmar por completo e voltar para o jogo
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("a",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -471,7 +471,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # 2. Entra no modo de atalhos (apenas nós da HUD) e pressiona Start: desarma para o jogo
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.35)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.40)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.40)
             self._tick(engine, self._state(), now=0.45)
             self.assertTrue(shared.get().shortcut_config_active)
             self.assertFalse(shared.get().shortcut_grid_active)
@@ -584,7 +584,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos e abre o grid
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("a",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -605,7 +605,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Entra no modo de atalhos e abre o grid
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("a",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -701,7 +701,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Ativa modo de atalhos e solta botões
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             engine.injector.events.clear()
 
@@ -733,7 +733,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Ativa modo de atalhos
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
 
             # D-pad Cima entra na aba de informações
@@ -756,7 +756,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Ativa modo de atalhos e sobe para aba de informações
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
             self._tick(engine, self._state(("dpad_up",)), now=0.15)
             self._tick(engine, self._state(), now=0.20)
@@ -776,7 +776,7 @@ class ShortcutConfigTests(unittest.TestCase):
 
             # Ativa modo de atalhos
             self._tick(engine, self._state(("lb",), rx=0.0, ry=0.8), now=0.0)
-            self._tick(engine, self._state(("lb", "a"), rx=0.0, ry=0.8), now=0.05)
+            self._tick(engine, self._state(rx=0.0, ry=0.8), now=0.05)
             self._tick(engine, self._state(), now=0.10)
 
             # Pressiona A no nó 0 para abrir o grid de opções

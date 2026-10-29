@@ -158,6 +158,7 @@ class BridgeEngine(threading.Thread):
         # Setor da roda selecionado enquanto LB estiver segurado.
         self._radial_selection: int | None = None
         self._radial_dismissed: bool = False
+        self._radial_cancel_lock: int | None = None
         self._rescan_requested: bool = False
         # Modo de configuração de atalhos inferior (spotlight ativo).
         self._shortcut_config_active: bool = False
@@ -338,6 +339,7 @@ class BridgeEngine(threading.Thread):
         self._reset_active_panels()
         self._radial_selection = None
         self._radial_dismissed = False
+        self._radial_cancel_lock = None
         self._dialog_initialized = False
         self._dialog_focus = None
         self._last_dialog_type = ""
@@ -521,8 +523,8 @@ class BridgeEngine(threading.Thread):
         # A roda fechou (interrupção): a sublinha de pet actions não pode sobreviver aberta.
         self._pet_submenu = False
         self._pet_submenu_selection = PET_SUBMENU_DEFAULT
-        # O latch de confirmação pelo A também não pode sobreviver à interrupção.
         self._radial_dismissed = False
+        self._radial_cancel_lock = None
         # Clique modificado em curso: solta o left da sequência (ele NÃO está em
         # _held_mouse) — o modificador já foi solto pelo laço de _held_keys acima.
         # A sequência não sobrevive à pausa (o que deteve o foco detém as entradas).
@@ -4889,7 +4891,7 @@ class BridgeEngine(threading.Thread):
             return False
         menus = self._memory_state.open_menus or []
         # Permitido sem menus abertos, ou quando painéis comuns de gameplay (Inventário, Pet, Atributos, Habilidades, Missões (Quests)) estão abertos
-        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades", "Missões (Quests)"}
+        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades", "Missões (Quests)", "Diário (Journal)"}
         other_menus = [m for m in menus if m not in allowed_panels]
         if other_menus:
             return False
@@ -4898,8 +4900,9 @@ class BridgeEngine(threading.Thread):
             return False
         return True
 
-    # Roda de habilidades: LB + analógico direito escolhe o setor; A confirma o atalho e
-    # soltar LB só fecha a roda (a confirmação saiu do soltar em ago/2026).
+    # Roda de habilidades: LB + analógico direito escolhe o setor; liberação do LB confirma o atalho.
+    # Botão Leste (B / Bolinha) cancela a seleção atual e fecha o submenu do pet caso aberto,
+    # retornando o menu radial ao estado inicial (aberto, mas nada selecionado). O botão A não confirma.
     def _handle_radial(
         self,
         hub: ControllerHub,
@@ -4910,46 +4913,131 @@ class BridgeEngine(threading.Thread):
     ) -> None:
         active = state.pressed("lb") and self._is_radial_allowed()
         slots = bindings.get("radial_slots", [])
-        # Borda de subida do LB: rearma o latch — o próximo aperto reabre a roda do zero.
+        # Borda de subida do LB: rearma a roda — novo aperto começa do zero (nada selecionado).
         if not self._previous.pressed("lb") and active:
             self._radial_dismissed = False
-        # Roda de pé: LB segurado E sem latch de confirmação pelo A (apertar A com o LB
-        # ainda segurado mantém a roda fechada até soltar o LB).
+            self._radial_selection = None
+            self._radial_cancel_lock = None
+            self._pet_submenu = False
+            self._pet_submenu_selection = PET_SUBMENU_DEFAULT
+
+        # LB liberado (borda de descida): CONFIRMA a seleção feita enquanto a roda esteve aberta
+        if self._previous.pressed("lb") and not active:
+            if (
+                self._radial_selection is not None
+                and self._radial_selection <= len(slots)
+            ):
+                if not self._pet_submenu:
+                    slot = slots[self._radial_selection - 1]
+                    if str(slot).lower() in ("short-cut", "shortcut"):
+                        has_open_menu = bool(
+                            self._memory_state.is_menu_open
+                            or any(self._active_panels)
+                            or getattr(self, "_skill_menu_open", False)
+                            or getattr(self, "_quest_menu_initialized", False)
+                            or getattr(self, "_dialog_initialized", False)
+                        )
+                        if has_open_menu:
+                            self.injector.tap("ESC")
+                            self._reset_active_panels()
+                            if getattr(self, "_skill_menu_open", False):
+                                self._skill_menu_open = False
+                                self._skill_in_spells = False
+                                self._skill_spell_idx = 0
+                            if getattr(self, "_quest_menu_initialized", False):
+                                self._quest_menu_initialized = False
+                                self._quest_b_consumed = False
+                            if getattr(self, "_dialog_initialized", False):
+                                self._dialog_initialized = False
+                                self._dialog_focus = None
+
+                        self._shortcut_config_active = True
+                        self._shortcut_node_focus = 0
+                        self._shortcut_info_focus = False
+                        self.shared.update(
+                            shortcut_config_active=True,
+                            shortcut_node_focus=0,
+                            shortcut_info_focus=False,
+                            active_panels=list(self._active_panels),
+                        )
+                        self._release_all()
+                        target_x, target_y = shortcut_node_point(rect, 0)
+                        self.injector.move(target_x, target_y)
+                    else:
+                        self._tap_binding(slot)
+                        next_panels = toggle_panel(self._active_panels, slot)
+                        if next_panels != self._active_panels:
+                            self._active_panels = next_panels
+                            self.shared.update(active_panels=list(next_panels))
+                else:
+                    target = pet_click_point(rect, self._pet_submenu_selection)
+                    if self._last_anchor:
+                        return_x, return_y = self._last_anchor
+                    else:
+                        movement = self.config.get()["movement"]
+                        return_x = rect.left + rect.width * float(movement["anchor_x"])
+                        return_y = rect.top + rect.height * float(movement["anchor_y"])
+                    pending_panel = self._active_panels[0] or None
+                    self._pet_click_seq = (
+                        int(round(target[0])),
+                        int(round(target[1])),
+                        int(round(return_x)),
+                        int(round(return_y)),
+                        pending_panel,
+                        now,
+                    )
+                    self._pet_click_down = False
+                    self._pet_click_panel_done = pending_panel is None
+                    if pending_panel:
+                        self._active_panels[0] = ""
+                        self.shared.update(active_panels=list(self._active_panels))
+                hub.rumble(0.06, 0.12, 50)
+
+            self._pet_submenu = False
+            self._pet_submenu_selection = PET_SUBMENU_DEFAULT
+            self._radial_selection = None
+            self._radial_cancel_lock = None
+            self._radial_dismissed = False
+
+        # Roda de pé: LB segurado E sem latch de confirmação/dismissal.
         open = active and not self._radial_dismissed
-        # Sem LB (ou roda confirmada) não há seleção; radial_slot devolve 1..N (N = slots
-        # do perfil) com inclinação mínima.
-        selection = radial_slot(state.rx, state.ry, len(slots)) if open else None
-        # Setor mudou (roda de pé): atualiza a seleção e vibra para dar retorno tátil.
-        if open and selection is not None and selection != self._radial_selection:
-            self._radial_selection = selection
+
+        # Leitura do analógico direito para o setor (1..N) com inclinação mínima.
+        raw_selection = radial_slot(state.rx, state.ry, len(slots)) if open else None
+
+        # Se o analógico retornou ao centro (deadzone), libera a trava de cancelamento
+        if raw_selection is None:
+            self._radial_cancel_lock = None
+
+        # Setor mudou (roda de pé): atualiza a seleção persistida e vibra para retorno tátil
+        if (
+            open
+            and raw_selection is not None
+            and raw_selection != self._radial_cancel_lock
+            and raw_selection != self._radial_selection
+        ):
+            self._radial_selection = raw_selection
+            self._radial_cancel_lock = None
             hub.rumble(0.04, 0.10, 35)
+
         # A sublinha acompanha a seleção PERSISTIDA (self._radial_selection), não a
-        # seleção instantânea do analógico: assim, com a alavanca de volta ao centro
-        # (radial_slot devolve None), o setor segue o último que o analogo apontou — e o
-        # d-pad BAIXO abre o submenu sem precisar manter o stick inclinado.
+        # seleção instantânea do analógico.
         current = self._radial_selection if open else None
+
         # Sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad PARA BAIXO abre,
         # para CIMA fecha — enquanto a roda está aberta e o setor do pet é o selecionado.
-        # Vibra só na transição real (abriu ou fechou).
         if current is not None:
             current_slot = slots[current - 1] if 1 <= current <= len(slots) else ""
             if pet_submenu_open(open, current, current_slot, True):
-                # Setor do pet selecionado: o d-pad inteiro é da sublinha (os toques de
-                # tecla já são suprimidos em _handle_discrete_bindings com a roda de pé).
                 if state.pressed("dpad_down") and not self._previous.pressed("dpad_down"):
                     if not self._pet_submenu:
                         self._pet_submenu = True
-                        # Ao abrir, o marcador nasce no quadrado padrão (o 4º).
                         self._pet_submenu_selection = PET_SUBMENU_DEFAULT
                         hub.rumble(0.04, 0.10, 35)
                 elif state.pressed("dpad_up") and not self._previous.pressed("dpad_up"):
                     if self._pet_submenu:
                         self._pet_submenu = False
                         hub.rumble(0.04, 0.10, 35)
-                # Navegação horizontal: d-pad DIRITO/ESQUERDO move o marcador com wrap
-                # (do 4º volta pro 1º e vice-versa). Só com a sublinha aberta — fechada,
-                # esquerdo/direito são toques normais de tecla (mas com a roda aberta eles
-                # também são suprimidos, igual aos verticais).
                 elif self._pet_submenu:
                     if state.pressed("dpad_right") and not self._previous.pressed("dpad_right"):
                         self._pet_submenu_selection = (self._pet_submenu_selection % PET_SUBMENU_COUNT) + 1
@@ -4957,113 +5045,20 @@ class BridgeEngine(threading.Thread):
                     elif state.pressed("dpad_left") and not self._previous.pressed("dpad_left"):
                         self._pet_submenu_selection = ((self._pet_submenu_selection - 2) % PET_SUBMENU_COUNT) + 1
                         hub.rumble(0.03, 0.08, 30)
-            # Setor desmarcado do pet (análogo apontou outro setor): a sublinha se esconde
-            # sozinha (estado interno volta a False — o próximo 'P' começa fechado).
             elif self._pet_submenu:
                 self._pet_submenu = False
         else:
-            # Roda fechada: a sublinha não existe mais.
             self._pet_submenu = False
 
-        # Confirmação da roda é do botão A — PS cross / Xbox A / genérico A / Nintendo A
-        # chegam todos normalizados como "a" (mapeamento SDL), um caminho cobre as
-        # famílias. Com a sublinha aberta: A fecha a sublinha E a roda e dispara a
-        # ação do quadrado marcado — não existe tecla de teclado para as ações do pet,
-        # então o motor leva o mouse até o botão correspondente na caixinha do pet,
-        # clica e devolve o cursor ao centro (sequência em _handle_pet_click).
-        # Sem sublinha: dispara o atalho do setor (o papel do antigo "soltar LB").
-        if (
-            open
-            and state.pressed("a")
-            and not self._previous.pressed("a")
-            and self._radial_selection is not None
-            and self._radial_selection <= len(slots)
-        ):
-            if not self._pet_submenu:
-                slot = slots[self._radial_selection - 1]
-                if str(slot).lower() in ("short-cut", "shortcut"):
-                    has_open_menu = bool(
-                        self._memory_state.is_menu_open
-                        or any(self._active_panels)
-                        or getattr(self, "_skill_menu_open", False)
-                        or getattr(self, "_quest_menu_initialized", False)
-                        or getattr(self, "_dialog_initialized", False)
-                    )
-                    if has_open_menu:
-                        self.injector.tap("ESC")
-                        self._reset_active_panels()
-                        if getattr(self, "_skill_menu_open", False):
-                            self._skill_menu_open = False
-                            self._skill_in_spells = False
-                            self._skill_spell_idx = 0
-                        if getattr(self, "_quest_menu_initialized", False):
-                            self._quest_menu_initialized = False
-                            self._quest_b_consumed = False
-                        if getattr(self, "_dialog_initialized", False):
-                            self._dialog_initialized = False
-                            self._dialog_focus = None
-
-                    self._shortcut_config_active = True
-                    self._shortcut_node_focus = 0
-                    self._shortcut_info_focus = False
-                    self.shared.update(shortcut_config_active=True, shortcut_node_focus=0, shortcut_info_focus=False, active_panels=list(self._active_panels))
-                    self._release_all()
-                    target_x, target_y = shortcut_node_point(rect, 0)
-                    self.injector.move(target_x, target_y)
-                else:
-                    self._tap_binding(slot)
-                    # O atalho também alterna o rastreador de painéis mostrado no overlay.
-                    next_panels = toggle_panel(self._active_panels, slot)
-                    if next_panels != self._active_panels:
-                        self._active_panels = next_panels
-                        self.shared.update(active_panels=list(next_panels))
-            else:
-                # Sublinha do pet aberta: arma a sequência de clique do quadrado
-                # marcado (1=agressivo/vermelho, 2=defensivo/azul, 3=passivo/branco,
-                # 4=vendedor/amarelo). A letra do painel ESQUERDO, se aberto, é
-                # pendurada na sequência e dispara DEPOIS do clique — mesma regra
-                # antiga, só que sequenciada para o jogo fechar o painel com o
-                # cenário limpo. O cursor de retorno é a âncora do movimento direto
-                # (o "centro" que o click-to-move já usa); fallback no âncora do perfil.
-                target = pet_click_point(rect, self._pet_submenu_selection)
-                if self._last_anchor:
-                    return_x, return_y = self._last_anchor
-                else:
-                    movement = self.config.get()["movement"]
-                    return_x = rect.left + rect.width * float(movement["anchor_x"])
-                    return_y = rect.top + rect.height * float(movement["anchor_y"])
-                pending_panel = self._active_panels[0] or None
-                self._pet_click_seq = (
-                    int(round(target[0])),
-                    int(round(target[1])),
-                    int(round(return_x)),
-                    int(round(return_y)),
-                    pending_panel,
-                    now,
-                )
-                self._pet_click_down = False
-                # Sem painel, a fase da letra já está "resolvida" no armar — o caminho
-                # rápido não desperdiça o primeiro tick em fase vazia (o move sai no
-                # mesmo tick da confirmação, como sempre). Com painel, o primeiro tick
-                # dispara a letra e começa a contagem dos 500 ms de espera.
-                self._pet_click_panel_done = pending_panel is None
-                if pending_panel:
-                    self._active_panels[0] = ""
-                    self.shared.update(active_panels=list(self._active_panels))
-            self._pet_submenu = False
-            self._pet_submenu_selection = PET_SUBMENU_DEFAULT
-            self._radial_selection = None
-            self._radial_dismissed = True
-            hub.rumble(0.06, 0.12, 50)
-
-        # LB liberado: fecha a roda (SÓ fecha — a confirmação de slot/marcação é do botão A).
-        if self._previous.pressed("lb") and not active:
-            self._radial_selection = None
-            self._radial_dismissed = False
-
-        # O A pode ter armado o latch no meio deste tick: recomputa para a publicação
-        # já fechar a roda agora (senão ela só sumiria no tick seguinte).
-        open = active and not self._radial_dismissed
+        # Botão Leste (B / Bolinha no PS): cancela a seleção do analógico e fecha o submenu do pet
+        # caso estejam ativos, retornando o menu radial para o estado inicial (aberto, mas nada selecionado).
+        if open and state.pressed("b") and not self._previous.pressed("b"):
+            if self._radial_selection is not None or self._pet_submenu:
+                self._radial_selection = None
+                self._pet_submenu = False
+                self._pet_submenu_selection = PET_SUBMENU_DEFAULT
+                self._radial_cancel_lock = raw_selection
+                hub.rumble(0.04, 0.08, 30)
 
         self.shared.update(
             radial_active=open,
@@ -5076,7 +5071,6 @@ class BridgeEngine(threading.Thread):
                 else "",
                 self._pet_submenu,
             ),
-            # O quadrado com marcador só tem sentido com a sublinha aberta.
             pet_submenu_selection=(
                 self._pet_submenu_selection
                 if pet_submenu_open(
