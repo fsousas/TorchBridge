@@ -763,6 +763,18 @@ class PetSubmenuTests(unittest.TestCase):
             self.assertTrue(shared.get().radial_active)
             self.assertEqual(shared.get().radial_selection, 1)
 
+            # Fecha roda
+            self._tick(engine, directory, self._state())
+            self.assertFalse(shared.get().radial_active)
+
+            # 4. Com menu de Diário (Journal) aberto
+            engine._memory_state = GameMemoryState(
+                is_connected=True, state_id=6, is_in_game=True, open_menus=["Diário (Journal)"]
+            )
+            self._tick(engine, directory, self._state(("lb",), rx=0.0, ry=-0.6))
+            self.assertTrue(shared.get().radial_active)
+            self.assertEqual(shared.get().radial_selection, 1)
+
 
     # Regressão: com a alavanca de volta ao CENTRO (radial_slot → None), o setor persistido
     # segue valendo — d-pad BAIXO abre a sublinha sem manter o stick inclinado no P.

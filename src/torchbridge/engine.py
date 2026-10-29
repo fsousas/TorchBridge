@@ -4891,7 +4891,7 @@ class BridgeEngine(threading.Thread):
             return False
         menus = self._memory_state.open_menus or []
         # Permitido sem menus abertos, ou quando painéis comuns de gameplay (Inventário, Pet, Atributos, Habilidades, Missões (Quests)) estão abertos
-        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades", "Missões (Quests)"}
+        allowed_panels = {"Inventário", "Pet", "Atributos", "Habilidades", "Missões (Quests)", "Diário (Journal)"}
         other_menus = [m for m in menus if m not in allowed_panels]
         if other_menus:
             return False
