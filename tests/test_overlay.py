@@ -354,6 +354,176 @@ class OverlayCalibrationTests(unittest.TestCase):
                 painter.end()
 
 
+
+
+class OverlayRadialExtraHudTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _make_overlay(self, directory: str, layout: str = "auto") -> tuple[GameOverlay, SharedOverlayState]:
+        import json
+        config_path = Path(directory) / "perfil.json"
+        config_path.write_text(
+            json.dumps({
+                "overlay": {"show_calibration": False, "controller_layout": layout},
+                "bindings": {"radial_slots": ["C", "I", "S", "Q", "J", "P", "Shortcuts", "A"]},
+            }),
+            encoding="utf-8",
+        )
+        config = ConfigManager(config_path)
+        shared = SharedOverlayState()
+        overlay = GameOverlay(shared, config)
+        return overlay, shared
+
+    def test_radial_extra_hud_assets_exist_and_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            instructions = [
+                "menu-radial-instructions-xbox.png",
+                "menu-radial-instructions-ps.png",
+                "menu-radial-instructions-nintendo.png",
+            ]
+            for filename in instructions:
+                pix = overlay._radial_instruction_pixmap(filename)
+                self.assertIsNotNone(pix, f"Failed to load {filename}")
+                self.assertFalse(pix.isNull(), f"Pixmap is null for {filename}")
+                self.assertIn(filename, overlay._radial_instruction_cache)
+
+            info_keys = [
+                "A", "C", "I", "J", "P", "P-agressive",
+                "P-defensive", "P-passive", "P-sell", "Q", "S", "Shortcuts",
+            ]
+            for key in info_keys:
+                pix = overlay._radial_info_pixmap(key)
+                self.assertIsNotNone(pix, f"Failed to load top info card for {key}")
+                self.assertFalse(pix.isNull(), f"Pixmap is null for {key}")
+                self.assertIn(key, overlay._radial_info_cache)
+
+    def test_get_radial_top_info_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # 1. Radial fechado
+            snap = OverlaySnapshot(game_rect=rect, radial_active=False, radial_selection=1)
+            self.assertIsNone(overlay._get_radial_top_info_key(snap))
+
+            # 2. Radial aberto sem seleção
+            snap = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=None)
+            self.assertIsNone(overlay._get_radial_top_info_key(snap))
+
+            # 3. Seleção slot 1 ('C')
+            snap = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=1)
+            self.assertEqual(overlay._get_radial_top_info_key(snap), "C")
+
+            # 4. Seleção slot 2 ('I')
+            snap = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=2)
+            self.assertEqual(overlay._get_radial_top_info_key(snap), "I")
+
+            # 5. Seleção slot 7 ('Shortcuts')
+            snap = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=7)
+            self.assertEqual(overlay._get_radial_top_info_key(snap), "Shortcuts")
+
+            # 6. Seleção slot 6 ('P') com submenu fechado
+            snap = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=6, pet_submenu_open=False)
+            self.assertEqual(overlay._get_radial_top_info_key(snap), "P")
+
+            # 7. Seleção slot 6 ('P') com submenu aberto (1 a 4)
+            sub_expected = {
+                1: "P-agressive",
+                2: "P-defensive",
+                3: "P-passive",
+                4: "P-sell",
+            }
+            for sel, expected in sub_expected.items():
+                snap = OverlaySnapshot(
+                    game_rect=rect,
+                    radial_active=True,
+                    radial_selection=6,
+                    pet_submenu_open=True,
+                    pet_submenu_selection=sel,
+                )
+                self.assertEqual(overlay._get_radial_top_info_key(snap), expected)
+
+    def test_radial_top_info_animation_lifecycle(self):
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # Estado inicial
+            snap_none = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=None)
+            overlay._tick_radial_top_info_anim(snap_none)
+            self.assertIsNone(overlay._radial_top_info_current)
+            self.assertEqual(overlay._radial_top_info_progress, 0.0)
+
+            # 1. Entrada de 'C': fade + scale (crossfade=False)
+            snap_c = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=1)
+            overlay._tick_radial_top_info_anim(snap_c)
+            self.assertEqual(overlay._radial_top_info_target, "C")
+            self.assertEqual(overlay._radial_top_info_current, "C")
+            self.assertFalse(overlay._radial_top_info_crossfade)
+
+            # Avança o tempo para completar a entrada
+            overlay._radial_top_info_last_time = time.monotonic() - 1.0
+            overlay._tick_radial_top_info_anim(snap_c)
+            self.assertEqual(overlay._radial_top_info_progress, 1.0)
+
+            # 2. Troca de 'C' para 'I': crossfade puro (sem scale)
+            snap_i = OverlaySnapshot(game_rect=rect, radial_active=True, radial_selection=2)
+            overlay._tick_radial_top_info_anim(snap_i)
+            self.assertEqual(overlay._radial_top_info_target, "I")
+            self.assertEqual(overlay._radial_top_info_current, "I")
+            self.assertEqual(overlay._radial_top_info_prev, "C")
+            self.assertTrue(overlay._radial_top_info_crossfade)
+
+            # Avança o tempo para completar o crossfade
+            overlay._radial_top_info_last_time = time.monotonic() - 1.0
+            overlay._tick_radial_top_info_anim(snap_i)
+            self.assertFalse(overlay._radial_top_info_crossfade)
+            self.assertIsNone(overlay._radial_top_info_prev)
+            self.assertEqual(overlay._radial_top_info_progress, 1.0)
+
+            # 3. Cancelamento pelo botão leste (radial_selection vira None): fade + scale de saída
+            overlay._tick_radial_top_info_anim(snap_none)
+            self.assertIsNone(overlay._radial_top_info_target)
+            self.assertFalse(overlay._radial_top_info_crossfade)
+
+            # Avança o tempo para completar a saída
+            overlay._radial_top_info_last_time = time.monotonic() - 1.0
+            overlay._tick_radial_top_info_anim(snap_none)
+            self.assertEqual(overlay._radial_top_info_progress, 0.0)
+            self.assertIsNone(overlay._radial_top_info_current)
+
+    def test_draw_radial_renders_instructions_and_info(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory, layout="playstation")
+            rect = Rect(0, 0, 1920, 1080)
+            overlay._radial_progress = 1.0
+            overlay._radial_top_info_progress = 1.0
+            overlay._radial_top_info_current = "I"
+            overlay._radial_top_info_target = "I"
+
+            snap = OverlaySnapshot(
+                game_rect=rect,
+                radial_active=True,
+                radial_selection=2,
+                controller_type="playstation",
+            )
+
+            pix = QPixmap(1920, 1080)
+            painter = QPainter(pix)
+            try:
+                overlay._draw_radial(painter, snap, 1.0)
+            finally:
+                painter.end()
+
+            # Ambos devem ter sido consultados no cache
+            self.assertIn("menu-radial-instructions-ps.png", overlay._radial_instruction_cache)
+            self.assertIn("I", overlay._radial_info_cache)
+
+
 if __name__ == "__main__":
     unittest.main()
 

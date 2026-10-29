@@ -132,6 +132,15 @@ def _radial_icons_dir() -> Path:
     return base / "assets" / "images" / "radial-menu-icons"
 
 
+# Diretório dos assets extras do menu radial (TB-16): informações e instruções.
+def _radial_extra_hud_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    return base / "assets" / "hud" / "menu radial"
+
+
 # Janela de sobreposição alinhada à área do jogo, redesenhada a ~60 FPS.
 class KeyboardInputSurface(QWidget):
     """Intercept virtual-key clicks without activating a window or clicking the game."""
@@ -240,6 +249,21 @@ class GameOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         # Cache dos pixmaps do radial: carrega cada PNG uma única vez (desenhar a 60 FPS).
         self._radial_cache: dict[tuple[str, str], QPixmap] = {}
+        # Cache das informações extras do menu radial (TB-16):
+        self._radial_info_cache: dict[str, QPixmap] = {}
+        self._radial_instruction_cache: dict[str, QPixmap] = {}
+        # Animação do card superior de informações (fade e scale para entrada/saída; fade puro em crossfade):
+        self._radial_top_info_current: str | None = None
+        self._radial_top_info_target: str | None = None
+        self._radial_top_info_progress: float = 0.0
+        self._radial_top_info_anim_seconds: float = 0.18
+        self._radial_top_info_last_time: float = time.monotonic()
+        # Crossfade entre opções selecionadas:
+        self._radial_top_info_prev: str | None = None
+        self._radial_top_info_prev_opacity: float = 0.0
+        self._radial_top_info_crossfade: bool = False
+        self._radial_top_info_crossfade_progress: float = 0.0
+        self._radial_top_info_crossfade_seconds: float = 0.14
         # Cache dos pixmaps do HUD inferior dos controles (Xbox, PlayStation, Nintendo).
         self._bottom_hud_cache: dict[str, QPixmap] = {}
         # Cache do pixmap de fundo do teclado virtual (assets/keyboard/background.png).
@@ -450,6 +474,7 @@ class GameOverlay(QWidget):
         # A da sublinha é CHAMADA DIRETO AQUI (não dentro da da roda): o atalho de
         # "chegou ao alvo" do radial faz return cedo e congelaria a da sublinha.
         self._tick_radial_anim(snapshot)
+        self._tick_radial_top_info_anim(snapshot)
         self._tick_pet_submenu_anim(snapshot)
         self._tick_virtual_keyboard_anim(snapshot)
         self._tick_shortcut_mode_anim(snapshot)
@@ -844,6 +869,233 @@ class GameOverlay(QWidget):
             )
         # Devolve transformações de estado (opacidade/translate/scale) ao desenhista.
         painter.restore()
+
+        # TB-16: Informações extras no menu radial (card superior e instruções inferiores)
+        self._draw_radial_top_info(painter, center, scale)
+        self._draw_radial_bottom_instructions(painter, center, scale, snapshot)
+
+    # Chave do card de informações extras da opção selecionada (TB-16).
+    def _get_radial_top_info_key(self, snapshot: OverlaySnapshot) -> str | None:
+        if not snapshot.radial_active or snapshot.radial_selection is None:
+            return None
+        cfg = self.config.get()
+        slots = cfg.get("bindings", {}).get("radial_slots", [])
+        idx = snapshot.radial_selection - 1
+        if not (0 <= idx < len(slots)):
+            return None
+        slot = str(slots[idx]).strip()
+        slot_upper = slot.upper()
+        if slot_upper in ("SHORT-CUT", "SHORTCUT", "SHORTCUTS", "SHORT-CUTS"):
+            return "Shortcuts"
+        if slot_upper == "P":
+            if snapshot.pet_submenu_open and snapshot.pet_submenu_selection:
+                sub_map = {
+                    1: "P-agressive",
+                    2: "P-defensive",
+                    3: "P-passive",
+                    4: "P-sell",
+                }
+                return sub_map.get(snapshot.pet_submenu_selection, "P")
+            return "P"
+        return slot_upper
+
+    # Avança a animação do card superior de informações (TB-16):
+    # - Entrada vindo de 'nada selecionado': fade + scale
+    # - Troca entre opções: apenas fade (crossfade, sem scale)
+    # - Saída por cancelamento (botão leste) ou fechamento: fade + scale
+    def _tick_radial_top_info_anim(self, snapshot: OverlaySnapshot) -> None:
+        target_key = self._get_radial_top_info_key(snapshot)
+        now = time.monotonic()
+        dt = now - self._radial_top_info_last_time
+        self._radial_top_info_last_time = now
+
+        if target_key != self._radial_top_info_target:
+            prev_target = self._radial_top_info_target
+            self._radial_top_info_target = target_key
+
+            if target_key is not None:
+                if prev_target is None or self._radial_top_info_progress <= 0.0 or not self._radial_top_info_current:
+                    # Entrada inicial (do estado nada selecionado): fade + scale
+                    self._radial_top_info_current = target_key
+                    self._radial_top_info_prev = None
+                    self._radial_top_info_progress = 0.0
+                    self._radial_top_info_crossfade = False
+                else:
+                    # Troca entre opções com card já visível: fade somente (sem scale)
+                    self._radial_top_info_prev = self._radial_top_info_current
+                    self._radial_top_info_prev_opacity = 1.0
+                    self._radial_top_info_current = target_key
+                    self._radial_top_info_crossfade = True
+                    self._radial_top_info_crossfade_progress = 0.0
+            else:
+                # Saída: fade + scale
+                self._radial_top_info_crossfade = False
+
+        if self._radial_top_info_crossfade:
+            cf_step = dt / self._radial_top_info_crossfade_seconds if self._radial_top_info_crossfade_seconds > 0 else 1.0
+            self._radial_top_info_crossfade_progress = min(1.0, self._radial_top_info_crossfade_progress + cf_step)
+            t = self._radial_top_info_crossfade_progress
+            eased_t = t * t * (3.0 - 2.0 * t)
+            self._radial_top_info_prev_opacity = max(0.0, 1.0 - eased_t)
+            self._radial_top_info_progress = 1.0
+            if self._radial_top_info_crossfade_progress >= 1.0:
+                self._radial_top_info_crossfade = False
+                self._radial_top_info_prev = None
+        else:
+            step = dt / self._radial_top_info_anim_seconds if self._radial_top_info_anim_seconds > 0 else 1.0
+            target_prog = 1.0 if self._radial_top_info_target is not None else 0.0
+            if abs(self._radial_top_info_progress - target_prog) < 1e-3:
+                self._radial_top_info_progress = target_prog
+                if target_prog == 0.0:
+                    self._radial_top_info_current = None
+            elif target_prog > self._radial_top_info_progress:
+                self._radial_top_info_progress = min(target_prog, self._radial_top_info_progress + step)
+            else:
+                self._radial_top_info_progress = max(target_prog, self._radial_top_info_progress - step)
+                if self._radial_top_info_progress <= 0.0:
+                    self._radial_top_info_current = None
+
+    # Carrega e armazena em cache o pixmap de informação da opção (assets/hud/menu radial/raidal-menu-info-*.png).
+    def _radial_info_pixmap(self, key: str) -> QPixmap | None:
+        if key in self._radial_info_cache:
+            return self._radial_info_cache[key]
+        filename = f"raidal-menu-info-{key}.png"
+        path = _radial_extra_hud_dir() / filename
+        if not path.is_file():
+            return None
+        pix = QPixmap(str(path))
+        if pix.isNull():
+            return None
+        self._radial_info_cache[key] = pix
+        return pix
+
+    # Carrega e armazena em cache o pixmap de instruções inferiores (assets/hud/menu radial/menu-radial-instructions-*.png).
+    def _radial_instruction_pixmap(self, filename: str) -> QPixmap | None:
+        if filename in self._radial_instruction_cache:
+            return self._radial_instruction_cache[filename]
+        path = _radial_extra_hud_dir() / filename
+        if not path.is_file():
+            return None
+        pix = QPixmap(str(path))
+        if pix.isNull():
+            return None
+        self._radial_instruction_cache[filename] = pix
+        return pix
+
+    # Desenha o card superior de informações da opção selecionada (TB-16).
+    # Fica 30px acima da borda superior da roda, centralizado horizontalmente.
+    def _draw_radial_top_info(
+        self,
+        painter: QPainter,
+        center: QPointF,
+        scale: float,
+    ) -> None:
+        if self._radial_top_info_progress <= 0.0 and not self._radial_top_info_crossfade:
+            return
+
+        # Topo da roda radial: center.y - 166 * scale.
+        # Offset de 30px acima: a base do card fica em center.y - (166 + 30) * scale = center.y - 196 * scale.
+        card_bottom_y = center.y() - 196.0 * scale
+
+        if self._radial_top_info_crossfade:
+            # Troca entre opções: crossfade suave sem escala.
+            if self._radial_top_info_prev:
+                pix_prev = self._radial_info_pixmap(self._radial_top_info_prev)
+                if pix_prev and not pix_prev.isNull():
+                    w = int(pix_prev.width() * scale)
+                    h = int(pix_prev.height() * scale)
+                    rect = QRectF(center.x() - w / 2, card_bottom_y - h, w, h)
+                    painter.save()
+                    painter.setOpacity(self._radial_top_info_prev_opacity)
+                    painter.drawPixmap(rect.toRect(), pix_prev)
+                    painter.restore()
+
+            if self._radial_top_info_current:
+                pix_curr = self._radial_info_pixmap(self._radial_top_info_current)
+                if pix_curr and not pix_curr.isNull():
+                    w = int(pix_curr.width() * scale)
+                    h = int(pix_curr.height() * scale)
+                    rect = QRectF(center.x() - w / 2, card_bottom_y - h, w, h)
+                    painter.save()
+                    curr_opacity = min(1.0, 1.0 - self._radial_top_info_prev_opacity)
+                    painter.setOpacity(curr_opacity)
+                    painter.drawPixmap(rect.toRect(), pix_curr)
+                    painter.restore()
+        else:
+            # Entrada ou Saída: Fade + Scale em torno do centro do card.
+            prog = self._radial_top_info_progress
+            if prog <= 0.0 or not self._radial_top_info_current:
+                return
+            pix = self._radial_info_pixmap(self._radial_top_info_current)
+            if not pix or pix.isNull():
+                return
+            w = int(pix.width() * scale)
+            h = int(pix.height() * scale)
+            card_rect = QRectF(center.x() - w / 2, card_bottom_y - h, w, h)
+            card_center = card_rect.center()
+
+            eased = prog * prog * (3.0 - 2.0 * prog)
+            scale_factor = 0.8 + 0.2 * eased
+
+            painter.save()
+            painter.setOpacity(eased)
+            painter.translate(card_center.x(), card_center.y())
+            painter.scale(scale_factor, scale_factor)
+            painter.translate(-card_center.x(), -card_center.y())
+            painter.drawPixmap(card_rect.toRect(), pix)
+            painter.restore()
+
+    # Desenha o banner inferior de instruções do controle (TB-16).
+    # Fica 80px abaixo da base da roda radial, centralizado horizontalmente.
+    def _draw_radial_bottom_instructions(
+        self,
+        painter: QPainter,
+        center: QPointF,
+        scale: float,
+        snapshot: OverlaySnapshot,
+    ) -> None:
+        progress = self._radial_progress
+        if progress <= 0.0:
+            return
+
+        cfg = self.config.get()
+        overlay_cfg = cfg.get("overlay", {})
+        layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
+        if layout_cfg in ("xbox", "playstation", "nintendo"):
+            controller_type = layout_cfg
+        else:
+            controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+
+        if controller_type == "playstation":
+            asset_name = "menu-radial-instructions-ps.png"
+        elif controller_type == "nintendo":
+            asset_name = "menu-radial-instructions-nintendo.png"
+        else:
+            asset_name = "menu-radial-instructions-xbox.png"
+
+        pix = self._radial_instruction_pixmap(asset_name)
+        if not pix or pix.isNull():
+            return
+
+        # Base da roda radial: center.y + 166 * scale.
+        # Offset de 80px abaixo: topo do banner em center.y + (166 + 80) * scale = center.y + 246 * scale.
+        banner_top_y = center.y() + 246.0 * scale
+        w = int(pix.width() * scale)
+        h = int(pix.height() * scale)
+        banner_rect = QRectF(center.x() - w / 2, banner_top_y, w, h)
+        banner_center = banner_rect.center()
+
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        scale_factor = 0.8 + 0.2 * eased
+
+        painter.save()
+        painter.setOpacity(eased)
+        painter.translate(banner_center.x(), banner_center.y())
+        painter.scale(scale_factor, scale_factor)
+        painter.translate(-banner_center.x(), -banner_center.y())
+        painter.drawPixmap(banner_rect.toRect(), pix)
+        painter.restore()
+
 
     # Ícones dos quadradinhos da sublinha de pet (ordem 1..4 = agressivo/defensivo/
     # passivo/vendedor). Mesmos PNGs de assets/images/radial-menu-icons (31x31, fundo
