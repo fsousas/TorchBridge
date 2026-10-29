@@ -173,7 +173,7 @@ class KeyboardInputSurface(QWidget):
             make_overlay_clickthrough(int(self.winId()), interactive=True)
 
     def nativeEvent(self, event_type, message):
-        if sys.platform == "win32":
+        if sys.platform == "win32" or event_type == b"windows_generic_MSG":
             import ctypes
             from ctypes import wintypes
             msg = wintypes.MSG.from_address(int(message))

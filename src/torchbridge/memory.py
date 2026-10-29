@@ -297,7 +297,8 @@ class TorchlightMemoryReader:
             try:
                 me = MODULEENTRY32()
                 me.dwSize = ctypes.sizeof(MODULEENTRY32)
-                if kernel32.Module32First(snap, ctypes.byref(me)):
+                first = kernel32.Module32First(snap, ctypes.byref(me))
+                if first and isinstance(first, (int, bool)):
                     base_addr = me.modBaseAddr
                     if base_addr:
                         return (int(base_addr), int(me.modBaseSize or 1), me.szExePath.decode("latin1", errors="ignore"))
@@ -328,12 +329,14 @@ class TorchlightMemoryReader:
         try:
             pe = PROCESSENTRY32()
             pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
-            if kernel32.Process32First(snap, ctypes.byref(pe)):
+            first = kernel32.Process32First(snap, ctypes.byref(pe))
+            if first and isinstance(first, (int, bool)):
                 while True:
                     name = pe.szExeFile.decode("latin1", errors="ignore").lower()
                     if name == "torchlight.exe":
                         pids.append(pe.th32ProcessID)
-                    if not kernel32.Process32Next(snap, ctypes.byref(pe)):
+                    nxt = kernel32.Process32Next(snap, ctypes.byref(pe))
+                    if not nxt or not isinstance(nxt, (int, bool)):
                         break
         finally:
             kernel32.CloseHandle(snap)
@@ -457,12 +460,14 @@ class TorchlightMemoryReader:
         try:
             me = MODULEENTRY32()
             me.dwSize = ctypes.sizeof(MODULEENTRY32)
-            if kernel32.Module32First(snap, ctypes.byref(me)):
+            first = kernel32.Module32First(snap, ctypes.byref(me))
+            if first and isinstance(first, (int, bool)):
                 while True:
                     if me.szModule.decode("latin1", errors="ignore").lower() == "ceguibase.dll":
                         self._cegui_base = int(me.modBaseAddr)
                         return self._cegui_base
-                    if not kernel32.Module32Next(snap, ctypes.byref(me)):
+                    nxt = kernel32.Module32Next(snap, ctypes.byref(me))
+                    if not nxt or not isinstance(nxt, (int, bool)):
                         break
         finally:
             kernel32.CloseHandle(snap)
