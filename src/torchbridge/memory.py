@@ -23,9 +23,13 @@ TH32CS_SNAPMODULE   = 0x00000008
 TH32CS_SNAPMODULE32 = 0x00000010
 LIST_MODULES_32BIT  = 0x01
 
-kernel32 = ctypes.windll.kernel32
-psapi = ctypes.windll.psapi
-user32 = ctypes.windll.user32
+if os.name == "nt":
+    kernel32 = ctypes.windll.kernel32
+    psapi = ctypes.windll.psapi
+    user32 = ctypes.windll.user32
+else:
+    # Kept as named Windows boundaries for the Windows regression tests.
+    kernel32 = psapi = user32 = None
 
 # Endereços estáticos e offsets mapeados por engenharia reversa (.data)
 ADDR_CGAME_GLOBAL = 0x00C1AD64  # Base fixa GOG (0x00400000 + RVA 0x0081AD64)
@@ -82,9 +86,19 @@ def strip_torchlight_formatting(text: str) -> str:
     return clean.strip()
 
 
-def get_save_character_count() -> int:
+def _game_data_directory() -> Path | None:
+    if os.name == "nt":
+        return Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "runic games/torchlight"
+    from .linux_process import game_data_directory
+    return game_data_directory()
+
+
+def get_save_character_count(directory: Path | None = None) -> int:
     """Retorna o número de personagens existentes na pasta de saves do Torchlight."""
-    save_dir = Path(os.environ.get("APPDATA", "")) / "runic games" / "torchlight" / "save"
+    root = directory or _game_data_directory()
+    if root is None:
+        return 0
+    save_dir = root / "save"
     if not save_dir.is_dir():
         return 0
     try:
@@ -94,16 +108,17 @@ def get_save_character_count() -> int:
         return 0
 
 
-def get_audio_settings() -> dict[str, float | bool]:
+def get_audio_settings(directory: Path | None = None) -> dict[str, float | bool]:
     """Lê os volumes normalizados (0.0 a 1.0) e flags de mudo em local_settings.txt."""
-    settings_file = Path(os.environ.get("APPDATA", "")) / "runic games" / "torchlight" / "local_settings.txt"
+    root = directory or _game_data_directory()
+    settings_file = root / "local_settings.txt" if root is not None else None
     out: dict[str, float | bool] = {
         "sound_volume": 1.0,
         "music_volume": 1.0,
         "sound_mute": False,
         "music_mute": False,
     }
-    if not settings_file.is_file():
+    if settings_file is None or not settings_file.is_file():
         return out
     try:
         raw = settings_file.read_bytes()
@@ -239,6 +254,11 @@ class TorchlightMemoryReader:
     """Gerencia a leitura segura da memória do processo Torchlight.exe (GOG e Steam)."""
 
     def __init__(self) -> None:
+        self._linux = None
+        if os.name != "nt":
+            from .linux_process import LinuxProcess
+            self._linux = LinuxProcess()
+        self.last_error = ""
         self.pid: int | None = None
         self._handle: int | None = None
         self._module_base: int = 0
@@ -258,9 +278,12 @@ class TorchlightMemoryReader:
         self._cached_gui_3501_icons: dict[tuple[int, int], int] = {}
 
     def close(self) -> None:
+        if self._linux is not None:
+            self._linux.close()
         if self._handle:
             try:
-                kernel32.CloseHandle(self._handle)
+                if self._linux is None:
+                    kernel32.CloseHandle(self._handle)
             except Exception:
                 pass
             self._handle = None
@@ -272,9 +295,13 @@ class TorchlightMemoryReader:
             self.game_version = ""
             self._cached_gui_3501_base_ptr = None
             self._cached_gui_3501_icons = {}
+            self._cegui_base = None
+            self._last_disk_check = 0.0
 
     def _get_module_info(self, pid: int) -> tuple[int, int, str]:
         """Obtém (base_address, base_size, exe_path) do módulo principal Torchlight.exe."""
+        if self._linux is not None:
+            return self._linux.module_info()
         # 1. Tenta EnumProcessModulesEx com LIST_MODULES_32BIT diretamente no processo
         if self._handle:
             try:
@@ -322,6 +349,8 @@ class TorchlightMemoryReader:
         return has_win
 
     def _find_pid(self) -> int | None:
+        if self._linux is not None:
+            return self._linux.find_pid()
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
         if snap in (None, 0, -1, ctypes.c_void_p(-1).value):
             return None
@@ -353,6 +382,29 @@ class TorchlightMemoryReader:
         return pids[-1]
 
     def _ensure_handle(self, target_pid: int | None = None) -> bool:
+        if self._linux is not None:
+            old_session = (self._linux.pid, self._linux.start)
+            connected = self._linux.attach(target_pid)
+            new_session = (self._linux.pid, self._linux.start)
+            if old_session != new_session or not connected:
+                self._handle = None
+                self.pid = None
+                self._module_base = self._module_size = 0
+                self._exe_path = self.game_version = ""
+                self._cgame_address = self._cegui_base = None
+                self._cached_gui_3501_base_ptr = None
+                self._cached_gui_3501_icons = {}
+                if old_session != new_session:
+                    self._last_disk_check = 0.0
+            if self._linux.error != self.last_error and self._linux.error:
+                log.warning(self._linux.error)
+            self.last_error = self._linux.error
+            if connected:
+                self.pid = self._linux.pid
+                self._handle = self._linux.fd
+                if old_session != new_session:
+                    self._module_base, self._module_size, self._exe_path = self._linux.module_info()
+            return connected
         # Se já temos um handle, checa se o processo ainda está vivo
         if self._handle:
             exit_code = wintypes.DWORD()
@@ -420,6 +472,9 @@ class TorchlightMemoryReader:
     def read_u32(self, address: int) -> int | None:
         if not self._handle or not address:
             return None
+        if self._linux is not None:
+            raw = self._linux.read(address, 4)
+            return struct.unpack("<I", raw)[0] if len(raw) == 4 else None
         buf = ctypes.create_string_buffer(4)
         read = ctypes.c_size_t()
         if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, 4, ctypes.byref(read)):
@@ -430,6 +485,9 @@ class TorchlightMemoryReader:
     def read_u8(self, address: int) -> int | None:
         if not self._handle or not address:
             return None
+        if self._linux is not None:
+            raw = self._linux.read(address, 1)
+            return struct.unpack("<B", raw)[0] if len(raw) == 1 else None
         buf = ctypes.create_string_buffer(1)
         read = ctypes.c_size_t()
         if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, 1, ctypes.byref(read)):
@@ -441,6 +499,9 @@ class TorchlightMemoryReader:
         """Lê um float IEEE 754 de 32 bits da memória."""
         if not self._handle or not address:
             return None
+        if self._linux is not None:
+            raw = self._linux.read(address, 4)
+            return struct.unpack("<f", raw)[0] if len(raw) == 4 else None
         buf = ctypes.create_string_buffer(4)
         read = ctypes.c_size_t()
         if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, 4, ctypes.byref(read)):
@@ -454,6 +515,11 @@ class TorchlightMemoryReader:
             return self._cegui_base
         if not self._handle or not self.pid:
             return None
+        if self._linux is not None:
+            base, _, _ = self._linux.module_info("CEGUIBase.dll")
+            if base:
+                self._cegui_base = base
+            return base or None
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, self.pid)
         if snap in (None, 0, -1, ctypes.c_void_p(-1).value):
             return None
@@ -591,6 +657,8 @@ class TorchlightMemoryReader:
         """Lê uma string UTF-16LE da memória do jogo até o caractere nulo."""
         if not self._handle or not address:
             return ""
+        if self._linux is not None:
+            return self._linux.read(address, max_chars * 2).decode("utf-16le", errors="ignore").split("\x00")[0]
         buf = ctypes.create_string_buffer(max_chars * 2)
         read = ctypes.c_size_t()
         if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, max_chars * 2, ctypes.byref(read)):
@@ -603,19 +671,28 @@ class TorchlightMemoryReader:
 
     def update(self, target_pid: int | None = None) -> GameMemoryState:
         """Executa um ciclo de leitura rápida (microssegundos) e retorna o estado atual."""
+        connected = self._ensure_handle(target_pid)
+        # Resolve the selected process/prefix before reading disk state. Different
+        # installations must not share save counts or cached CEGUI pointers.
         # Atualiza contagem de saves e áudio em disco periodicamente (a cada 1.0s)
         now = time.monotonic()
         if now - self._last_disk_check >= 1.0:
-            self._cached_save_count = get_save_character_count()
-            self._cached_audio = get_audio_settings()
+            directory = self._linux.data_directory if self._linux is not None else None
+            if self._linux is not None and self.pid and directory is None:
+                self._cached_save_count = 0
+                self._cached_audio = {}
+            else:
+                self._cached_save_count = get_save_character_count(directory)
+                self._cached_audio = get_audio_settings(directory)
             self._last_disk_check = now
 
         sound_vol = float(self._cached_audio.get("sound_volume", 1.0))
         music_vol = float(self._cached_audio.get("music_volume", 1.0))
 
-        if not self._ensure_handle(target_pid):
+        if not connected:
             return GameMemoryState(
                 game_version=self.game_version,
+                state_desc=self.last_error or "Aguardando jogo...",
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
                 music_volume=music_vol,

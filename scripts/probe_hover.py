@@ -7,12 +7,10 @@ from pathlib import Path
 import struct
 import sys
 import time
-import winsound
+from _platform_tools import beep
 import ctypes
 from ctypes import wintypes
 
-user32 = ctypes.windll.user32
-VK_SPACE = 0x20
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -23,6 +21,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+from torchbridge.platform import InputInjector
+_physical_input = InputInjector()
 
 from torchbridge.memory import (
     ADDR_CGAME_GLOBAL,
@@ -43,7 +44,7 @@ def sample_offsets(reader: TorchlightMemoryReader, base: int, size: int) -> dict
 
 
 def is_space_pressed() -> bool:
-    return bool(user32.GetAsyncKeyState(VK_SPACE) & 0x8000)
+    return _physical_input.key_pressed("SPACE")
 
 
 class SpaceBanner(QWidget):
@@ -178,7 +179,7 @@ def run_probe_gui():
             )
             if rising_edge:
                 try:
-                    winsound.Beep(1400, 120)
+                    beep(1400, 120)
                 except Exception:
                     pass
                 banner.set_content("PASSO 1: GRAVADO!", "Chão capturado com sucesso!", "Carregando...", border="#00FF66", hint_color="#00FF66")
@@ -205,7 +206,7 @@ def run_probe_gui():
             )
             if rising_edge:
                 try:
-                    winsound.Beep(1600, 150)
+                    beep(1600, 150)
                 except Exception:
                     pass
                 banner.set_content("PASSO 2: GRAVADO!", "Objeto capturado com sucesso!", "Carregando...", border="#00FF66", hint_color="#00FF66")
@@ -232,7 +233,7 @@ def run_probe_gui():
             )
             if rising_edge:
                 try:
-                    winsound.Beep(1800, 200)
+                    beep(1800, 200)
                 except Exception:
                     pass
                 banner.set_content("CONCLUÍDO!", "Analisando dados da memória...", "Aguarde...", border="#00FF66", hint_color="#00FF66")

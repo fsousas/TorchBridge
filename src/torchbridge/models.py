@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+
+from .resources import resource_root
 from threading import Lock
 from typing import Any
 import os
@@ -295,10 +297,7 @@ def _rasterize_hud_mask() -> tuple[int, int, list[bytes]] | None:
 
 # Caminho do asset da HUD: assets/hud/ do projeto, ou o bundle PyInstaller (sys.frozen).
 def hud_asset_path() -> Path | None:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     return base / "assets" / "hud" / HUD_ASSET
 
 
@@ -348,10 +347,7 @@ BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION = 0.015                                    
 
 def bottom_hud_asset_path(controller_type: str, shortcut_active: bool = False) -> Path | None:
     """Retorna o caminho do asset PNG do layout do controle especificado."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     assets_map = BOTTOM_HUD_SHORTCUT_ACTIVE_ASSETS if shortcut_active else BOTTOM_HUD_ASSETS
     filename = assets_map.get(controller_type, assets_map.get("xbox", "hud-xbox.png"))
     path = base / "assets" / "hud" / "inferior" / filename
@@ -360,10 +356,7 @@ def bottom_hud_asset_path(controller_type: str, shortcut_active: bool = False) -
 
 def shortcut_mask_asset_path() -> Path | None:
     """Retorna o caminho do asset PNG da máscara do HUD (mask-hud.png)."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     path = base / "assets" / "hud" / "inferior" / "mask-hud.png"
     return path if path.is_file() else None
 
@@ -377,10 +370,7 @@ SHORTCUT_INSTRUCTION_ASSETS = {
 
 def shortcut_instruction_asset_path(controller_type: str) -> Path | None:
     """Retorna o caminho do asset PNG com instruções de atalhos conforme o layout do controle."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     filename = SHORTCUT_INSTRUCTION_ASSETS.get(controller_type.lower(), "shortcut-instruction-xbox.png")
     path = base / "assets" / "images" / "instructions" / filename
     return path if path.is_file() else None
@@ -388,10 +378,7 @@ def shortcut_instruction_asset_path(controller_type: str) -> Path | None:
 
 def shortcut_config_info_asset_path() -> Path | None:
     """Retorna o caminho do asset PNG da aba superior de informações (config-info.png)."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     path = base / "assets" / "hud" / "superior" / "config-info.png"
     return path if path.is_file() else None
 
@@ -405,10 +392,7 @@ SHORTCUT_CONFIG_INFO_TOOLTIP_ASSETS = {
 
 def shortcut_config_info_tooltip_asset_path(controller_type: str) -> Path | None:
     """Retorna o caminho do asset PNG do tooltip de informações de atalhos por tipo de controle."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     filename = SHORTCUT_CONFIG_INFO_TOOLTIP_ASSETS.get(controller_type.lower(), "config-info-tooltip-xbox.png")
     path = base / "assets" / "hud" / "superior" / filename
     return path if path.is_file() else None
@@ -445,10 +429,7 @@ SHORTCUT_HUD_NODES: tuple[tuple[int, str, float, float], ...] = (
 
 def shortcut_nodes_asset_path() -> Path | None:
     """Retorna o caminho do asset PNG com os nós da HUD inferior (nodes.png)."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     path = base / "assets" / "hud" / "inferior" / "nodes.png"
     return path if path.is_file() else None
 
@@ -563,10 +544,7 @@ def pet_actions_target_rect(rect: Rect) -> tuple[float, float, float, float]:
 
 # Caminho do asset do pet actions (mesma pasta da HUD).
 def pet_actions_asset_path() -> Path | None:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     return base / "assets" / "hud" / PET_ACTIONS_ASSET
 
 
@@ -587,10 +565,7 @@ def app_icon_path(ativo: bool = True, calibration: bool = False) -> Path | None:
     - Ativado sem calibração: torchbridge-ativo-true-calibration-false.png
     - Ativado com calibração: torchbridge-ativo-true-calibration-true.png
     """
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     filename = APP_ICON_ASSETS.get(
         (bool(ativo), bool(calibration)),
         "torchbridge-ativo-true-calibration-false.png",
@@ -922,10 +897,7 @@ KEYBOARD_LAYOUT.append(("ok", 5, 11, 3, "ok"))
 
 def virtual_keyboard_asset_path(filename: str = "background.png") -> Path | None:
     """Retorna o caminho de um asset PNG da pasta do teclado virtual."""
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     path = base / "assets" / "keyboard" / filename
     return path if path.is_file() else None
 

@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import sys
 
 native_overlay = Path(SPECPATH) / "assets" / "native" / "x86" / "d3d9.dll"
 native_datas = [(str(native_overlay), "assets/native/x86")] if native_overlay.is_file() else []
@@ -7,13 +8,15 @@ native_datas = [(str(native_overlay), "assets/native/x86")] if native_overlay.is
 analysis = Analysis(
     ["launcher.py"],
     pathex=["src"],
-    binaries=[],
+    binaries=[(str(p), "torchbridge") for p in (Path(SPECPATH) / "src/torchbridge").glob("_wayland*.so")]
+    if sys.platform.startswith("linux") else [],
     datas=[
         ("assets/images/radial-menu-icons", "assets/images/radial-menu-icons"),
         ("assets/images/app", "assets/images/app"),
         ("assets/hud", "assets/hud"),
         ("assets/keyboard", "assets/keyboard"),
-    ] + native_datas,
+    ] + native_datas + ([("native/linux/THIRD_PARTY_NOTICES.txt", "licenses")]
+                       if sys.platform.startswith("linux") else []),
     hiddenimports=["pygame._sdl2.controller"],
     hookspath=[],
     hooksconfig={},

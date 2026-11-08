@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import time
-import winsound
+from _platform_tools import beep
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -28,7 +28,11 @@ if not reader.pid:
     print("Certifique-se de que o jogo está aberto com o personagem carregado.")
     sys.exit(1)
 
-p_game = reader.read_u32(ADDR_CGAME_GLOBAL)
+p_game = reader.read_u32(reader._resolve_cgame_address() or ADDR_CGAME_GLOBAL)
+if not p_game:
+    print(reader.last_error or "CGame ainda não inicializado; aguarde o jogo carregar.")
+    reader.close()
+    sys.exit(1)
 p_client = reader.read_u32(p_game + OFFSET_GAMECLIENT)
 p_ui = reader.read_u32(p_client + OFFSET_GAMEUI)
 
@@ -56,13 +60,13 @@ try:
                 desc = "NPC" if flag == 2 else ("Baú/Item" if flag == 1 else f"Objeto (flag={flag})")
                 print(f"🟢 [HOVER ATIVO!]   Tipo: {desc:10s} | Objeto: 0x{ptr:08X} | Flag: {flag} | UIType: {ui_type}")
                 try:
-                    winsound.Beep(1400, 60)
+                    beep(1400, 60)
                 except Exception:
                     pass
             else:
                 print(f"⚪ [CHÃO LIMPO]     (Nenhum objeto sob o mouse)")
                 try:
-                    winsound.Beep(800, 50)
+                    beep(800, 50)
                 except Exception:
                     pass
             last_is_hover = is_hover
