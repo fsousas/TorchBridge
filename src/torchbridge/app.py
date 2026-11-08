@@ -1,4 +1,4 @@
-# Ponto de entrada da aplicação GUI: cria a bandeja do Windows, o overlay Qt,
+# Ponto de entrada da aplicação GUI: cria a bandeja do sistema, o overlay Qt,
 # o motor de entrada (thread) e liga o menu/sinais de encerramento.
 from __future__ import annotations
 
@@ -11,12 +11,22 @@ import sys
 
 
 # Linha de comando: permite um perfil alternativo (útil em testes).
-def _arguments() -> argparse.Namespace:
+def _arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Controle para Torchlight PC")
     parser.add_argument("--perfil", type=Path, help="Caminho de um perfil JSON alternativo")
     parser.add_argument("--fullscreen-setup", choices=("install", "remove"),
                         help="Instala ou remove o suporte a fullscreen")
-    return parser.parse_args()
+    parser.add_argument("--diagnose", action="store_true", help="Verifica integração Linux e imprime JSON sem enviar entrada")
+    parser.add_argument("--launch", nargs=argparse.REMAINDER, help="Inicia o comando do jogo como processo filho (Linux/Proton)")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Steam's runtime command contains its own '--'. argparse treats that token
+    # as a parser delimiter even with an optional REMAINDER; split explicitly.
+    if "--launch" in argv:
+        index = argv.index("--launch")
+        args = parser.parse_args(argv[:index])
+        args.launch = argv[index + 1:]
+        return args
+    return parser.parse_args(argv)
 
 
 # Log técnico em %APPDATA%\TorchBridge\torchbridge.log.
@@ -62,12 +72,29 @@ def _populate_controller_menu(menu, config, devices) -> None:
 
 # Orquestra tudo: valida SO, monta Qt, inicia o motor e roda o event loop até Sair.
 def main() -> int:
-    # O TorchBridge depende do SendInput; fora do Windows não faz sentido rodar.
-    if os.name != "nt":
-        print("TorchBridge requer Windows 10 ou Windows 11.", file=sys.stderr)
-        return 2
-
     args = _arguments()
+    if args.diagnose:
+        from .diagnostics import main as diagnose
+        return diagnose()
+    if os.name != "nt" and not sys.platform.startswith("linux"):
+        print("TorchBridge suporta Windows e Omarchy Linux.", file=sys.stderr)
+        return 2
+    if args.launch is not None and (os.name == "nt" or not args.launch):
+        print("Use --launch COMANDO [ARGUMENTOS] no Linux; veja docs/LINUX.md.", file=sys.stderr)
+        return 2
+    if args.fullscreen_setup and os.name != "nt":
+        print("No Omarchy o overlay Wayland já atende fullscreen; a DLL D3D9 é exclusiva do Windows.", file=sys.stderr)
+        return 2
+    # Keep the original Steam/Proton environment for the game. Qt uses the host
+    # Wayland plugin, rather than an inherited Steam plugin path.
+    launch_environment = os.environ.copy()
+    if sys.platform.startswith("linux"):
+        if not os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            print("Inicie o TorchBridge na sessão Omarchy/Hyprland. Consulte docs/LINUX.md.", file=sys.stderr)
+            return 2
+        os.environ["QT_QPA_PLATFORM"] = "wayland"
+        os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+        os.environ.pop("QT_PLUGIN_PATH", None)
     # SDL lê o controle mesmo com o Torchlight em primeiro plano.
     os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
@@ -79,7 +106,7 @@ def main() -> int:
     from .engine import BridgeEngine
     from .models import SharedOverlayState, app_icon_path
     from .overlay import GameOverlay
-    from .win32 import SingleInstance, enable_dpi_awareness, show_information
+    from .platform import SingleInstance, enable_dpi_awareness, show_information
 
     # Antes de criar janelas: DPI awareness para as coordenadas casarem com o jogo.
     enable_dpi_awareness()
@@ -90,14 +117,19 @@ def main() -> int:
     single_instance = SingleInstance()
     # Outra instância viva: avisa e encerra esta (evita abrir duas vezes).
     if single_instance.already_running:
-        show_information("TorchBridge", "O TorchBridge já está em execução perto do relógio do Windows.")
+        message = "O TorchBridge já está em execução na bandeja do sistema."
+        if args.launch is not None:
+            message += " Feche essa instância antes de iniciar com --launch para permitir a leitura de memória."
+        show_information("TorchBridge", message)
         single_instance.close()
-        return 0
+        return 2 if args.launch is not None else 0
     # Carrega/valida o perfil; o log fica na pasta padrão do usuário.
     config = ConfigManager(args.perfil)
     _configure_logging(user_config_dir())
 
     # Aplicação Qt; sys.argv[:1] evita que o Qt interprete argumentos nossos.
+    if sys.platform.startswith("linux"):
+        QApplication.setDesktopFileName("io.github.torchbridge.TorchBridge")
     app = QApplication(sys.argv[:1])
     app.setApplicationName("TorchBridge")
     # Não fecha ao esconder o overlay — vive na bandeja até 'Sair'.
@@ -261,7 +293,12 @@ def main() -> int:
 
     # Abre o perfil.json no editor padrão do Windows.
     def open_profile() -> None:
-        os.startfile(config.path)  # type: ignore[attr-defined]
+        if os.name == "nt":
+            os.startfile(config.path)  # type: ignore[attr-defined]
+        else:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(config.path)))
 
     open_profile_action.triggered.connect(open_profile)
     reload_action = menu.addAction("Recarregar perfil")
@@ -279,7 +316,8 @@ def main() -> int:
     controller_menu.aboutToShow.connect(
         lambda: _populate_controller_menu(controller_menu, config, shared.get().controller_devices)
     )
-    _add_fullscreen_actions(menu)
+    if os.name == "nt":
+        _add_fullscreen_actions(menu)
     menu.addSeparator()
     exit_action = menu.addAction("Sair")
     # 'Sair' encerra o event loop → passa pelo cleanup.
@@ -343,6 +381,8 @@ def main() -> int:
     app.aboutToQuit.connect(cleanup)
     # Ctrl+C no terminal encerra a UI de forma limpa.
     signal.signal(signal.SIGINT, lambda *_: app.quit())
+    if os.name != "nt":
+        signal.signal(signal.SIGTERM, lambda *_: app.quit())
     # No Windows o Python só roda handlers de sinal quando o loop acorda; este timer de 250 ms garante isso.
     keep_signals_alive = QTimer()
     keep_signals_alive.timeout.connect(lambda: None)
@@ -350,6 +390,21 @@ def main() -> int:
 
     # A thread do motor começa aqui; app.exec() roda até 'Sair'.
     engine.start()
+    if args.launch is not None:
+        import subprocess
+        try:
+            # Popen keeps TorchBridge as an ancestor of Proton and the PE process.
+            # Yama's default scope=1 then permits read-only memory access.
+            game = subprocess.Popen(args.launch, env=launch_environment)
+        except OSError as error:
+            logging.exception("Não foi possível iniciar o jogo")
+            print(f"Não foi possível iniciar o jogo: {error}", file=sys.stderr)
+            cleanup()
+            return 2
+        # Reap the launcher without terminating the game if TorchBridge is closed.
+        game_timer = QTimer()
+        game_timer.timeout.connect(game.poll)
+        game_timer.start(1000)
     # Event loop Qt (bandeja + overlay) até o usuário sair.
     result = app.exec()
     cleanup()

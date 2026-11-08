@@ -27,7 +27,11 @@ if not reader.pid:
     print("[ERRO] Torchlight não encontrado!")
     sys.exit(1)
 
-p_game = reader.read_u32(ADDR_CGAME_GLOBAL)
+p_game = reader.read_u32(reader._resolve_cgame_address() or ADDR_CGAME_GLOBAL)
+if not p_game:
+    print(reader.last_error or "CGame ainda não inicializado; aguarde o jogo carregar.")
+    reader.close()
+    sys.exit(1)
 p_client = reader.read_u32(p_game + OFFSET_GAMECLIENT)
 p_ui = reader.read_u32(p_client + OFFSET_GAMEUI)
 p_player = reader.read_u32(p_client + OFFSET_PLAYER)

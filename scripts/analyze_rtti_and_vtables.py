@@ -6,7 +6,8 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-EXE_PATH = Path(r"C:\GOG Games\Torchlight\Torchlight.exe")
+from _platform_tools import default_exe_path, exe_argument
+EXE_PATH = default_exe_path()
 
 def main():
     if not EXE_PATH.exists():
@@ -173,4 +174,5 @@ def main():
             print(f"  CGameUI + 0x{disp:04X} -> {menu_class:<22} (registrado em VA 0x{code_va:08X})")
 
 if __name__ == "__main__":
+    EXE_PATH = exe_argument()
     main()

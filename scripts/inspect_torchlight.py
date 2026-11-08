@@ -8,7 +8,8 @@ import re
 import struct
 from pathlib import Path
 
-EXE_PATH = Path(r"C:\GOG Games\Torchlight\Torchlight.exe")
+from _platform_tools import default_exe_path, exe_argument
+EXE_PATH = default_exe_path()
 
 def inspect_pe() -> None:
     if not EXE_PATH.exists():
@@ -81,4 +82,5 @@ def inspect_pe() -> None:
         print(f"  String '{kw.decode()}': encontrada {len(matches)} vezes no arquivo")
 
 if __name__ == "__main__":
+    EXE_PATH = exe_argument()
     inspect_pe()

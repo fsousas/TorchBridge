@@ -1,5 +1,5 @@
 # Motor principal: thread dedicada que, a 120 Hz (padrão), converte o estado do controle
-# em teclado/mouse reais via SendInput. Só atua com o jogo em primeiro plano.
+# em teclado/mouse pelo backend do sistema. Só atua com o jogo em primeiro plano.
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,7 @@ from typing import Any
 
 from .config import ConfigManager
 from .controller import ControllerHub
-from .input_session import InputCancelled, InputSession
+from .input_session import InputCancelled, InputSession, wait_for_text_field_cursor
 from .mathutils import clamp, cursor_delta, radial_deadzone, radial_slot
 from .models import (
     PET_SUBMENU_COUNT,
@@ -96,7 +96,7 @@ from .models import (
 )
 
 from .memory import GameMemoryState, TorchlightMemoryReader
-from .win32 import (
+from .platform import (
     InputInjector,
     WindowLocator,
     begin_high_resolution_timer,
@@ -1031,6 +1031,7 @@ class BridgeEngine(threading.Thread):
         # Focus the actual game edit control before moving onto the virtual keys.
         self._set_mouse("left", False)
         self.injector.move(*char_create_button_point(rect, target))
+        wait_for_text_field_cursor(self.injector)
         self.injector.mouse_button("left", True)
         self.injector.mouse_button("left", False)
         self._virtual_keyboard_open = True
@@ -6316,7 +6317,7 @@ class BridgeEngine(threading.Thread):
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
-                if enabled and game_active and state.connected:
+                if enabled and not self.memory.last_error and game_active and state.connected:
                     if self._memory_state.is_loading:
                         self._release_all()
                     else:
@@ -6336,6 +6337,7 @@ class BridgeEngine(threading.Thread):
                     self._update_trigger_edges(state)
                     self._release_all()
 
+                self.shared.update(engine_error=self.memory.last_error)
                 self._previous = state
                 # Duração do tick alvo (1/120 s por padrão).
                 period = 1.0 / float(cfg["input"]["poll_hz"])
@@ -6369,4 +6371,8 @@ class BridgeEngine(threading.Thread):
                         hub.close()
                 finally:
                     self.memory.close()
+                    injector = self.injector.injector if isinstance(self.injector, InputSession) else self.injector
+                    close = getattr(injector, "close", None)
+                    if close is not None:
+                        close()
                     end_high_resolution_timer()

@@ -15,6 +15,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
 from .config import ConfigManager
+from .resources import resource_root
 from .models import (
     OverlaySnapshot,
     Rect,
@@ -117,7 +118,7 @@ from .models import (
     quest_abandon_point,
 )
 from .native_overlay import FrameChannel, frame_size
-from .win32 import IS_WINDOWS, WindowLocator, make_overlay_clickthrough, position_overlay
+from .platform import IS_WINDOWS, IS_LINUX, WindowLocator, make_overlay_clickthrough, position_overlay
 
 
 log = logging.getLogger(__name__)
@@ -125,19 +126,13 @@ log = logging.getLogger(__name__)
 
 # Diretório dos ícones do menu radial: assets/ do projeto, ou o bundle PyInstaller.
 def _radial_icons_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     return base / "assets" / "images" / "radial-menu-icons"
 
 
 # Diretório dos assets extras do menu radial (TB-16): informações e instruções.
 def _radial_extra_hud_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parent.parent.parent
+    base = resource_root()
     return base / "assets" / "hud" / "menu radial"
 
 
@@ -229,6 +224,13 @@ class GameOverlay(QWidget):
         self._last_raise = 0.0
         # Handles de plataformas Qt offscreen/minimal não são HWNDs, mesmo no Windows.
         self._native_windows = IS_WINDOWS and QGuiApplication.platformName() == "windows"
+        self._wayland = None
+        if IS_LINUX and QGuiApplication.platformName().startswith("wayland"):
+            from .wayland import Connection
+            self._wayland = Connection()
+        self._wayland_monitor = None
+        self._wayland_monitor_check = 0.0
+        self._wayland_rect = None
         self._channel: FrameChannel | None = None
         self._channel_pid: int | None = None
         self._channel_retry_at = 0.0
@@ -313,6 +315,10 @@ class GameOverlay(QWidget):
         self._kb_press_anim_start: float = 0.0
         self._kb_press_anim_id: int = 0
         self._keyboard_input = KeyboardInputSurface(self.shared, self)
+        if self._wayland is not None:
+            pointer_path = virtual_keyboard_asset_path("pointer.cur")
+            if pointer_path is not None and pointer_path.is_file():
+                self._wayland.set_cursor(QImage(str(pointer_path)))
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
         # Redesenho a cada 16 ms (~60 FPS); o motor publica o estado a 120 Hz.
@@ -334,6 +340,9 @@ class GameOverlay(QWidget):
 
     def shutdown(self) -> None:
         self._timer.stop()
+        if self._wayland is not None:
+            self._wayland.close()
+            self._wayland = None
         self._keyboard_input.hide()
         self.hide()
         if self._channel is not None:
@@ -482,9 +491,18 @@ class GameOverlay(QWidget):
         # Só desenha com overlay habilitado, jogo presente e janela válida.
         should_show = snapshot.enabled and snapshot.game_found and snapshot.game_active and rect.valid
         # Revalida o foco na UI: um snapshot atrasado não pode cobrir outro aplicativo.
-        if should_show and self._native_windows and snapshot.game_hwnd:
+        if should_show and (self._native_windows or self._wayland is not None) and snapshot.game_hwnd:
             should_show = WindowLocator.is_foreground(snapshot.game_hwnd)
         kb_active = snapshot.virtual_keyboard_open and self._virtual_keyboard_progress >= 1.0
+        if self._wayland is not None:
+            try:
+                self._refresh_wayland(snapshot, should_show, kb_active)
+            except (OSError, ValueError, MemoryError):
+                log.exception("Falha no overlay Wayland")
+                self._wayland.hide()
+                self._wayland_monitor = None
+                self.backend_status = "Overlay: erro Wayland; consulte o log"
+            return
         if should_show and kb_active:
             target = snapshot.virtual_keyboard_target or self._last_virtual_keyboard_target or "character_name"
             geometry = virtual_keyboard_target_rect(rect, target)
@@ -537,6 +555,51 @@ class GameOverlay(QWidget):
         # Sem razão de aparecer: esconde para não sobrar janela órfã na tela.
         elif self.isVisible():
             self.hide()
+
+    def _refresh_wayland(self, snapshot, should_show: bool, kb_active: bool) -> None:
+        """Render the shared Qt painter into a focusless layer above fullscreen.
+
+        Geometry stays in compositor pixels. Rasterizing at ceil(output scale)
+        keeps fractional-scale monitors sharp without changing engine coordinates.
+        """
+        import math
+        rect = snapshot.game_rect
+        self._keyboard_input.hide()
+        self.hide()  # QWidget is only the painter/controller on this backend.
+        for kind, x, y in self._wayland.events():
+            if should_show and kb_active:
+                self.shared.keyboard_event(kind, rect.left + x, rect.top + y)
+        if not should_show:
+            self._wayland.hide()
+            self._wayland_monitor = None
+            return
+        now = time.monotonic()
+        if (self._wayland_monitor is None or rect != self._wayland_rect
+                or now - self._wayland_monitor_check >= 0.25):
+            self._wayland_monitor = WindowLocator.monitor(snapshot.game_hwnd)
+            self._wayland_monitor_check = now
+        monitor = self._wayland_monitor
+        if monitor is None:
+            self._wayland.hide()
+            return
+        scale = max(1, math.ceil(monitor["scale"]))
+        image = QImage(rect.width * scale, rect.height * scale, QImage.Format.Format_ARGB32_Premultiplied)
+        if image.isNull():
+            raise MemoryError("Sem memória para o overlay Wayland")
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        try:
+            painter.scale(scale, scale)
+            self._paint_overlay(painter, snapshot)
+        finally:
+            painter.end()
+        keyboard = None
+        if kb_active:
+            target = snapshot.virtual_keyboard_target or self._last_virtual_keyboard_target or "character_name"
+            keyboard = Rect(*virtual_keyboard_target_rect(rect, target))
+        self._wayland.present(image, monitor, rect, keyboard)
+        self._wayland_rect = rect
+        self.backend_status = "Overlay: Wayland (janela e fullscreen)"
 
     @staticmethod
     # Fonte padrão do overlay, com tamanho e peso.

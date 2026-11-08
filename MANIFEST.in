@@ -1,0 +1,3 @@
+recursive-include native/linux *.c *.xml *.md *.txt
+recursive-include assets *.png *.cur
+include TorchBridge.spec

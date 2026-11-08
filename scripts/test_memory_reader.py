@@ -15,7 +15,9 @@ import time
 PROCESS_VM_READ = 0x0010
 TH32CS_SNAPPROCESS = 0x00000002
 
-kernel32 = ctypes.windll.kernel32
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from torchbridge.memory import TorchlightMemoryReader
 
 ADDR_CGAME_GLOBAL = 0x00C1AD64   # Ponteiro global estático em .data para CGame
 OFFSET_GAMECLIENT = 0x64         # CGame -> CGameClient*
@@ -51,69 +53,24 @@ GAMEPLAY_MENUS = {
     "Morte / Respawn":   (0x02F0, 0x18),
 }
 
-class PROCESSENTRY32(ctypes.Structure):
-    _fields_ = [
-        ("dwSize", wintypes.DWORD),
-        ("cntUsage", wintypes.DWORD),
-        ("th32ProcessID", wintypes.DWORD),
-        ("th32DefaultHeapID", ctypes.c_size_t),
-        ("th32ModuleID", wintypes.DWORD),
-        ("cntThreads", wintypes.DWORD),
-        ("th32ParentProcessID", wintypes.DWORD),
-        ("pcPriClassBase", wintypes.LONG),
-        ("dwFlags", wintypes.DWORD),
-        ("szExeFile", ctypes.c_char * 260),
-    ]
-
 def find_torchlight_pid() -> int | None:
-    snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snap == -1:
-        return None
-    try:
-        pe = PROCESSENTRY32()
-        pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
-        if kernel32.Process32First(snap, ctypes.byref(pe)):
-            while True:
-                name = pe.szExeFile.decode("latin1", errors="ignore").lower()
-                if name == "torchlight.exe":
-                    return pe.th32ProcessID
-                if not kernel32.Process32Next(snap, ctypes.byref(pe)):
-                    break
-    finally:
-        kernel32.CloseHandle(snap)
-    return None
+    return TorchlightMemoryReader()._find_pid()
 
-class ProcessMemory:
+
+class ProcessMemory(TorchlightMemoryReader):
+    """Keep the historical tool API, backed by the application's real reader."""
     def __init__(self, pid: int) -> None:
-        self.pid = pid
-        self.handle = kernel32.OpenProcess(PROCESS_VM_READ, False, pid)
-        if not self.handle:
-            err = kernel32.GetLastError()
-            raise RuntimeError(f"Falha ao abrir processo {pid}: Erro Win32 {err}")
+        super().__init__()
+        if not self._ensure_handle(pid):
+            raise RuntimeError(self.last_error or f"Falha ao abrir processo {pid}")
 
-    def close(self) -> None:
-        if self.handle:
-            kernel32.CloseHandle(self.handle)
-            self.handle = None
+    @property
+    def handle(self):
+        return self._handle
 
-    def read_u32(self, address: int) -> int | None:
-        buf = ctypes.create_string_buffer(4)
-        read = ctypes.c_size_t()
-        if kernel32.ReadProcessMemory(self.handle, ctypes.c_void_p(address), buf, 4, ctypes.byref(read)):
-            if read.value == 4:
-                return struct.unpack("<I", buf.raw)[0]
-        return None
-
-    def read_u8(self, address: int) -> int | None:
-        buf = ctypes.create_string_buffer(1)
-        read = ctypes.c_size_t()
-        if kernel32.ReadProcessMemory(self.handle, ctypes.c_void_p(address), buf, 1, ctypes.byref(read)):
-            if read.value == 1:
-                return buf.raw[0]
-        return None
 
 def inspect_game(mem: ProcessMemory) -> None:
-    p_game = mem.read_u32(ADDR_CGAME_GLOBAL)
+    p_game = mem.read_u32(mem._resolve_cgame_address() or ADDR_CGAME_GLOBAL)
     if not p_game:
         print("[0x00C1AD64] CGame ainda não instanciado.")
         return
@@ -237,7 +194,10 @@ def main():
                 try:
                     mem = ProcessMemory(pid)
                     current_pid = pid
-                except RuntimeError:
+                except RuntimeError as error:
+                    print(error)
+                    if args.once:
+                        return
                     time.sleep(0.5)
                     continue
 

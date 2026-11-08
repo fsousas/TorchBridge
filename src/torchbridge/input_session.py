@@ -14,6 +14,11 @@ class InputSession:
         self.allowed = allowed
         self.keys: set[str] = set()
         self.mouse: set[str] = set()
+        # Linux's Unicode fallback yields while clients consume a temporary X11
+        # keymap. Recheck the lease after that yield, before pressing any key.
+        setter = getattr(type(injector), "set_focus_guard", None)
+        if setter is not None:
+            setter(injector, allowed)
 
     def check(self) -> None:
         if not self.allowed():
@@ -66,3 +71,16 @@ class InputSession:
             self.key(name, False)
         for button in tuple(self.mouse):
             self.mouse_button(button, False)
+
+
+def wait_for_text_field_cursor(injector: Any) -> None:
+    """Let backends that need it settle the game cursor before a field click.
+
+    The Win32 backend has no such hook: its existing move/down/up sequence is
+    unchanged. Use the concrete type so test doubles don't invent capabilities.
+    InputSession still guards/tracks the actual click and its release.
+    """
+    backend = injector.injector if isinstance(injector, InputSession) else injector
+    wait = getattr(type(backend), "wait_for_text_field_cursor", None)
+    if wait is not None and not wait(backend):
+        raise InputCancelled()

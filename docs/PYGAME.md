@@ -127,3 +127,14 @@ inicialização).
    estado fica congelado.
 6. `rumble()` pode levantar `pygame.error` em hardware sem motor — sempre em
    try/except (o `ControllerHub.rumble` já trata).
+
+## Omarchy Linux (TB-21)
+
+O mesmo `ControllerHub` SDL/RAW atende Windows e Linux, incluindo hotplug,
+preferência por GUID, rumble e calibração. No Linux não se reinicializam os
+subsistemas SDL durante a enumeração, preservando dispositivos já abertos.
+Use `CALIBRAR_CONTROLE_GENERICO.sh` no terminal para o assistente. GUIDs e mapas
+RAW podem variar entre sistemas; selecione e calibre o dispositivo no sistema de
+destino. Não é necessário executar como root nem conceder acesso global a input.
+Caso o controle não apareça, confira as permissões normais de sessão/logind e a
+visibilidade do dispositivo no SDL. [Guia Linux](LINUX.md).

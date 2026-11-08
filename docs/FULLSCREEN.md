@@ -1,5 +1,8 @@
 # Overlay em fullscreen no Windows
 
+No Omarchy Linux o fullscreen usa uma camada Wayland e não instala a DLL D3D9.
+Veja [LINUX.md](LINUX.md). Este documento descreve o backend Windows.
+
 O backend externo Qt depende da composição do desktop. Em fullscreen exclusivo,
 o jogo controla a apresentação; elevar uma janela com `TOPMOST` não garante que
 ela apareça. O backend nativo adiciona o desenho ao próprio backbuffer D3D9.
