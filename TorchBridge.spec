@@ -13,6 +13,7 @@ analysis = Analysis(
     datas=[
         ("assets/images/radial-menu-icons", "assets/images/radial-menu-icons"),
         ("assets/images/app", "assets/images/app"),
+        ("assets/images/instructions", "assets/images/instructions"),
         ("assets/hud", "assets/hud"),
         ("assets/keyboard", "assets/keyboard"),
     ] + native_datas + ([("native/linux/THIRD_PARTY_NOTICES.txt", "licenses")]
@@ -52,4 +53,3 @@ collection = COLLECT(
     upx_exclude=[],
     name="TorchBridge",
 )
-
