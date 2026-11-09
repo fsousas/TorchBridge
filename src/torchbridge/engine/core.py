@@ -1384,15 +1384,43 @@ class BridgeEngineCore(threading.Thread):
             # Sub-modo: Grid de Opções aberto e ativo para navegação
             if self._shortcut_grid_active:
                 # Atualização dinâmica de dimensões caso CEGUI tenha atualizado o layout após o clique
-                dims = self.memory.read_shortcut_grid_dims()
-                if dims and dims != (self._shortcut_grid_cols, self._shortcut_grid_rows):
-                    self._shortcut_grid_cols, self._shortcut_grid_rows = dims
-                    self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
-                    self.shared.update(
-                        shortcut_grid_cols=self._shortcut_grid_cols,
-                        shortcut_grid_rows=self._shortcut_grid_rows,
-                        shortcut_grid_counts=self._shortcut_grid_counts,
-                    )
+                grid_info = getattr(self.memory, "read_shortcut_grid_info", lambda: None)()
+                if grid_info:
+                    new_cols, new_rows, new_counts = grid_info
+                    if (new_cols, new_rows, new_counts) != (
+                        self._shortcut_grid_cols,
+                        self._shortcut_grid_rows,
+                        self._shortcut_grid_counts,
+                    ):
+                        self._shortcut_grid_cols = new_cols
+                        self._shortcut_grid_rows = new_rows
+                        self._shortcut_grid_counts = new_counts
+                        self._shortcut_grid_row = min(self._shortcut_grid_row, max(0, self._shortcut_grid_rows - 1))
+                        row_items = (
+                            self._shortcut_grid_counts[self._shortcut_grid_row]
+                            if self._shortcut_grid_row < len(self._shortcut_grid_counts)
+                            else self._shortcut_grid_cols
+                        )
+                        self._shortcut_grid_col = min(self._shortcut_grid_col, max(0, row_items - 1))
+                        self.shared.update(
+                            shortcut_grid_cols=self._shortcut_grid_cols,
+                            shortcut_grid_rows=self._shortcut_grid_rows,
+                            shortcut_grid_counts=self._shortcut_grid_counts,
+                            shortcut_grid_pos=(self._shortcut_grid_row, self._shortcut_grid_col),
+                        )
+                else:
+                    dims = self.memory.read_shortcut_grid_dims()
+                    if dims and dims != (self._shortcut_grid_cols, self._shortcut_grid_rows):
+                        self._shortcut_grid_cols, self._shortcut_grid_rows = dims
+                        self._shortcut_grid_counts = (self._shortcut_grid_cols,) * self._shortcut_grid_rows
+                        self._shortcut_grid_row = min(self._shortcut_grid_row, max(0, self._shortcut_grid_rows - 1))
+                        self._shortcut_grid_col = min(self._shortcut_grid_col, max(0, self._shortcut_grid_cols - 1))
+                        self.shared.update(
+                            shortcut_grid_cols=self._shortcut_grid_cols,
+                            shortcut_grid_rows=self._shortcut_grid_rows,
+                            shortcut_grid_counts=self._shortcut_grid_counts,
+                            shortcut_grid_pos=(self._shortcut_grid_row, self._shortcut_grid_col),
+                        )
 
                 # Tecla ESC ou Botão Start: desarma completamente a configuração e volta para o jogo
                 if (state.pressed("start") and not self._previous.pressed("start")) or esc_edge:

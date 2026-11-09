@@ -558,9 +558,9 @@ class TorchlightMemoryReader:
             vis = self.read_u8(base_ptr + 0x1A0)
             if vis == 0:
                 return None
-            w = self.read_f32(base_ptr + 0x148)
-            h = self.read_f32(base_ptr + 0x14C)
-            if vis != 1 or w is None or h is None or not (50.0 <= w <= 800.0 and 50.0 <= h <= 800.0):
+            h = self.read_f32(base_ptr + 0x148)
+            w = self.read_f32(base_ptr + 0x14C)
+            if vis != 1 or w is None or h is None or not (40.0 <= w <= 1200.0 and 40.0 <= h <= 1200.0):
                 base_ptr = None
                 self._cached_gui_3501_base_ptr = None
                 self._cached_gui_3501_icons = {}
@@ -611,8 +611,15 @@ class TorchlightMemoryReader:
                     suffix = name[len("gui__3501SkillIcon"):]
                     if len(suffix) >= 2:
                         try:
-                            col = int(suffix[:-1])
-                            row = int(suffix[-1:])
+                            # Nomes no CEGUI: gui__3501SkillIcon<row><col>
+                            # Linhas 1-9: 1 dígito de linha (ex: 11..110, 21..210)
+                            # Linha 10: prefixo '10' (ex: 101..1010)
+                            if suffix.startswith("10"):
+                                row = 10
+                                col = int(suffix[2:])
+                            else:
+                                row = int(suffix[0])
+                                col = int(suffix[1:])
                             found_icons[(row, col)] = w_ptr
                         except Exception:
                             pass
@@ -635,22 +642,31 @@ class TorchlightMemoryReader:
         if vis != 1:
             return None
 
-        w = self.read_f32(base_ptr + 0x148)
-        h = self.read_f32(base_ptr + 0x14C)
-        if w is None or h is None or not (50.0 <= w <= 800.0 and 50.0 <= h <= 800.0):
+        h = self.read_f32(base_ptr + 0x148)
+        w = self.read_f32(base_ptr + 0x14C)
+        if w is None or h is None or not (40.0 <= w <= 1200.0 and 40.0 <= h <= 1200.0):
             return None
 
-        cols = max(1, round((w - 10.4) / 65.1))
-        rows = max(1, round((h - 10.4) / 65.1))
-
-        # Lê a visibilidade real das células em icon_ptrs
-        row_max_col: dict[int, int] = {}
+        # Identifica todas as células que estão realmente visíveis no CEGUI
+        visible_cells: list[tuple[int, int]] = []
         if icon_ptrs:
             for (row_1idx, col_1idx), ptr in icon_ptrs.items():
                 if self.read_u8(ptr + 0x1A0) == 1:
-                    row_max_col[row_1idx] = max(row_max_col.get(row_1idx, 0), col_1idx)
+                    visible_cells.append((row_1idx, col_1idx))
 
-        counts = tuple(row_max_col.get(r, cols) if row_max_col.get(r, 0) > 0 else cols for r in range(1, rows + 1))
+        if visible_cells:
+            real_rows = max(r for r, _ in visible_cells)
+            real_cols = max(c for _, c in visible_cells)
+            row_counts = tuple(
+                max((c for r_c, c in visible_cells if r_c == r), default=0)
+                for r in range(1, real_rows + 1)
+            )
+            return (real_cols, real_rows, row_counts)
+
+        # Fallback caso não haja células visíveis ainda
+        cols = max(1, round(w / 50.0))
+        rows = max(1, round(h / 50.0))
+        counts = (cols,) * rows
         return (cols, rows, counts)
 
     def read_wstring(self, address: int, max_chars: int = 64) -> str:

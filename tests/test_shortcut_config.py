@@ -77,6 +77,8 @@ class ShortcutConfigTests(unittest.TestCase):
         engine = BridgeEngine(config, shared)
         engine._mode = "direct"
         engine.injector = FakeInjector()
+        engine.memory.read_shortcut_grid_info = lambda: None
+        engine.memory.read_shortcut_grid_dims = lambda: None
         return engine, shared, config
 
     def _tick(self, engine, state, now=0.0):
