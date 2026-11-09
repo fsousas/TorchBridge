@@ -1,170 +1,200 @@
-# Arquitetura e Engenharia Reversa: Movimentação e Interação Nativa de Console (Torchlight 1)
+# Proposta: separar caminhada de interação no Torchlight 1
 
-> **Documento de Especificação Técnica e Roteiro de Pesquisa**  
-> **Objetivo:** Desacoplar a movimentação do personagem do sistema de combate/interação do mouse do Torchlight 1, eliminando cliques acidentais em NPCs, baús e monstros, alcançando a experiência fluida e nativa de console (Xbox 360).
+Estado em 09/11/2026, branch `feature/tb-18`: **estudo; movimento nativo ainda
+não implementado**. Esta proposta substitui o roteiro anterior, que sugeria
+zerar alvos por escrita externa e tratava posições/hover como desconhecidos.
 
----
+A recomendação é usar a navegação do próprio jogo para andar e manter a
+interação como uma ação explícita. A primeira entrega deve ser uma prova de
+conceito em cópia isolada do jogo, antes de alterar o movimento padrão.
 
-## 1. O Problema Fundamental: A Sobrecarga do Clique Esquerdo
+## Causa confirmada no projeto
 
-No Torchlight 1 para PC, o botão esquerdo do mouse (`Left Click`) é polimórfico e sobrecarregado pela engine original:
+Em `src/torchbridge/engine/core.py`, `_move_pointer()` posiciona o cursor ao
+redor da âncora do personagem e retorna `auto_move=True`. `_process_active()`
+combina `left_pressed = auto_move or a_pressed` e mantém o botão esquerdo
+pressionado. O Torchlight decide entre andar, atacar, conversar e usar um
+objeto conforme o alvo sob o cursor. Windows e Omarchy chegam à mesma regra;
+trocar SendInput por outro transporte de mouse não separa essas ações.
 
-| Alvo Sob o Cursor | Ação Disparada pelo Jogo | Consequência no Analógico |
-| :--- | :--- | :--- |
-| **Terreno Livre (Chão)** | `MOVE_TO_POSITION` | Personagem anda normalmente na direção desejada. |
-| **Monstro / Inimigo** | `SET_TARGET` + `DEFAULT_ATTACK` | **Trava o personagem no lugar** para atacar; no meio de uma horda, o jogador fica encurralado e morre. |
-| **NPC com Diálogo** | `OPEN_DIALOG` / `TALK` | **Abre janela de conversa**, interrompe a corrida e toma o controle da UI. |
-| **Baú / Barril / Portal** | `INTERACT` / `LOOT` | Desvia a rota para abrir o objeto ou carregar uma nova área por engano. |
+A TB-18 acrescentou um caminho explícito em `engine/interaction.py`: **D-pad ↑**,
+seleção por proximidade, projeção do alvo, confirmação de hover e um clique.
+Ela ainda não removeu o clique gerado pela caminhada. O mapeamento de mercadores
+e missões melhora a escolha e a indicação do alvo, mas não impede o caminho
+antigo de acioná-lo.
 
-### Por que heurísticas simples de mouse falham:
-1. **Vetor Curto (40–60px nos pés):**
-   * Reduz cliques em objetos distantes, mas falha totalmente quando colado em NPCs ou cercado de monstros (as cápsulas de colisão 3D dos inimigos cobrem o chão ao redor do herói).
-   * Valores abaixo de 40px causam *jitter* / engasgos na física de virada do personagem.
-2. **Auto-Cancel com ESC:**
-   * Funciona para fechar caixas de diálogo de NPCs, mas **não tem efeito contra monstros**, pois golpear um monstro não abre menu cancelável; simplesmente inicia animação de ataque.
-3. **Soltar o Clique ao Passar por Cima:**
-   * Soltar o botão esquerdo enquanto o analógico está inclinado age como um "freio de mão", fazendo o herói mancar ou parar na hora.
+Também precisam entrar na revisão:
 
----
+- os pulsos de clique de `_auto_move_resume_times`, usados para retomar a
+  caminhada depois de habilidades;
+- A/Cruz, que deixa de segurar Shift quando o hover é interativo, e o binding
+  de R3 para clique esquerdo: ainda permitem interação pelo cursor;
+- o movimento com somente um painel lateral aberto, atualmente permitido;
+- o cancelamento por foco, identidade do processo e controle em `InputSession`.
 
-## 2. A Solução Nativa: Como o Console (Xbox 360) Faz
+## Alternativas
 
-No porte oficial de Torchlight para Xbox 360, a Runic Games reconstruiu o subsistema de entrada:
-* **Analógico Esquerdo:** Aplica diretamente um vetor de velocidade/deslocamento no `CPlayer` (`m_velocity` ou `m_destination`). **Nenhum clique de mouse virtual existe na movimentação.**
-* **Sistema de Targeting / Foco:** O motor calcula a entidade interativa mais próxima no cone de visão do personagem e exibe um contorno (*highlight*) com um prompt do botão (ex: `(X) Conversar`, `(A) Atacar`).
-* **Botões de Ação:** O clique de interação ou ataque é despachado **estritamente** quando os botões físicos correspondentes são pressionados.
+| Abordagem | Resultado e limite | Decisão proposta |
+| --- | --- | --- |
+| Tecla nativa de movimento exclusivo, se existir nesta edição | Seria a integração mais simples; precisa funcionar sobre NPC, inimigo, loot e escada. | Verificar primeiro. Nenhum binding assim está confirmado no projeto; não assumir equivalência com Torchlight II/III. |
+| Evitar entidades com o cursor e soltar o clique quando houver hover | Reduz acidentes, mas interrompe a caminhada e depende de projeção, hitboxes e leituras atrasadas. | Mitigação opcional; não atende à promessa de isolamento. |
+| Clicar e limpar o alvo externamente na memória | A interação pode ocorrer antes da limpeza; um ponteiro zerado não desfaz diálogo ou troca de mapa e pode quebrar o estado interno. | Descartar. |
+| Enviar destino à navegação nativa, sem clique de caminhada | Separa o comando de andar da seleção sob o mouse e preserva o caminho calculado pelo jogo. | Caminho recomendado para a prova de conceito. |
 
-```mermaid
-graph TD
-    subgraph "Controle (Jogador)"
-        Stick[Analógico Esquerdo]
-        BtnX[Botão X - Interagir / Loot]
-        BtnCombat[Botão A / Gatilhos - Combate]
-    end
+Não há proposta de escrever a posição do personagem: isso seria deslocamento
+direto, poderia atravessar obstáculos e não preservaria a navegação original.
 
-    subgraph "Pipeline TorchBridge"
-        Stick -->|Vetor Direcional| PureMove[Vetor de Chão / Destino Puro]
-        EntityScanner[Leitura de Entidades Próximas / Hover] -->|Detecta Alvo| TargetLock[Alvo Focado / Highlight]
-        BtnX -->|Se Alvo Válido| InteractCmd[Disparar Interação Cirúrgica]
-        BtnCombat -->|Dispara Ataque| AttackCmd[Atacar Alvo Focado]
-    end
-
-    subgraph "Motor Torchlight 1 (Memória)"
-        PureMove -->|MoveTo sem Colisão de Alvo| EngineNav[Navegação do Herói]
-        InteractCmd --> EngineTarget[Abertura de Diálogo / Baú]
-        AttackCmd --> EngineCombat[Execução de Habilidade]
-    end
-```
-
----
-
-## 3. Topologia da Memória do Jogo (Offsets e Estruturas)
-
-Graças ao trabalho já concluído no [memory.py](file:///c:/Users/kleve/Documents/Projetos/TorchBridge/src/torchbridge/memory.py), a cadeia de navegação estática do Torchlight 1 (GOG e Steam) já está estabelecida:
-
-```
-[Módulo Base] 
-      │
-      ▼
-   CGame (GOG: 0x00C1AD64 | Steam: Base + 0x007F0E0C)
-      │
-      ├──> +0x64: CGameClient
-      │      │
-      │      ├──> +0x2C: CPlayer (Ponteiro do Herói Local)
-      │      ├──> +0x38: CLevel (Ponteiro do Mundo / Nível Atual)
-      │      └──> +0x3C: CGameUI (Árvore de Interfaces - Já Mapeada!)
-```
-
-### O que precisamos mapear no `CPlayer` e `CGameClient`:
-
-Para o desacoplamento completo, a pesquisa em memória focará nos seguintes campos:
-
-| Objeto / Classe | Offset Estimado | Tipo | Propósito |
-| :--- | :--- | :--- | :--- |
-| `CGameClient` | `+0x??` | `void*` (`m_pHoverObject`) | Ponteiro da entidade atualmente sob o cursor do mouse no raycast do frame. |
-| `CPlayer` | `+0x??` | `float[3]` (`Vector3`) | Posição no mundo do jogador $(X, Y, Z)$. |
-| `CPlayer` | `+0x??` | `float[3]` (`Vector3`) | Posição de destino da movimentação atual $(DestX, DestY, DestZ)$. |
-| `CPlayer` | `+0x??` | `void*` (`m_pTarget`) | Ponteiro do alvo atual travado para ataque/conversa (`0` = nenhum alvo). |
-| `CPlayer` | `+0x??` | `uint32` (`m_actionState`) | Enum de estado da ação (`IDLE = 0`, `WALK = 1`, `ATTACK = 2`, etc.). |
-| `CLevel` | `+0x??` | `std::vector` / lista | Lista de entidades vivas no mapa (NPCs, monstros, baús). |
-
----
-
-## 4. As Duas Estratégias de Implementação Técnica
-
-### Estratégia 1: O "Raycast Seguro com Limpeza de Alvo" (Zero DLL Injection)
-Esta estratégia usa o pipeline de entrada do Windows (`SendInput`) combinado com leitura e escrita cirúrgica em memória, sem precisar injetar código executável (DLL/ASM):
-
-1. **Movimento pelo Analógico:**
-   * O analógico calcula o vetor em direção ao horizonte livre (além da horda de monstros ou num raio seguro de chão).
-   * O `SendInput` envia o clique de movimentação.
-2. **Neutralização do Alvo em Tempo Real:**
-   * Se o analógico estiver ativo e o jogo tentar travar um monstro ou NPC no `m_pTarget` do jogador sem que o botão de ataque/interação tenha sido apertado:
-   * O `memory.py` zera o ponteiro: `write_u32(p_player + OFFSET_TARGET, 0)`.
-   * **Efeito no Jogo:** O motor aborta imediatamente a ordem de ataque/diálogo e força a máquina de estados a continuar na rota de caminhada (`MOVE_TO`).
-
-### Estratégia 2: Movimentação Direta por Coordenada de Destino (Injeção de Vetor 3D)
-Esta é a experiência mais pura de console:
-
-1. A cada tick do analógico (120 Hz):
-   * Lemos a posição atual $(X, Y, Z)$ do herói em `CPlayer`.
-   * Projetamos o destino $(X + \cos\theta \cdot R, Y, Z + \sin\theta \cdot R)$ no plano do mundo.
-   * Escrevemos as coordenadas de destino diretamente em `m_destination` ou chamamos a função nativa `CPlayer::MoveTo`.
-2. **Resultado:**
-   * **Zero cliques de mouse virtuais** para andar.
-   * O mouse fica 100% parado ou reservado exclusivamente para os menus e mira manual do analógico direito.
-
----
-
-## 5. Arquitetura da Interação Contextual (Botão X)
-
-Com a movimentação protegida de cliques involuntários, a interação segue o padrão de console:
+## Fluxo recomendado
 
 ```mermaid
-sequenceDiagram
-    participant Jogador as Jogador (Controle)
-    participant Overlay as TorchBridge Overlay
-    participant Memoria as Torchlight Memory (RAM)
-    participant Motor as Torchlight Engine
-
-    Note over Memoria,Overlay: Varredura de Proximidade (120 Hz)
-    Memoria->>Overlay: Entidade Próxima Detectada (ex: Syl, Duran, Baú)
-    Overlay->>Jogador: Desenha Ícone [X] flutuando sobre o alvo
-
-    alt Jogador apenas anda ao redor
-        Jogador->>Motor: Analógico inclinado (Movimentação Pura)
-        Motor-->>Motor: Ignora interação; Herói continua andando
-    else Jogador decide interagir
-        Jogador->>Overlay: Pressiona [X]
-        Overlay->>Memoria: Lê coordenadas exatas da tela do alvo
-        Overlay->>Motor: Dispara clique esquerdo sobre a entidade
-        Motor->>Jogador: Abre janela de diálogo / Abre baú
-    end
+flowchart LR
+    Stick[Analógico esquerdo] --> Intent[Intenção de caminhar]
+    Intent --> Gate[Validar sessão e estado]
+    Gate --> Native[Módulo no processo do jogo]
+    Native --> Nav[Destino e parada pela navegação do jogo]
+    Button[D-pad para cima] --> Interaction[Interação explícita da TB-18]
+    Interaction --> Hover[Confirmar alvo e hover]
+    Hover --> Click[Clique de interação]
 ```
 
----
+O motor Python continua lendo o controle, aplicando deadzone e decidindo o
+contexto. Um backend de movimento separado recebe a direção e o pedido de
+parada. No backend nativo, o analógico não posiciona o mouse para andar nem
+pressiona o botão esquerdo. A mira, os menus e a interação mantêm seus fluxos.
 
-## 6. Roteiro Prático para o Dia da Execução
+O módulo calcula um destino curto no plano X/Z do Ogre, orientado pela câmera.
+As posições e matrizes já publicadas por `world_memory.py` dão contexto para
+isso, mas o módulo deve revalidar jogador e cenário no momento de executar.
+Direita na tela não pode ser tratada simplesmente como +X do mundo.
 
-Quando formos colocar a mão na massa, o plano de ataque será dividido em 4 etapas claras:
+As ordens devem ser consumidas na **thread de atualização do jogo**, respeitando
+colisões, pathfinding, morte, cutscenes, menus e habilidades que bloqueiam
+movimento. Não chamar funções do jogo pela thread de rede nem por uma thread
+remota criada para cada comando. O destino deve ter frequência limitada e
+medida; os 120 Hz do controle não exigem 120 buscas de caminho por segundo.
 
-### Etapa 1: Sondagem de Offsets no Cheat Engine / x64dbg
-* [ ] Conectar ao `Torchlight.exe` (Steam ou GOG).
-* [ ] Acessar `CPlayer` (`[[CGame] + 0x64] + 0x2C`).
-* [ ] Localizar as coordenadas $X, Y, Z$ do personagem (varredura de floats que mudam ao andar).
-* [ ] Localizar o ponteiro `m_pTarget` (ponteiro que fica `0x00000000` ao andar no chão limpo e vira um ponteiro não-nulo ao clicar em um NPC ou monstro).
-* [ ] Localizar `m_pHoverObject` em `CGameClient` (atualizado a cada frame conforme o mouse passa sobre entidades).
+Ao iniciar a caminhada, alvos antigos de ataque/interação precisam ser
+cancelados pelas rotinas do próprio jogo, quando a transição permitir. Ao
+soltar o analógico, enviar parada, sem deixar o personagem terminar um caminho
+longo. Habilidades têm prioridade e a caminhada só retoma quando o estado do
+jogo permitir, substituindo os pulsos de clique atuais.
 
-### Etapa 2: Mapeamento no `memory.py`
-* [ ] Adicionar `read_player_position()` e `read_player_target()`.
-* [ ] Adicionar suporte a escrita segura com `WriteProcessMemory` (`PROCESS_VM_WRITE | PROCESS_VM_OPERATION`).
-* [ ] Validar compatibilidade dos offsets tanto na versão GOG quanto na versão Steam.
+Há uma ressalva importante: a rotina candidata de destino consulta o estado de
+"manter posição" (Shift) e pode seguir um ramo de ataque. Não basta chamar
+`setDestination` indiscriminadamente. O contrato do backend deve suspender a
+caminhada durante esse estado e validar a coordenação com A e as habilidades.
 
-### Etapa 3: Integração no `engine.py`
-* [ ] Criar o manipulador de movimentação desacoplada: suprimir `LBUTTONDOWN` sobre entidades durante a navegação do analógico esquerdo.
-* [ ] Implementar a trava de foco do botão `X` (interação só despacha comando com alvo válido e botão pressionado).
-* [ ] Desacoplar habilidades de combate para disparar nos alvos focados sem interferir na caminhada.
+## Evidências e o que ainda falta validar
 
-### Etapa 4: Indicadores Visuais no `overlay.py`
-* [ ] Renderizar um sprite sutil de contorno ou ícone `[X]` sobre a cabeça do NPC ou objeto focado.
-* [ ] Sincronizar o desaparecimento do ícone assim que a entidade sair do raio de alcance.
+Existem implementações públicas independentes que chamam a navegação do
+Torchlight 1 sem passar pelo clique. São referências para a pesquisa, não
+código incorporado ao TorchBridge:
+
+| Rotina candidata | GOG, VA preferencial | Steam, VA preferencial |
+| --- | --- | --- |
+| `CCharacter::setDestination` / `MoveTo` | `0x00494B30` | `0x00492AD0` |
+| `CCharacter::stopPathing` | `0x00486150` | `0x00484360` |
+| `CCharacter::setTarget` | `0x004949D0` | `0x00492970` |
+| `CCharacter::setTargetItem` | `0x00494AB0` | `0x00492A50` |
+
+Os endereços vêm das referências abaixo. Nesta investigação, a desmontagem do
+executável Steam local confirmou que a candidata de destino consulta os campos
+de pathfinding, estado, habilidade e Shift; a candidata de parada limpa o
+estado de caminho. **Isso não equivale a validar chamadas em execução** nem
+confirma todos os executáveis GOG/Steam disponíveis.
+
+O Steam inspecionado tem SHA-256
+`a783a60725abd20ba0b5cd64f210f9b5baa08f07a0222a56c8f1e5e182b3eec6`.
+Uma implementação deve identificar o executável, validar assinaturas e ABI x86
+e resolver RVA pela base real, incluindo ASLR. Builds desconhecidas não devem
+receber chamadas com endereços presumidos. A prova de conceito precisa confirmar
+semântica de alvos, parada, combate e transições em ambas as distribuições.
+
+### Escadas, portais e gatilhos de presença
+
+Separar o clique evita acionar NPCs e objetos pela mira de caminhada. Porém,
+o jogo também tem `CTriggerBox`, `CTriggerSphere` e `CWarper`, que participam de
+eventos de presença e troca de cenário. Um destino de caminhada não impede,
+por si só, que entrar num volume dispare um evento.
+
+A escada testada na TB-18 foi reconhecida pelo hover de item e ativada por
+clique. Isso não prova que todas as escadas, portais ou mapas usem esse fluxo.
+Antes de prometer que só D-pad ↑ muda de andar, é necessário classificar cada
+caso. Se existir transição por presença, a prova de conceito deve testar uma
+autorização explícita, curta, vinculada à instância e ao cenário da transição.
+O bloqueio teria de atuar apenas nesse tipo de transição do jogador local,
+preservando missões, spawns, scripts e portais gerados por habilidades.
+Se não for possível distinguir os eventos com segurança, esse caso permanece
+um limite declarado, e não se bloqueiam todos os triggers globalmente.
+
+## Windows e Omarchy
+
+O jogo é PE32 nos dois ambientes: Windows nativo ou Proton/Wine no Omarchy.
+Um pequeno módulo Windows x86 pode executar as mesmas rotinas nos dois; o
+TorchBridge e seu overlay continuam nativos do sistema hospedeiro.
+
+Essa é uma ampliação da arquitetura atual, cujo leitor é somente leitura.
+Precisamos validar carga opcional do módulo e transporte local entre Python e
+jogo. Um protótipo pode usar TCP de loopback com sessão identificada; não assumir
+que o canal Windows de memória compartilhada do overlay está acessível pelo
+Python Linux. O receptor apenas publica a intenção mais recente para consumo
+pela thread do jogo, sem acumular uma fila de destinos antigos.
+
+O protocolo deve incluir versão, identidade da sessão/processo, sequência e
+prazo curto de validade. A perda de foco, desativação, desconexão, carregamento,
+troca de personagem/cenário ou ausência de renovação cancela o movimento. O
+módulo também precisa verificar foco e expiração, mesmo se o Python travar.
+Relógios monotônicos de processos/ambientes diferentes não devem ser comparados
+sem um protocolo definido; o receptor pode medir o tempo desde o recebimento.
+
+O movimento não deve depender de `Present`, FPS de renderização ou da instalação
+do overlay D3D9. A DLL atual de fullscreen é opcional e específica do renderer;
+o transporte Wayland continua atendendo mouse/teclado e o overlay no Omarchy.
+A instalação precisa detectar conflito com outros módulos, permitir remoção
+e ser testada inicialmente em cópia/prefixo isolados.
+
+Sugestão de rollout: backend nativo experimental e explicitamente selecionado,
+com estado visível na calibração. Se indisponível, ele informa a falha e para;
+não volta silenciosamente ao clique de caminhada. O modo legado continua uma
+escolha explícita durante a validação.
+
+## Sequência de implementação e aceite
+
+1. Verificar uma possível ação nativa de movimento exclusivo e reproduzir o
+   acidente em NPC, mercador, missão, inimigo, loot e escada. Se uma tecla resolver
+   todos os casos, preferir a integração comum de entrada.
+2. Na ausência dessa ação confirmada, provar `MoveTo` e `stopPathing` na thread
+   do jogo, com direção relativa à câmera, sem enviar clique. Começar pelo Steam
+   disponível e repetir no GOG; validar Windows e Proton.
+3. Integrar o backend ao motor: retirar caminhada de `left_pressed`, substituir
+   pulsos de retomada e arbitrar movimento, combate, interação e menus.
+4. Manter D-pad ↑ para interação explícita. Se o objetivo incluir exclusividade
+   total desse botão, também restringir os caminhos A/R3 no overworld; retirar
+   somente o clique do analógico não muda esses bindings.
+5. Classificar transições por presença e demonstrar o comportamento escolhido
+   para elas, sem desativar eventos gerais do cenário.
+6. Mostrar na calibração backend, direção, destino, último comando aceito e
+   motivo de suspensão, mantendo os marcadores de entidades da TB-18.
+
+O aceite exige caminhar e girar junto a mercadores, NPCs com missão, inimigos,
+loot, portas, escadas e portais sem interação causada pelo analógico; D-pad ↑
+deve continuar funcionando. Testar paredes, passagens estreitas, mudanças de
+câmera, painel lateral, combate, soltar o stick, Alt+Tab, desligar o controle,
+reiniciar o jogo e interromper o TorchBridge. Medir parada e custo de pathfinding.
+São necessárias sessões reais em Windows/Omarchy, janela/fullscreen e builds
+suportadas: testes simulados e CI não comprovam o comportamento do jogo.
+
+## Fontes
+
+- Código atual: `engine/core.py`, `engine/interaction.py`, `input_session.py`,
+  `world.py`, `world_memory.py`, `native/fullscreen` e `native/linux`.
+- [Posicionamento e interação já implementados](POSICIONAMENTO.md), incluindo
+  o teste real da escada e o layout de memória usado pela TB-18.
+- [Manual oficial do Torchlight distribuído pela Steam](https://cdn.akamai.steamstatic.com/steam/apps/41500/manuals/TorchlightManual.pdf):
+  movimento e interação por apontar e clicar.
+- [Pesquisa original de movimento no torchlight-xbox-ui-pc](https://github.com/YaPeL/torchlight-xbox-ui-pc/blob/3bd5c54023249f87564173c9da73be834e748beb/proxy/pad.c)
+  e [correspondência de endereços Steam/GOG](https://github.com/YaPeL/torchlight-xbox-ui-pc/blob/3bd5c54023249f87564173c9da73be834e748beb/proxy/addresses_steam.txt).
+  Referência GPL-3.0: usar fatos para validação e uma implementação própria,
+  sem transplantar código para o projeto MIT.
+- [Pesquisa original do TorchlightMultiplayer](https://github.com/mentalfoundry/TorchlightMultiplayer/blob/6d9b3bf1ca49f7638b99413cc65586347936c6ab/src/game/engine.h)
+  e [notas sobre navegação e triggers](https://github.com/mentalfoundry/TorchlightMultiplayer/blob/6d9b3bf1ca49f7638b99413cc65586347936c6ab/re/NOTES.md).

@@ -33,6 +33,11 @@ e liberam seu botão. O alvo de um clique pendente não é substituído por outr
 que ficou mais próximo. Os controles existentes A/X e as habilidades continuam
 disponíveis.
 
+A caminhada pelo analógico ainda mantém o clique esquerdo e pode acionar um
+elemento sob o cursor. O D-pad não elimina esse caminho existente. A separação
+de movimento e interação é uma proposta em
+[CONCEITO-MOVIMENTO-CONSOLE.md](CONCEITO-MOVIMENTO-CONSOLE.md).
+
 ## Configuração
 
 Perfis antigos recebem os padrões automaticamente. A seção no `perfil.json` é:

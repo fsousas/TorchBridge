@@ -169,8 +169,11 @@ O analógico direito assume o cursor quando é movimentado. Use o botão A
 habilidade na posição indicada.
 
 Ao devolver o analógico esquerdo ao centro, o cursor volta automaticamente para
-a âncora do herói — o próximo `click-to-move` nasce no centro e não cai em cima
-de um NPC ou inimigo.
+a âncora do herói, que serve de referência para o próximo `click-to-move`.
+Como a caminhada ainda usa o clique esquerdo, ela pode acionar NPCs e objetos
+sob o cursor. A separação entre andar e interagir está estudada em
+[Proposta de movimento nativo](docs/CONCEITO-MOVIMENTO-CONSOLE.md); ainda não
+foi implementada.
 
 ### Cursor / menus
 
