@@ -283,6 +283,12 @@ testes do motor e forçando Qt offscreen. Ele não envia entrada ao desktop nem
 executa o jogo. O smoke test opt-in Linux e a validação de integração estão em
 [docs/LINUX.md](docs/LINUX.md).
 
+A suíte também verifica sinais Qt e o encerramento normal de um subprocesso:
+uma extensão pode abortar depois de todos os testes terem passado. No Python
+3.11, o projeto exclui PySide6 6.12.0 devido ao
+[erro de referências PYSIDE-3474](https://qt-project.atlassian.net/browse/PYSIDE-3474).
+Instale as dependências com `python -m pip install -e .` para aplicar essa restrição.
+
 ## Limite técnico honesto
 
 A edição de PC do Torchlight foi desenhada para apontar e clicar; a edição de
