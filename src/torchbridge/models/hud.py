@@ -393,8 +393,8 @@ def shortcut_grid_cell_point(
         return (0, 0)
     scale = rect.height / 768.0
 
-    pitch_x = 48.0 * scale
-    pitch_y = 48.0 * scale
+    pitch_x = 50.0 * scale
+    pitch_y = 50.0 * scale
 
     # O grid repousa logo acima da barra inferior de atalhos e se expande PARA CIMA:
     # A linha inferior do popup fica centralizada em rect.bottom - (112.12 * scale) (subido mais 50% de um bloco)

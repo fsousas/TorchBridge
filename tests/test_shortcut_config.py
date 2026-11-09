@@ -362,10 +362,10 @@ class ShortcutConfigTests(unittest.TestCase):
 
         self.assertGreater(p00[0], 0)
         self.assertGreater(p00[1], 0)
-        # Na horizontal, a coluna 1 fica à direita da coluna 0 por ~60px (48px na base 768p)
-        self.assertAlmostEqual(p01[0] - p00[0], 60, delta=2)
-        # Na vertical, a linha 1 fica abaixo da linha 0 por ~60px
-        self.assertAlmostEqual(p10[1] - p00[1], 60, delta=2)
+        # Na horizontal, a coluna 1 fica à direita da coluna 0 por ~62.5px (50px na base 768p * 1.25)
+        self.assertAlmostEqual(p01[0] - p00[0], 62.5, delta=2)
+        # Na vertical, a linha 1 fica abaixo da linha 0 por ~62.5px
+        self.assertAlmostEqual(p10[1] - p00[1], 62.5, delta=2)
 
     def test_dpad_navigates_grid_2d(self):
         with tempfile.TemporaryDirectory() as directory:
