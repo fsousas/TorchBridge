@@ -48,6 +48,8 @@ separadas na matriz de validação.
 - rastreador de painéis abertos pela roda (C/P à esquerda, I/S/Q/J à direita), com
   indicador discreto no topo central do overlay;
 - envio de comandos somente quando o jogo está em primeiro plano;
+- leitura das posições do jogador e dos elementos interativos do cenário;
+- aviso de proximidade e interação com o alvo pelo **D-pad para cima**;
 - liberação automática de cliques e teclas ao trocar de janela;
 - calibração do ponto central do personagem dentro do jogo;
 - perfil JSON editável e recarregado automaticamente;
@@ -116,7 +118,9 @@ Detalhes, limites e roteiro: [docs/FULLSCREEN.md](docs/FULLSCREEN.md).
 | X / Quadrado (botão da esquerda) | Clique direito: habilidade secundária |
 | B / Círculo | Atalho 1 |
 | Y / Triângulo | Atalho 2 |
-| Direcional cima/direita/baixo/esquerda | Atalhos 5/6/7/8 |
+| Direcional cima | Interagir com o elemento próximo indicado no overlay |
+| Direcional direita | Tab, mapa/minimapa |
+| Direcional esquerda | Aciona o botão roxo da HUD e retorna o cursor |
 | Segurar LB / L1 + analógico direito | Roda de atalhos 1–6 |
 | RB / R1 | Segura Shift, para atacar sem avançar |
 | L3 | Segura Alt, para exibir itens |
@@ -137,6 +141,21 @@ mostra, em tempo real, quais painéis estão abertos (esquerdo | direito). Com u
 e âncora à direita), mantendo o alvo na área visível.
 
 ## Modos de uso
+
+### Elementos próximos (TB-18)
+
+Em movimento direto, aproxime-se de um NPC, portal, escadas, fonte, porta,
+alavanca ou local de pesca. O overlay indica o alvo mais próximo; pressione
+**D-pad ↑** para interagir. O clique só sai depois que o jogo confirma que o
+cursor está sobre esse alvo. Segurar não repete a ação.
+
+Ao ativar **Modo de calibração** no ícone TB, o overlay também mostra as
+coordenadas, os marcadores dos elementos do cenário e o raio de interação.
+Mercadores e NPCs com missão recebem identificação própria, incluindo missão
+disponível, em andamento ou pronta para entregar, conforme o marcador do jogo.
+
+Coordenadas X/Y, raio configurável, lista completa em JSON, limites e validação
+Windows/Omarchy: [docs/POSICIONAMENTO.md](docs/POSICIONAMENTO.md).
 
 ### Movimento direto
 

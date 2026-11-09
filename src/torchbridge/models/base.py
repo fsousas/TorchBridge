@@ -10,6 +10,7 @@ from typing import Any
 
 
 from ..resources import resource_root
+from ..world import WorldEntity, WorldSnapshot
 
 
 def get_project_root() -> Path:
@@ -117,6 +118,9 @@ class OverlaySnapshot:
     memory_is_loading: bool = False
     memory_is_menu_open: bool = False
     memory_open_menus: list[str] = field(default_factory=list)
+    world: WorldSnapshot = field(default_factory=WorldSnapshot)
+    interaction_target: WorldEntity | None = None
+    interaction_button: str = "dpad_up"
     char_name_len: int = 0
     title_menu_focus: str | None = None
     char_create_focus: str | None = None

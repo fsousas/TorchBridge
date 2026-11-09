@@ -14,6 +14,9 @@ import re
 import struct
 import time
 
+from .world import WorldSnapshot
+from .world_memory import WorldMemoryReader
+
 log = logging.getLogger(__name__)
 
 PROCESS_VM_READ = 0x0010
@@ -48,6 +51,7 @@ OFFSET_CHAR_NAME_LEN = 0x88
 OFFSET_UI_STATE      = 0x169C  # CGameUI -> Estado ativo do gameplay / transição de nível (6: em jogo, != 6: transição/carregando)
 OFFSET_HOVER_ENTITY  = 0x01BC  # CGameClient -> ponteiro para a entidade sob o cursor (0 = chão)
 OFFSET_HOVER_FLAG    = 0x01C0  # CGameClient -> tipo do hover (0 = chão, 1 = Baú/Item, 2 = NPC)
+OFFSET_HOVER_ITEM    = 0x01C4  # CGameClient -> hover de props/itens, inclusive portais e escadas
 
 MAIN_MENU_STATES: dict[int, str] = {
     0: "Tela Inicial",
@@ -248,6 +252,8 @@ class GameMemoryState:
     # Hover / Interação no Overworld
     is_hover_interactive: bool = False
     hover_flag: int = 0
+    hover_entity: int = 0
+    world: WorldSnapshot = field(default_factory=WorldSnapshot)
 
 
 class TorchlightMemoryReader:
@@ -274,10 +280,12 @@ class TorchlightMemoryReader:
             "music_mute": False,
         }
         self._last_disk_check: float = 0.0
+        self._world_reader = WorldMemoryReader(self)
         self._cached_gui_3501_base_ptr: int | None = None
         self._cached_gui_3501_icons: dict[tuple[int, int], int] = {}
 
     def close(self) -> None:
+        self._world_reader.reset()
         if self._linux is not None:
             self._linux.close()
         if self._handle:
@@ -387,6 +395,7 @@ class TorchlightMemoryReader:
             connected = self._linux.attach(target_pid)
             new_session = (self._linux.pid, self._linux.start)
             if old_session != new_session or not connected:
+                self._world_reader.reset()
                 self._handle = None
                 self.pid = None
                 self._module_base = self._module_size = 0
@@ -468,6 +477,22 @@ class TorchlightMemoryReader:
         # Still starting: do not publish an unverified version/address.
         self.game_version = ""
         return None
+
+    def read_bytes(self, address: int, size: int) -> bytes:
+        """Exact, bounded PE32 read shared by world data on Windows and Proton."""
+        if (not self._handle or not isinstance(address, int) or not isinstance(size, int)
+                or not 0 < size <= 1024 * 1024 or not 0x10000 <= address < 0x100000000
+                or address + size > 0x100000000):
+            return b""
+        if self._linux is not None:
+            raw = self._linux.read(address, size)
+            return raw if len(raw) == size else b""
+        buf = ctypes.create_string_buffer(size)
+        count = ctypes.c_size_t()
+        if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, size, ctypes.byref(count)):
+            if count.value == size:
+                return buf.raw
+        return b""
 
     def read_u32(self, address: int) -> int | None:
         if not self._handle or not address:
@@ -1096,7 +1121,9 @@ class TorchlightMemoryReader:
         # hover_flag: 0 = chão, 1 = Baú/Item, 2 = NPC.
         hover_ptr = self.read_u32(p_client + OFFSET_HOVER_ENTITY) or 0
         hover_flag = self.read_u32(p_client + OFFSET_HOVER_FLAG) or 0
-        is_hover_interactive = bool(hover_ptr > 0x00400000 and hover_flag in (1, 2))
+        hover_item = self.read_u32(p_client + OFFSET_HOVER_ITEM) or 0
+        is_hover_interactive = bool((hover_ptr > 0x00400000 and hover_flag in (1, 2))
+                                   or hover_item > 0x00400000)
 
         is_menu_open = len(open_menus) > 0
         return GameMemoryState(
@@ -1131,4 +1158,6 @@ class TorchlightMemoryReader:
             quest_has_item_reward=quest_has_item_reward,
             is_hover_interactive=is_hover_interactive,
             hover_flag=hover_flag,
+            hover_entity=hover_ptr or hover_item,
+            world=self._world_reader.read(p_client, p_player, time.monotonic()),
         )

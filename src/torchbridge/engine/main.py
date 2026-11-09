@@ -8,11 +8,13 @@ from .skills_quests import SkillQuestNavigationMixin
 from .inventory import InventoryNavigationMixin
 from .merchant_crafting import MerchantCraftingNavigationMixin
 from .overworld import OverworldNavigationMixin
+from .interaction import WorldInteractionMixin
 
 log = logging.getLogger(__name__)
 
 
 class BridgeEngine(
+    WorldInteractionMixin,
     CommonMenuNavigationMixin,
     CharacterNavigationMixin,
     SkillQuestNavigationMixin,

@@ -2,8 +2,9 @@
 
 Padrão do overworld: cada botão dispara uma entrada REAL (SendInput). A/X são
 os cliques de mouse (esquerdo/direito); o resto vira teclas (1..0) ou comandos
-contextuais. O d-pad fica **sem ação** no overworld — o rastreamento da tela
-inicial, que é quem vai usá-lo, ainda não existe.
+contextuais. No overworld, D-pad ↑ interage com o elemento próximo (TB-18),
+D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. A interação
+depende da confirmação do hover pelo jogo: [POSICIONAMENTO.md](POSICIONAMENTO.md).
 
 ---
 
@@ -41,7 +42,9 @@ L2+Triângulo  = 7
 L2+Círculo    = 8
 L2+R1         = 9
 L2+R2         = 0
-d-pad      = sem ação
+d-pad ↑    = interagir com o elemento próximo
+d-pad →    = TAB
+d-pad ←    = botão roxo da HUD
 ```
 
 ### Xbox/Genérico
@@ -58,7 +61,9 @@ LT+Y   = 7
 LT+B   = 8
 LT+RB  = 9
 LT+RT  = 0
-d-pad  = sem ação
+d-pad ↑ = interagir com o elemento próximo
+d-pad → = TAB
+d-pad ← = botão roxo da HUD
 ```
 
 ### Nintendo
@@ -75,7 +80,9 @@ ZL+Y   = 7
 ZL+B   = 8
 ZL+R   = 9
 ZL+ZR  = 0
-d-pad  = sem ação
+d-pad ↑ = interagir com o elemento próximo
+d-pad → = TAB
+d-pad ← = botão roxo da HUD
 ```
 
 **Notas técnicas (fechado)**
@@ -86,7 +93,9 @@ d-pad  = sem ação
   binding novo, não reusando as chaves velhas.
 - LT/L2/ZL é o **modificador** do combo 5..0: enquanto o gatilho está ativo
   (≥ 0.50), o botão face dispara o combo em vez do toque/clique comum.
-- O d-pad é **botão morto** no overworld.
+- D-pad ↑ usa a ação de proximidade; D-pad ↓ e L3 podem substituí-lo por
+  `interaction.button`. A ação só funciona em movimento direto, sem menus,
+  roda ou combo de combate. D-pad ← e → mantêm suas ações de HUD/mapa.
 
 ---
 

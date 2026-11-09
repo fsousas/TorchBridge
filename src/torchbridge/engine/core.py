@@ -134,6 +134,7 @@ class BridgeEngineCore(threading.Thread):
         self.memory = TorchlightMemoryReader()
         self._memory_state = GameMemoryState()
         self._memory_last_read = 0.0
+        self._world_click = None
         initial = config.get()
         target = initial["target"]
         # Localizador da janela do Torchlight + injetor de entrada do Windows.
@@ -491,6 +492,7 @@ class BridgeEngineCore(threading.Thread):
 
     def _release_all(self) -> None:
         self._needs_rearm = True
+        self._cancel_world_interaction()
         self._reset_transient_navigation()
         if isinstance(self.injector, InputSession):
             self.injector.release_all()
@@ -924,6 +926,8 @@ class BridgeEngineCore(threading.Thread):
                 return
         bindings = cfg["bindings"]
         self._handle_center_buttons(state, rect, bindings, now)
+        if self._handle_world_interaction(state, rect, cfg, now):
+            return
         self._handle_discrete_bindings(state, bindings)
         # Navegação nos Menus via D-pad conforme o estado da memória
         if self._memory_state.is_connected:
@@ -1976,6 +1980,9 @@ class BridgeEngineCore(threading.Thread):
 
                         self._active_panels = [left, right]
 
+                # Memory sampling happens after the tick started. Use a current
+                # clock so a fresh world sample is never treated as future data.
+                now = time.monotonic()
                 is_only_inventory = (self._memory_state.open_menus in (["Inventário"], ["Pet"]))
                 effective_mode = (
                     "blocked"
@@ -2010,6 +2017,7 @@ class BridgeEngineCore(threading.Thread):
                     memory_is_loading=self._memory_state.is_loading,
                     memory_is_menu_open=self._memory_state.is_menu_open,
                     memory_open_menus=list(self._memory_state.open_menus),
+                    world=self._memory_state.world,
                     char_name_len=self._memory_state.char_name_len,
                     title_menu_focus=self._title_focus if (self._memory_state.is_connected and self._memory_state.state_id == 0) else None,
                     dialog_focus=self._dialog_focus if (self._memory_state.is_connected and self._memory_state.dialog_type) else None,

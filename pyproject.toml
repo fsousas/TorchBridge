@@ -26,6 +26,7 @@ torchbridge = "torchbridge.app:main"
 
 [project.scripts]
 torchbridge-calibrar = "torchbridge.calibrate:main"
+torchbridge-cenario = "torchbridge.world_inspect:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

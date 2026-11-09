@@ -12,6 +12,10 @@
 8. `GameOverlay` desenha mira, modo, avisos e roda sem receber cliques ou foco.
 9. No Windows, em fullscreen exclusivo, os mesmos desenhos são rasterizados em BGRA e
    publicados num canal local por PID. A DLL D3D9 x86 os compõe antes de `Present`.
+10. `WorldMemoryReader` publica posições e entidades ativas do cenário em fotografias
+    imutáveis. O motor escolhe um alvo próximo e exige confirmação do hover antes do
+    clique explícito; o mesmo painter desenha o aviso nos três backends de overlay.
+    Layout, limites e uso: [POSICIONAMENTO.md](POSICIONAMENTO.md).
 
 ## Princípios de segurança operacional
 
