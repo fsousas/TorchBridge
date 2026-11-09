@@ -558,8 +558,8 @@ class TorchlightMemoryReader:
             vis = self.read_u8(base_ptr + 0x1A0)
             if vis == 0:
                 return None
-            h = self.read_f32(base_ptr + 0x148)
-            w = self.read_f32(base_ptr + 0x14C)
+            w = self.read_f32(base_ptr + 0x148)
+            h = self.read_f32(base_ptr + 0x14C)
             if vis != 1 or w is None or h is None or not (40.0 <= w <= 1200.0 and 40.0 <= h <= 1200.0):
                 base_ptr = None
                 self._cached_gui_3501_base_ptr = None
@@ -611,16 +611,16 @@ class TorchlightMemoryReader:
                     suffix = name[len("gui__3501SkillIcon"):]
                     if len(suffix) >= 2:
                         try:
-                            # Nomes no CEGUI: gui__3501SkillIcon<row><col>
-                            # Linhas 1-9: 1 dígito de linha (ex: 11..110, 21..210)
-                            # Linha 10: prefixo '10' (ex: 101..1010)
+                            # Nomes no CEGUI: gui__3501SkillIcon<col><row>
+                            # Colunas 1-9: 1 dígito (ex: 11..110, 21..210)
+                            # Coluna 10: prefixo '10' (ex: 101..1010)
                             if suffix.startswith("10"):
-                                row = 10
-                                col = int(suffix[2:])
+                                col = 10
+                                row = int(suffix[2:])
                             else:
-                                row = int(suffix[0])
-                                col = int(suffix[1:])
-                            found_icons[(row, col)] = w_ptr
+                                col = int(suffix[0])
+                                row = int(suffix[1:])
+                            found_icons[(col, row)] = w_ptr
                         except Exception:
                             pass
 
@@ -642,23 +642,23 @@ class TorchlightMemoryReader:
         if vis != 1:
             return None
 
-        h = self.read_f32(base_ptr + 0x148)
-        w = self.read_f32(base_ptr + 0x14C)
+        w = self.read_f32(base_ptr + 0x148)
+        h = self.read_f32(base_ptr + 0x14C)
         if w is None or h is None or not (40.0 <= w <= 1200.0 and 40.0 <= h <= 1200.0):
             return None
 
         # Identifica todas as células que estão realmente visíveis no CEGUI
         visible_cells: list[tuple[int, int]] = []
         if icon_ptrs:
-            for (row_1idx, col_1idx), ptr in icon_ptrs.items():
+            for (col_1idx, row_1idx), ptr in icon_ptrs.items():
                 if self.read_u8(ptr + 0x1A0) == 1:
-                    visible_cells.append((row_1idx, col_1idx))
+                    visible_cells.append((col_1idx, row_1idx))
 
         if visible_cells:
-            real_rows = max(r for r, _ in visible_cells)
-            real_cols = max(c for _, c in visible_cells)
+            real_cols = max(c for c, _ in visible_cells)
+            real_rows = max(r for _, r in visible_cells)
             row_counts = tuple(
-                max((c for r_c, c in visible_cells if r_c == r), default=0)
+                max((c for c, r_idx in visible_cells if r_idx == r), default=0)
                 for r in range(1, real_rows + 1)
             )
             return (real_cols, real_rows, row_counts)

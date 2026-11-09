@@ -307,20 +307,21 @@ class MemoryModuleTests(unittest.TestCase):
 
         def fake_read_f32(addr):
             if addr == base_ptr + 0x148:
-                return 150.0  # height
-            if addr == base_ptr + 0x14C:
                 return 350.0  # width
+            if addr == base_ptr + 0x14C:
+                return 150.0  # height
             return 0.0
 
         reader.read_u8 = MagicMock(side_effect=fake_read_u8)
         reader.read_f32 = MagicMock(side_effect=fake_read_f32)
 
+        # Células mapeadas como (col, row)
         reader._cached_gui_3501_icons = {
-            (1, 1): 0x2101, (1, 2): 0x2102, (1, 3): 0x2103, (1, 4): 0x2104,
-            (1, 5): 0x2105, (1, 6): 0x2106, (1, 7): 0x2107,
-            (2, 1): 0x2201, (2, 2): 0x2202,
-            (3, 1): 0x2301, (3, 2): 0x2302, (3, 3): 0x2303, (3, 4): 0x2304,
-            (3, 5): 0x2305,  # invisível
+            (1, 1): 0x2101, (2, 1): 0x2102, (3, 1): 0x2103, (4, 1): 0x2104,
+            (5, 1): 0x2105, (6, 1): 0x2106, (7, 1): 0x2107,
+            (1, 2): 0x2201, (2, 2): 0x2202,
+            (1, 3): 0x2301, (2, 3): 0x2302, (3, 3): 0x2303, (4, 3): 0x2304,
+            (5, 3): 0x2305,  # invisível
         }
 
         info = reader.read_shortcut_grid_info()
