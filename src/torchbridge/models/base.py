@@ -9,11 +9,12 @@ from threading import Lock
 from typing import Any
 
 
+from ..resources import resource_root
+
+
 def get_project_root() -> Path:
-    """Retorna o diretório raiz do projeto (suporta PyInstaller frozen)."""
-    if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    return Path(__file__).resolve().parents[3]
+    """Retorna o diretório raiz do projeto (suporta PyInstaller frozen, wheel e checkout)."""
+    return resource_root()
 
 
 @dataclass(frozen=True)

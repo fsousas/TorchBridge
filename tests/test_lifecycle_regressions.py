@@ -351,6 +351,7 @@ class EngineRegressionTests(unittest.TestCase):
                 engine = BridgeEngine(self.config, SharedOverlayState())
                 engine.injector = MagicMock()
                 engine.memory = MagicMock()
+                engine.memory.last_error = ""
                 engine.memory.update.return_value = GameMemoryState(is_connected=True, is_in_game=True, state_id=6)
                 engine.locator = MagicMock()
                 engine.locator.client_rect.return_value = self.rect

@@ -725,7 +725,7 @@ class VirtualKeyboardOverlayTests(unittest.TestCase):
 
             user32 = MagicMock()
 
-            with patch("ctypes.windll.user32", user32, create=True):
+            with patch.object(ctypes, "windll", MagicMock(user32=user32), create=True):
                 handled, res = surface.nativeEvent(b"windows_generic_MSG", msg_ptr)
                 self.assertTrue(handled)
                 self.assertEqual(res, 1)

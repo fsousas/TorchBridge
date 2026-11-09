@@ -3,10 +3,34 @@
 Controle de PS5, Xbox e controles genéricos no **Torchlight 1 para PC**, com
 movimento direto, cursor analógico, roda de habilidades e overlay transparente.
 
-O TorchBridge reconhece o controle pelo SDL, acompanha a janela do Torchlight,
-lê o estado dos menus na memória e envia teclado/mouse pelo `SendInput` do Windows.
-O overlay em janela é externo. Para fullscreen exclusivo, há um módulo Direct3D 9
-opcional, instalado ao lado do jogo sem alterar o executável ou os saves.
+O TorchBridge reconhece o controle pelo SDL, acompanha a janela do Torchlight e
+lê o estado dos menus na memória. Funciona no **Windows 10/11** e como aplicação
+**nativa no Omarchy Linux/Hyprland**, usando a edição Windows x86 do jogo via Proton.
+O motor, os menus, o teclado virtual, os perfis e os desenhos são compartilhados.
+
+No Windows, usa `SendInput`, overlay Qt e um módulo Direct3D 9 opcional para
+fullscreen exclusivo. No Omarchy, usa entrada virtual e overlay Wayland acima do
+fullscreen, sem DLL no jogo. Instalação, Steam/Proton, permissões, matriz de
+funcionalidades e evidências: **[docs/LINUX.md](docs/LINUX.md)**.
+
+### Começar no Omarchy
+
+```bash
+./INSTALAR.sh
+./INICIAR_TORCHBRIDGE.sh --diagnose
+```
+
+Para o Steam, feche o TorchBridge e configure a opção de inicialização do jogo:
+
+```text
+"/caminho/TorchBridge/INICIAR_TORCHBRIDGE.sh" --launch %command%
+```
+
+Esse modo permite a leitura de memória com a política Linux padrão, sem root.
+Desative Steam Input e use Proton/WineX11. A edição ELF do jogo não usa os mesmos
+mapas de memória e não está no escopo deste backend. Veja o guia Linux antes de
+instalar ou distribuir; a paridade implementada e a homologação pendente estão
+separadas na matriz de validação.
 
 ## O que já está implementado
 
@@ -29,7 +53,7 @@ opcional, instalado ao lado do jogo sem alterar o executável ou os saves.
 - perfil JSON editável e recarregado automaticamente;
 - script para gerar um executável portátil com PyInstaller.
 
-## Instalação rápida
+## Instalação rápida no Windows
 
 Requisitos: Windows 10/11, Torchlight 1 e Python 3.11 ou mais recente.
 
@@ -235,8 +259,10 @@ gatilhos e persistência do perfil. No diretório do projeto:
 python scripts/run_tests.py -v
 ```
 
-Esse comando também funciona no Linux, simulando as APIs Windows nos testes do
-motor e usando Qt offscreen. Ele não envia entrada ao desktop nem executa o jogo.
+Esse comando funciona no Windows e Linux, simulando as fronteiras de entrada nos
+testes do motor e forçando Qt offscreen. Ele não envia entrada ao desktop nem
+executa o jogo. O smoke test opt-in Linux e a validação de integração estão em
+[docs/LINUX.md](docs/LINUX.md).
 
 ## Limite técnico honesto
 

@@ -22,22 +22,18 @@ from PySide6.QtGui import (
 )
 from pathlib import Path
 
+from ..resources import resource_root
+
 log = logging.getLogger(__name__) if "logging" in globals() else None
 
 def _radial_icons_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parents[3]
+    base = resource_root()
     return base / "assets" / "images" / "radial-menu-icons"
 
 
 # Diretório dos assets extras do menu radial (TB-16): informações e instruções.
 def _radial_extra_hud_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        base = Path(__file__).resolve().parents[3]
+    base = resource_root()
     return base / "assets" / "hud" / "menu radial"
 
 

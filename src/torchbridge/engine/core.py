@@ -102,7 +102,7 @@ from ..models import (
     virtual_keyboard_key_rect,
     virtual_keyboard_target_rect,
 )
-from ..win32 import (
+from ..platform import (
     InputInjector,
     WindowLocator,
     begin_high_resolution_timer,
@@ -2019,7 +2019,7 @@ class BridgeEngineCore(threading.Thread):
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
-                if enabled and game_active and state.connected:
+                if enabled and not self.memory.last_error and game_active and state.connected:
                     if self._memory_state.is_loading:
                         self._release_all()
                     else:
@@ -2039,6 +2039,7 @@ class BridgeEngineCore(threading.Thread):
                     self._update_trigger_edges(state)
                     self._release_all()
 
+                self.shared.update(engine_error=self.memory.last_error)
                 self._previous = state
                 # Duração do tick alvo (1/120 s por padrão).
                 period = 1.0 / float(cfg["input"]["poll_hz"])
@@ -2072,4 +2073,8 @@ class BridgeEngineCore(threading.Thread):
                         hub.close()
                 finally:
                     self.memory.close()
+                    injector = self.injector.injector if isinstance(self.injector, InputSession) else self.injector
+                    close = getattr(injector, "close", None)
+                    if close is not None:
+                        close()
                     end_timer()

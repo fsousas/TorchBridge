@@ -10,6 +10,7 @@ from .base import (
     OverlaySnapshot,
     SharedOverlayState,
     get_project_root,
+    resource_root,
 )
 from .hud import *
 from .hud import _rasterize_hud_mask, _CLOSE_TAB_SVG

@@ -138,10 +138,6 @@ def _choose_joystick() -> pygame.joystick.JoystickType:
 
 # Fluxo principal da calibração: inicializa SDL, captura tudo e grava no perfil.
 def main() -> int:
-    # Calibração (como o jogo) só roda no Windows.
-    if os.name != "nt":
-        print("A calibração do TorchBridge deve ser executada no Windows.")
-        return 2
     # Inicializa SDL (display + joystick) para o assistente.
     pygame.display.init()
     pygame.joystick.init()

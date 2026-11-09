@@ -5,7 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "torchbridge"
 version = "0.1.0"
-description = "Controller bridge and low-latency overlay for Torchlight (PC)"
+description = "Controller bridge and overlay for Torchlight on Windows and Omarchy Linux"
+classifiers = [
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Games/Entertainment",
+]
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

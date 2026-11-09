@@ -21,7 +21,7 @@ from ..models import (
     virtual_keyboard_key_rect,
     virtual_keyboard_target_rect,
 )
-from ..win32 import (
+from ..platform import (
     IS_WINDOWS,
     make_overlay_clickthrough,
 )

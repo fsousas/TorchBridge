@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from ..controller import ControllerHub
+from ..input_session import wait_for_text_field_cursor
 from ..mathutils import clamp
 from ..models import (
     ControllerState,
@@ -190,6 +191,7 @@ class CharacterNavigationMixin:
         # Focus the actual game edit control before moving onto the virtual keys.
         self._set_mouse("left", False)
         self.injector.move(*char_create_button_point(rect, target))
+        wait_for_text_field_cursor(self.injector)
         self.injector.mouse_button("left", True)
         self.injector.mouse_button("left", False)
         self._virtual_keyboard_open = True
