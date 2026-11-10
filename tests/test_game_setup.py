@@ -42,7 +42,13 @@ class GamePreparationTests(unittest.TestCase):
         return setup.discover(environment=self.environment,home=self.root/"empty-home",**kwargs)
 
     def test_other_steam_library_uses_its_manifest_and_existing_client_prefix(self):
-        self.assertEqual(self.discover(),[setup.Installation(self.exe,self.prefix,self.proton,self.steam)])
+        games=self.discover()
+        self.assertEqual(len(games),1)
+        # Windows TEMP may use an 8.3 alias while discovery resolves Steam's
+        # root to its long path. Both must identify the same installation.
+        for name,expected in (("exe",self.exe),("prefix",self.prefix),
+                              ("proton",self.proton),("steam",self.steam)):
+            self.assertTrue(getattr(games[0],name).samefile(expected),name)
 
     def test_launch_selects_one_game_without_preparing_another_installation(self):
         other=self.root/"GOG/Torchlight.exe";other.parent.mkdir();other.write_bytes(b"other")
