@@ -1,12 +1,10 @@
 # Proposta: separar caminhada de interação no Torchlight 1
 
-Estado em 09/11/2026, branch `feature/tb-18`: **estudo; movimento nativo ainda
-não implementado**. Esta proposta substitui o roteiro anterior, que sugeria
-zerar alvos por escrita externa e tratava posições/hover como desconhecidos.
-
-A recomendação é usar a navegação do próprio jogo para andar e manter a
-interação como uma ação explícita. A primeira entrega deve ser uma prova de
-conceito em cópia isolada do jogo, antes de alterar o movimento padrão.
+Estado em 10/11/2026: a implementação foi incorporada na branch feature/tb-18.
+Este documento conserva a pesquisa e as alternativas consideradas. O contrato
+atual, a instalação, as famílias cobertas e a validação estão em
+[MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md). As seções abaixo são o estudo que
+orientou a implementação, não instruções de configuração do aplicativo atual.
 
 ## Causa confirmada no projeto
 

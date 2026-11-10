@@ -3,8 +3,8 @@
 Padrão do overworld: cada botão dispara uma entrada REAL (SendInput). A/X são
 os cliques de mouse (esquerdo/direito); o resto vira teclas (1..0) ou comandos
 contextuais. No overworld, D-pad ↑ interage com o elemento próximo (TB-18),
-D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. A interação
-depende da confirmação do hover pelo jogo: [POSICIONAMENTO.md](POSICIONAMENTO.md).
+D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. A caminhada não gera clique. A interação
+é validada pelo módulo nativo no próprio jogo: [POSICIONAMENTO.md](POSICIONAMENTO.md).
 
 ---
 

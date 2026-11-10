@@ -88,6 +88,8 @@ def main() -> int:
     # Keep the original Steam/Proton environment for the game. Qt uses the host
     # Wayland plugin, rather than an inherited Steam plugin path.
     launch_environment = os.environ.copy()
+    from .native_input_setup import launch_environment as input_launch_environment
+    launch_environment = input_launch_environment(launch_environment)
     if sys.platform.startswith("linux"):
         if not os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
             print("Inicie o TorchBridge na sessão Omarchy/Hyprland. Consulte docs/LINUX.md.", file=sys.stderr)
@@ -318,6 +320,11 @@ def main() -> int:
     )
     if os.name == "nt":
         _add_fullscreen_actions(menu)
+    from .native_input_setup import configure_dialog as configure_native_input
+    menu.addAction("Instalar movimento seguro...").triggered.connect(
+        lambda _checked=False: configure_native_input())
+    menu.addAction("Remover movimento seguro...").triggered.connect(
+        lambda _checked=False: configure_native_input(uninstall=True))
     menu.addSeparator()
     exit_action = menu.addAction("Sair")
     # 'Sair' encerra o event loop → passa pelo cleanup.

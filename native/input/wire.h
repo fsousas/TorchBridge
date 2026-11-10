@@ -24,7 +24,7 @@ struct Command {
     uint8_t token[16];
     uint32_t flags, player, level;
     float dx, dz, radius;
-    uint32_t action, target;
+    uint32_t action, action_age;
 };
 struct Reply {
     char magic[8];
@@ -36,6 +36,21 @@ struct Reply {
 static_assert(sizeof(Endpoint) == 48 && sizeof(Command) == 64 && sizeof(Reply) == 64);
 
 inline bool newer(uint32_t a, uint32_t b) { return static_cast<int32_t>(a - b) > 0; }
+inline bool recent_action(const Command& c, uint64_t packet_age) {
+    return uint64_t(c.action_age) + packet_age <= 200;
+}
+struct ActionLatch {
+    uint32_t generation = 0, last = 0;
+    bool attached = false;
+    bool consume(uint32_t connection, uint32_t action) {
+        if (!attached || generation != connection) {
+            generation = connection; last = action; attached = true;
+            return false; // Held/old actions cannot replay on reconnect.
+        }
+        if (action && newer(action, last)) { last = action; return true; }
+        return false;
+    }
+};
 inline bool valid(const Command& c, const uint8_t* token) {
     return !std::memcmp(c.magic, magic, 8) && c.version == version &&
         !std::memcmp(c.token, token, 16) && (c.flags & ~15u) == 0 &&

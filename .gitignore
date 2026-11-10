@@ -5,7 +5,12 @@ dist/
 __pycache__/
 .pytest_cache/
 *.pyc
-assets/native/
+# The input module is required for safe walking and ships with the app.
+# Optional/generated renderer binaries remain ignored.
+assets/native/*
+!assets/native/x86/
+assets/native/x86/*
+!assets/native/x86/winmm.dll
 # Screenshots de debug gerados na raiz (calibração de UI)
 /*.png
 

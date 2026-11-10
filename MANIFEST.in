@@ -1,3 +1,6 @@
 recursive-include native/linux *.c *.xml *.md *.txt
+recursive-include native/input *.cpp *.c *.h *.def *.inc *.txt
+recursive-include assets/native *.dll
+include scripts/build_native_input.py
 recursive-include assets *.png *.cur
 include TorchBridge.spec

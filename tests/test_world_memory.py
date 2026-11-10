@@ -139,9 +139,35 @@ def memory_fixture(base=0x400000):
 
 
 class WorldMemoryTests(unittest.TestCase):
+    def test_interactive_subclasses_are_discovered_through_rtti_bases(self):
+        space, reader, client, level, player, pet, npc, props, _ = memory_fixture()
+        custom=space.unit("CCustomDoor", "Porta", "CUSTOM_DOOR")
+        vt=space.vtables["CCustomDoor"]
+        col=struct.unpack("<I",space.read(vt-4,4))[0]
+        descriptors=[]
+        for base in ("CTriggerUnit","CItem"):
+            space.unit(base)
+            base_col=struct.unpack("<I",space.read(space.vtables[base]-4,4))[0]
+            td=struct.unpack("<I",space.read(base_col+12,4))[0]
+            descriptor=space.allocate(28);space.u32(descriptor,td);descriptors.append(descriptor)
+        array=space.allocate(8);space.put(array,struct.pack("<2I",*descriptors))
+        hierarchy=space.allocate(16)
+        space.u32(hierarchy+8,2);space.u32(hierarchy+12,array);space.u32(col+16,hierarchy)
+        space.linked_list(level,0x68,[custom])
+        world=reader._world_reader.read(client,player,10.)
+        entity=next(e for e in world.entities if e.address==custom)
+        self.assertEqual(entity.kind,"door")
+        self.assertEqual(entity.interaction_method,"item")
+
+    def test_unreadable_interactive_position_marks_the_roster_incomplete(self):
+        space, reader, client, level, player, pet, npc, props, _ = memory_fixture()
+        space.f32(npc+0x70,math.nan)
+        self.assertFalse(reader._world_reader.read(client,player,10.).roster_complete)
+
     def test_merchant_roles_use_unit_types_on_both_transports_without_name_guesses(self):
         roles = {41: "merchant", 127: "gambler", 130: "enchanter", 134: "transmuter",
-                 132: "gem_recover", 133: "gem_destroy", 104: ""}
+                 132: "gem_recover", 133: "gem_destroy", 128: "stash",
+                 170: "shared_stash", 175: "retirement", 104: ""}
         for transport in ("Windows", "Proton"):
             with self.subTest(transport=transport):
                 space, reader, client, level, player, pet, npc, props, _ = memory_fixture()
@@ -307,7 +333,7 @@ class WorldMemoryTests(unittest.TestCase):
         self.assertTrue(world.roster_complete)
         self.assertEqual(world.entities, ())
 
-    def test_hostile_dead_minions_hidden_loot_and_breakables_are_excluded(self):
+    def test_hostile_dead_minions_and_hidden_units_are_excluded_but_all_items_are_mapped(self):
         space, reader, client, level, player, pet, npc, props, _ = memory_fixture()
         enemies = [space.unit("CMonster", "Enemy") for _ in range(4)]
         space.u32(enemies[0] + 0x28C, 2)
@@ -321,7 +347,7 @@ class WorldMemoryTests(unittest.TestCase):
         space.u8(props[2] + 0x19D, 1)
         space.linked_list(level, 0x68, [*loot, *props])
         world = reader._world_reader.read(client, player, 10.)
-        self.assertEqual({e.address for e in world.entities}, {npc, *props[3:]})
+        self.assertEqual({e.address for e in world.entities}, {npc, *loot, *props[3:]})
 
     def test_unrecognized_player_invalid_coordinates_and_transition_drop_data(self):
         space, reader, client, level, player, pet, npc, props, _ = memory_fixture()

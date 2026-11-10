@@ -11,32 +11,19 @@ Props sem nome reconhecido permanecem como `interactive`, sem inventar categoria
 
 ## Uso no controle
 
-Em movimento direto, aproxime-se de um elemento. O overlay mostra seu nome,
-distância em unidades do jogo e **D-pad ↑**. Pressione o direcional para cima
-uma vez para interagir com o alvo mais próximo. Segurar não repete a ação.
+Em movimento direto, o elemento utilizável mais próximo recebe o highlight do
+próprio jogo sem deslocar o cursor. O overlay mostra seu nome, distância e
+**D-pad ↑**. O direcional envia uma ação nativa explícita: falar com o personagem
+ou usar/coletar o item pelo dispatch original. Segurar não repete.
 
-O cursor vai ao alvo e aguarda o próprio Torchlight reconhecer essa instância
-como objeto sob o cursor. Somente depois dessa confirmação sai um clique
-esquerdo. O clique dura 70 ms; a sequência completa expira em 600 ms. Até três
-alturas de mira são tentadas quando o cursor não encontra o objeto. Se outro
-objeto estiver encobrindo o alvo, nenhum clique é enviado.
+A caminhada é independente de cliques. O módulo confere novamente jogador,
+cenário, disponibilidade e distância ao executar; projeção, categoria ou
+posição na tela não fazem um objeto mais distante tomar o lugar do mais próximo.
+Os métodos originais preservam requisitos de missão, chaves, colisões e serviços.
+Menus, combos, dados incompletos, carregamento e perda de foco suspendem a ação.
 
-A ação exige cenário legível, câmera válida, distância dentro do raio, diferença
-de altura de até 2,5 unidades e projeção dentro da janela. Não tenta caminhar
-até um objeto distante. Paredes/caminhos e requisitos de missão continuam sob
-controle do jogo; distância geométrica não equivale a acesso garantido.
-
-Menus, diálogo, carregamento, modo cursor, roda, configuração de atalhos,
-teclado virtual e combos de combate suspendem a interação. Mudança de cenário,
-jogador, resolução, desconexão, perda de foco e pausa cancelam uma ação pendente
-e liberam seu botão. O alvo de um clique pendente não é substituído por outro
-que ficou mais próximo. Os controles existentes A/X e as habilidades continuam
-disponíveis.
-
-A caminhada pelo analógico ainda mantém o clique esquerdo e pode acionar um
-elemento sob o cursor. O D-pad não elimina esse caminho existente. A separação
-de movimento e interação é uma proposta em
-[CONCEITO-MOVIMENTO-CONSOLE.md](CONCEITO-MOVIMENTO-CONSOLE.md).
+Instalação, famílias adicionais e proteção de ativação/transições:
+[MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md).
 
 ## Configuração
 
@@ -103,7 +90,7 @@ Marcadores removidos pelo jogo desaparecem da classificação na próxima leitur
 
 No JSON, esses NPCs continuam com `kind: "npc"` e acrescentam `npc_role`,
 `quest_status` e `label`. Isso mantém a mesma mira e interação de NPCs, inclusive
-a confirmação do hover antes do clique. No modo de calibração, o painel também
+a validação nativa da instância e do alcance. No modo de calibração, o painel também
 conta mercadores e NPCs com missão identificados no cenário.
 
 ## Lista completa e coordenadas
@@ -167,13 +154,14 @@ Trocas de processo/cenário/jogador invalidam o cache. Dados com mais de 200 ms
 não autorizam interação.
 
 NPCs são personagens neutros/amigáveis vivos, excluindo jogador, pet, summons
-e inimigos. Props são `CTriggerUnit` ativos; loot comum, ouro e barris ficam
-fora dessa lista. A categoria usa o nome interno e o nome de exibição. O jogo
-modificado pode acrescentar classes ou identificadores desconhecidos; esses
-casos precisam de mapeamento, sem assumir offsets de outro executável.
+e inimigos. A lista também inclui CItem e subclasses: props CTriggerUnit,
+equipamentos, ouro e destrutíveis. RTTI inclui as classes base, permitindo
+reconhecer subclasses sem depender de nomes fixos. UNITTYPE classifica serviços
+e tipos de props; nomes refinam categorias como porta e alavanca. Posições
+ilegíveis tornam a fotografia incompleta, sem selecionar outro alvo por engano.
 
-O recurso não escreve na memória, não chama funções remotas e não requer DLL
-adicional. O Windows usa a projeção no retângulo físico do cliente; o Omarchy usa
+O leitor e o CLI permanecem somente leitura. Movimento, highlight e uso de
+objetos são executados pelo módulo nativo separado na thread do jogo. O Windows usa a projeção no retângulo físico do cliente; o Omarchy usa
 o retângulo lógico recebido do backend existente. Isso mantém a mesma proporção
 da projeção em escala fracionária e em monitores com origem negativa.
 
@@ -203,12 +191,12 @@ e os ponteiros do processo corrente, incluindo ASLR/relocação do Proton.
 
 ## Validação
 
-Comando: `python scripts/run_tests.py`. A suíte contém **576 testes**, incluindo
-49 novos testes desta funcionalidade. Os testes novos exercitam os dois
+Comando: `python scripts/run_tests.py`. A suíte cobre o leitor, o controlador
+nativo, o transporte local e o overlay. Os testes novos exercitam os dois
 transportes de leitura (Win32 simulado e Proton simulado), bases diferentes,
 todos os tipos pedidos, objetos com pai, atualização de posições, leitura parcial,
-ciclos, strings inválidas, câmera, projeção, dados antigos, cliques confirmados
-pelo hover, ausência de repetição, falha de liberação e cancelamento durante
+ciclos, strings inválidas, câmera, projeção, dados antigos, seleção nativa,
+ausência de repetição/replay na reconexão e cancelamento durante
 menus/perda de foco. O aviso é renderizado offscreen em várias resoluções e
 escalas e pelo mesmo renderer do fullscreen nativo. O workflow existente executa
 a suíte em Windows/Linux e Python 3.11/3.13.
@@ -218,7 +206,7 @@ e `git diff --check`. O wheel Linux foi gerado, instalado em ambiente virtual
 isolado fora do checkout e verificado quanto aos imports do motor/overlay,
 carregamento do transporte nativo e comando `torchbridge-cenario`.
 
-### Jogo real no Omarchy
+### Ensaio inicial de hover no Omarchy (09/11/2026, anterior ao módulo nativo)
 
 Em 2026-11-09, foi executado Torchlight Steam PE32 com GE-Proton11-12, usando
 cópias temporárias do jogo e do prefixo (incluindo saves). O harness manteve

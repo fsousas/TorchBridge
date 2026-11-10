@@ -18,6 +18,10 @@ int wmain(int argc, wchar_t** argv) {
     // An unrelated executable must retain normal WinMM and never receive hooks.
     assert(endpoint->error == tbinput::unsupported && endpoint->port == 0);
     const auto timer = reinterpret_cast<DWORD(WINAPI*)()>(GetProcAddress(dll, "timeGetTime"));
-    assert(timer && static_cast<DWORD>(GetTickCount() - timer()) < 1000);
+    assert(timer);
+    const auto before = GetTickCount();
+    const auto clock = timer(); // The first forward may load the system runtime.
+    const auto after = GetTickCount();
+    assert(static_cast<DWORD>(clock - before + 1000) <= static_cast<DWORD>(after - before + 2000));
     assert(GetProcAddress(dll, "waveInOpen"));
 }

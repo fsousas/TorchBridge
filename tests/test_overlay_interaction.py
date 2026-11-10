@@ -159,3 +159,16 @@ class WorldOverlayTests(unittest.TestCase):
         self.assertIn("Mercador: Vasman", labels)
         self.assertIn("NPC · Missão para entregar (?): Vasman", labels)
         self.assertIn("Mercadores: 1 · NPCs com missão: 1", panel.call_args.args[2])
+
+    def test_calibration_shows_native_movement_highlight_and_blocked_events(self):
+        self.config.set_show_calibration(True)
+        snap=replace(self.snapshot,movement_status="Caminhando",native_input_ready=True,
+                     native_highlight=True,movement_direction=(.5,-.5),
+                     movement_destination=(12.,34.),blocked_interactions=3,blocked_warps=2)
+        with patch.object(self.overlay,"_draw_world_calibration_panel",
+                          wraps=self.overlay._draw_world_calibration_panel) as panel:
+            self.assertTrue(any(self.render(snap,calibration=True)))
+        lines=panel.call_args.args[2]
+        self.assertIn("Movimento seguro: Caminhando",lines)
+        self.assertTrue(any("12.00, 34.00" in line for line in lines))
+        self.assertTrue(any("Highlight: ativo" in line and "3 usos / 2 transições" in line for line in lines))

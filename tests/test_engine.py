@@ -116,129 +116,58 @@ class RadialSessionResetTests(unittest.TestCase):
 
 
 class DirectMovementCircleTests(unittest.TestCase):
-    # Raio do movimento direto referenciado à ALTURA nos dois eixos: em 1920x1080 com
-    # raio 16%, o alcance máximo é 173 px da âncora (960, 507.6) em qualquer direção — círculo,
-    # não elipse. Sem painel aberto o modo direto fica ativo.
-    def test_max_reach_is_circular_based_on_height(self):
+    """The direction marker keeps its geometry without moving the system cursor."""
+    def test_marker_is_circular_and_never_clicks(self):
+        from torchbridge.memory import GameMemoryState
         with tempfile.TemporaryDirectory() as directory:
             config = ConfigManager(Path(directory) / "perfil.json")
             engine = BridgeEngine(config, SharedOverlayState())
-            engine._mode = "direct"
-            injector = FakeInjector()
-            engine.injector = injector
-
+            engine.injector = FakeInjector()
+            engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True)
             cfg = config.get()
             rect = Rect(0, 0, 1920, 1080)
-            radius = 1080 * float(cfg["movement"]["movement_radius_percent"])
-            anchor_x = 1920 * float(cfg["movement"]["anchor_x"])
-            anchor_y = 1080 * float(cfg["movement"]["anchor_y"])
+            radius = rect.height * cfg["movement"]["movement_radius_percent"]
+            ax, ay = rect.width * cfg["movement"]["anchor_x"], rect.height * cfg["movement"]["anchor_y"]
+            for dx, dy in ((1,0),(-1,0),(0,1),(0,-1),(.7071,.7071)):
+                engine._move_pointer(ControllerState(connected=True,lx=dx,ly=dy),rect,cfg,.05)
+                snap = engine.shared.get()
+                self.assertAlmostEqual(((snap.aim_x-ax)**2+(snap.aim_y-ay)**2)**.5,radius,delta=1)
+            self.assertEqual(engine.injector.events,[])
 
-            def reach(direction: tuple[float, float]) -> tuple[int, int]:
-                state = ControllerState(connected=True, lx=direction[0], ly=direction[1])
-                engine._process_active(FakeHub(), state, rect, cfg, 0.0, 0.05)
-                return injector.moved[-1]
-
-            # Direita, esquerda, baixo e cima com stick cheio: a distância da âncora é a mesma.
-            # Tolerância de 1 px: âncora y (507.6) e raio decimal não caem em inteiro.
-            for dx, dy in ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)):
-                x, y = reach((dx, dy))
-                dist = ((x - anchor_x) ** 2 + (y - anchor_y) ** 2) ** 0.5
-                self.assertLessEqual(
-                    abs(dist - radius), 1.0,
-                    msg=f"Alcance na direção {(dx, dy)} = {dist:.1f} não bate com o raio circular {radius:.1f}",
-                )
-            # Diagonal (0.7071/0.7071 = unidade): mesmo raio, sem ovalizar.
-            x, y = reach((0.7071, 0.7071))
-            dist = ((x - anchor_x) ** 2 + (y - anchor_y) ** 2) ** 0.5
-            self.assertLessEqual(
-                abs(dist - radius), 1.0,
-                msg=f"Alcance diagonal = {dist:.1f} não bate com o raio circular {radius:.1f}",
-            )
-
-    # Perto da deadzone o cursor fica junto da âncora (clique central do click-to-move):
-    # o alcance em fração do raio deve ser ~click_center_fraction, não 55% como era antes.
-    # Assim o clique cai perto do herói, longe de NPCs/inimigos, e o cursor só cresce
-    # até o raio cheio quando o stick é empurrado até o fim.
-    def test_low_stick_keeps_cursor_near_anchor(self):
+    def test_low_stick_changes_marker_without_moving_cursor(self):
+        from torchbridge.memory import GameMemoryState
         with tempfile.TemporaryDirectory() as directory:
             config = ConfigManager(Path(directory) / "perfil.json")
             engine = BridgeEngine(config, SharedOverlayState())
-            engine._mode = "direct"
-            injector = FakeInjector()
-            engine.injector = injector
+            engine.injector = FakeInjector()
+            engine._memory_state = GameMemoryState(is_connected=True,is_in_game=True)
+            rect=Rect(0,0,1920,1080);cfg=config.get()
+            engine._move_pointer(ControllerState(connected=True,lx=.3),rect,cfg,.05)
+            snap=engine.shared.get()
+            self.assertGreater(snap.aim_x,960)
+            self.assertLess(snap.aim_x-960,1080*cfg["movement"]["movement_radius_percent"]*.55)
+            self.assertEqual(engine.injector.events,[])
 
-            cfg = config.get()
-            rect = Rect(0, 0, 1920, 1080)
-            radius = 1080 * float(cfg["movement"]["movement_radius_percent"])
-            anchor_x = 1920 * float(cfg["movement"]["anchor_x"])
-            anchor_y = 1080 * float(cfg["movement"]["anchor_y"])
-            center_frac = float(cfg["movement"]["click_center_fraction"])
-            dz = float(cfg["input"]["deadzone"])
-            curve = float(cfg["input"]["response_curve"])
-
-            # Stick levemente inclinado (mag 0.3, direção +x): o lmag vem da mesma função do engine.
-            _, _, lmag = radial_deadzone(0.3, 0.0, dz, curve)
-            self.assertGreater(lmag, 0.0)  # fora da deadzone, senão o teste é vazio
-            expected_reach = center_frac + (1.0 - center_frac) * lmag
-
-            state = ControllerState(connected=True, lx=0.3, ly=0.0)
-            engine._process_active(FakeHub(), state, rect, cfg, 0.0, 0.05)
-            x, y = injector.moved[-1]
-            dist = ((x - anchor_x) ** 2 + (y - anchor_y) ** 2) ** 0.5
-
-            # O cursor está na fração esperada do raio (1 px de folga p/ arredondamento).
-            self.assertLessEqual(
-                abs(dist - radius * expected_reach), 1.0,
-                msg=f"Alcance {dist:.1f} não bate com o esperado {radius * expected_reach:.1f} (reach {expected_reach:.2f})",
-            )
-            # E, o que importa: bem mais perto do que o antigo salto de 55% do raio.
-            self.assertLess(dist, radius * 0.55)
-
-    # Ao soltar o stick (voltar para a deadzone), o cursor é devolvido à âncora do herói:
-    # o próximo click-to-move nasce no centro e não cai em cima de um NPC/inimigo.
-    def test_releasing_stick_returns_cursor_to_anchor(self):
+    def test_releasing_stick_clears_marker_without_repositioning_cursor(self):
+        from torchbridge.memory import GameMemoryState
         with tempfile.TemporaryDirectory() as directory:
-            config = ConfigManager(Path(directory) / "perfil.json")
-            engine = BridgeEngine(config, SharedOverlayState())
-            engine._mode = "direct"
-            injector = FakeInjector()
-            engine.injector = injector
+            config=ConfigManager(Path(directory)/"perfil.json")
+            engine=BridgeEngine(config,SharedOverlayState());engine.injector=FakeInjector()
+            engine._memory_state=GameMemoryState(is_connected=True,is_in_game=True)
+            rect=Rect(0,0,1920,1080)
+            engine._move_pointer(ControllerState(connected=True,lx=1),rect,config.get(),.05)
+            self.assertIsNotNone(engine.shared.get().aim_x)
+            engine._move_pointer(ControllerState(connected=True),rect,config.get(),.05)
+            self.assertIsNone(engine.shared.get().aim_x)
+            self.assertEqual(engine.injector.events,[])
 
-            cfg = config.get()
-            rect = Rect(0, 0, 1920, 1080)
-            anchor = (round(1920 * float(cfg["movement"]["anchor_x"])),
-                      round(1080 * float(cfg["movement"]["anchor_y"])))
-
-            # Tick 1: stick cheio para a direita -> movimento direto ativo, cursor no raio cheio.
-            engine._process_active(FakeHub(), ControllerState(connected=True, lx=1.0, ly=0.0), rect, cfg, 0.0, 0.05)
-            self.assertNotEqual(injector.moved[-1], anchor)  # cursor saiu da âncora
-            self.assertTrue(engine._direct_move_active)
-
-            # Tick 2: stick de volta ao centro (deadzone) -> nada move o cursor -> retorno à âncora.
-            engine._process_active(FakeHub(), ControllerState(connected=True, lx=0.0, ly=0.0), rect, cfg, 0.0, 0.05)
-            self.assertEqual(injector.moved[-1], anchor)
-            self.assertFalse(engine._direct_move_active)
-
-    # O retorno não deve sequestrar o cursor quando outro eixo está o movendo (cursor livre/direito).
-    def test_return_does_not_override_active_cursor(self):
+    def test_right_stick_still_moves_cursor(self):
         with tempfile.TemporaryDirectory() as directory:
-            config = ConfigManager(Path(directory) / "perfil.json")
-            engine = BridgeEngine(config, SharedOverlayState())
-            engine._mode = "direct"
-            injector = FakeInjector()
-            engine.injector = injector
-
-            cfg = config.get()
-            rect = Rect(0, 0, 1920, 1080)
-            anchor = (round(1920 * float(cfg["movement"]["anchor_x"])),
-                      round(1080 * float(cfg["movement"]["anchor_y"])))
-
-            # Tick 1: movimento direto ativo.
-            engine._process_active(FakeHub(), ControllerState(connected=True, lx=1.0, ly=0.0), rect, cfg, 0.0, 0.05)
-            # Tick 2: esquerdo solto, DIREITO inclinado -> cursor livre ativo; o retorno deve ceder.
-            engine._process_active(FakeHub(), ControllerState(connected=True, lx=0.0, ly=0.0, rx=1.0, ry=0.0), rect, cfg, 0.0, 0.05)
-            self.assertNotEqual(injector.moved[-1], anchor)  # o cursor seguiu o direito, não voltou
-            self.assertEqual(engine._direct_move_active, False)
+            config=ConfigManager(Path(directory)/"perfil.json")
+            engine=BridgeEngine(config,SharedOverlayState());engine.injector=FakeInjector()
+            engine._move_pointer(ControllerState(connected=True,rx=1),Rect(0,0,1920,1080),config.get(),.05)
+            self.assertTrue(engine.injector.moved)
+            self.assertNotIn(("mouse","left",True),engine.injector.events)
 
 class LeftStickFreeCursorTests(unittest.TestCase):
     # Com os dois painéis abertos, o analógico esquerdo move o cursor livremente
@@ -267,7 +196,7 @@ class LeftStickFreeCursorTests(unittest.TestCase):
             self.assertFalse(injector.buttons.get("left", False))
 
     # Com só um painel aberto, o comportamento clássico permanece: movimento direto segura o clique.
-    def test_single_panel_keeps_click_to_move(self):
+    def test_single_panel_does_not_click_to_move(self):
         with tempfile.TemporaryDirectory() as directory:
             config = ConfigManager(Path(directory) / "perfil.json")
             engine = BridgeEngine(config, SharedOverlayState())
@@ -283,8 +212,8 @@ class LeftStickFreeCursorTests(unittest.TestCase):
             engine._process_active(FakeHub(), state, rect, cfg, 0.0, 0.05)
 
             # Movimento direto saltou para o ponto-âncora e reteve o clique esquerdo.
-            self.assertEqual(len(injector.moved), 1)
-            self.assertTrue(injector.buttons.get("left", False))
+            self.assertEqual(injector.moved, [])
+            self.assertFalse(injector.buttons.get("left", False))
 
 
 class CenterClickPanelResetTests(unittest.TestCase):
@@ -1583,8 +1512,8 @@ class OverworldRemapTests(unittest.TestCase):
             self.assertNotIn("SHIFT", engine._held_keys)
             # O left retido seguiu retido (a sequência não o tocou) e volta a ser
             # do click-to-move: soltando o stick, o _set_mouse devolve a descida.
-            self.assertTrue(injector.buttons.get("left"))
-            self.assertIn("left", engine._held_mouse)
+            self.assertFalse(injector.buttons.get("left"))
+            self.assertNotIn("left", engine._held_mouse)
             self._tick(engine, self._state(), now=0.25)
             self.assertFalse(injector.buttons.get("left"))
             self.assertNotIn("left", engine._held_mouse)
@@ -2280,7 +2209,7 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             self.assertIn(("key", "SHIFT", False), injector.events)
             self.assertIn(("mouse", "left", False), injector.events)
 
-    def test_a_button_on_interactive_hover_sends_plain_left_click(self):
+    def test_a_button_on_interactive_hover_keeps_attack_modifier(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared, injector = self._make_engine(directory)
             from torchbridge.memory import GameMemoryState
@@ -2299,11 +2228,11 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             # Pressiona A sobre NPC: clique simples (SEM Shift)
             state_a = ControllerState(connected=True, buttons=frozenset({"a"}))
             engine._process_active(hub, state_a, rect, cfg, 0.0, 0.05)
-            self.assertFalse(engine._a_shift_held)
-            self.assertNotIn(("key", "SHIFT", True), injector.events)
+            self.assertTrue(engine._a_shift_held)
+            self.assertIn(("key", "SHIFT", True), injector.events)
             self.assertIn(("mouse", "left", True), injector.events)
 
-    def test_auto_move_sends_plain_left_click_without_shift(self):
+    def test_walking_never_sends_left_click_or_shift(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, shared, injector = self._make_engine(directory)
             from torchbridge.memory import GameMemoryState
@@ -2323,7 +2252,7 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             engine._process_active(hub, state_move, rect, cfg, 0.0, 0.05)
             self.assertFalse(engine._a_shift_held)
             self.assertNotIn(("key", "SHIFT", True), injector.events)
-            self.assertIn(("mouse", "left", True), injector.events)
+            self.assertNotIn(("mouse", "left", True), injector.events)
 
     def test_a_button_in_menu_does_not_hold_shift(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2355,86 +2284,20 @@ class OverworldAttackInPlaceTests(unittest.TestCase):
             self.assertNotIn("SHIFT", engine._held_keys)
             self.assertIn(("key", "SHIFT", False), injector.events)
 
-    def test_skill_release_during_auto_move_pulses_left_click(self):
+    def test_skill_release_during_walking_never_pulses_left_click(self):
+        from torchbridge.memory import GameMemoryState
         with tempfile.TemporaryDirectory() as directory:
-            engine, shared, injector = self._make_engine(directory)
-            from torchbridge.memory import GameMemoryState
-            engine._memory_state = GameMemoryState(
-                is_connected=True,
-                is_in_game=True,
-                state_id=6,
-                is_menu_open=False,
-            )
-            rect = Rect(0, 0, 1024, 768)
-            cfg = engine.config.get()
-            hub = FakeHub()
-
-            # 1. Herói caminhando com analógico esquerdo (lx=0.8)
-            state_walk = ControllerState(connected=True, lx=0.8, ly=0.0)
-            engine._process_active(hub, state_walk, rect, cfg, 0.0, 0.05)
-            self.assertIn("left", engine._held_mouse)
-            self.assertIn(("mouse", "left", True), injector.events)
-
-            # 2. Mantém analógico inclinado e aperta Triângulo (Y / magia 1)
-            state_skill = ControllerState(connected=True, lx=0.8, ly=0.0, buttons=frozenset({"y"}))
-            engine._previous = state_walk
-            engine._process_active(hub, state_skill, rect, cfg, 0.05, 0.05)
-
-            # 3. Solta Triângulo (Y) ainda mantendo o analógico inclinado
-            state_release = ControllerState(connected=True, lx=0.8, ly=0.0)
-            engine._previous = state_skill
-            injector.events.clear()
-            engine._process_active(hub, state_release, rect, cfg, 0.10, 0.05)
-
-            # No tick da soltura, deve soltar o clique esquerdo (pulso de reset)
-            self.assertNotIn("left", engine._held_mouse)
-            self.assertIn(("mouse", "left", False), injector.events)
-            self.assertTrue(len(engine._auto_move_resume_times) > 0)
-
-            # 4. No tick seguinte, ainda com analógico inclinado, deve reapertar o clique esquerdo
-            engine._previous = state_release
-            injector.events.clear()
-            engine._process_active(hub, state_release, rect, cfg, 0.15, 0.05)
-            self.assertIn("left", engine._held_mouse)
-            self.assertIn(("mouse", "left", True), injector.events)
-
-    def test_square_release_during_auto_move_pulses_left_click(self):
-        with tempfile.TemporaryDirectory() as directory:
-            engine, shared, injector = self._make_engine(directory)
-            from torchbridge.memory import GameMemoryState
-            engine._memory_state = GameMemoryState(
-                is_connected=True,
-                is_in_game=True,
-                state_id=6,
-                is_menu_open=False,
-            )
-            rect = Rect(0, 0, 1024, 768)
-            cfg = engine.config.get()
-            hub = FakeHub()
-
-            # 1. Caminhando e segurando Quadrado (X / Right Click)
-            state_sq = ControllerState(connected=True, lx=0.8, ly=0.0, buttons=frozenset({"x"}))
-            engine._process_active(hub, state_sq, rect, cfg, 0.0, 0.05)
-            self.assertIn("right", engine._held_mouse)
-
-            # 2. Solta Quadrado (X) mantendo analógico inclinado
-            state_rel = ControllerState(connected=True, lx=0.8, ly=0.0)
-            engine._previous = state_sq
-            injector.events.clear()
-            engine._process_active(hub, state_rel, rect, cfg, 0.10, 0.05)
-
-            # Deve soltar o botão direito e também dar o pulso no botão esquerdo
-            self.assertNotIn("right", engine._held_mouse)
-            self.assertNotIn("left", engine._held_mouse)
-            self.assertIn(("mouse", "right", False), injector.events)
-            self.assertIn(("mouse", "left", False), injector.events)
-
-            # 3. No tick seguinte, reaperta o clique esquerdo
-            engine._previous = state_rel
-            injector.events.clear()
-            engine._process_active(hub, state_rel, rect, cfg, 0.15, 0.05)
-            self.assertIn("left", engine._held_mouse)
-            self.assertIn(("mouse", "left", True), injector.events)
+            engine, shared, injector=self._make_engine(directory)
+            engine._memory_state=GameMemoryState(is_connected=True,is_in_game=True,state_id=6)
+            rect=Rect(0,0,1024,768);hub=FakeHub();cfg=engine.config.get()
+            for button in ("y","x"):
+                for buttons in (frozenset(),frozenset({button}),frozenset(),frozenset()):
+                    state=ControllerState(connected=True,lx=.8,buttons=buttons)
+                    engine._process_active(hub,state,rect,cfg,0.,.05)
+                    engine._previous=state
+            self.assertNotIn(("mouse","left",True),injector.events)
+            self.assertNotIn("left",engine._held_mouse)
+            self.assertIn(("mouse","right",False),injector.events)
 
 
 class DiscreteBindingsR3Tests(unittest.TestCase):

@@ -31,12 +31,15 @@ KIND_LABELS = {
     "enchant_shrine": "Fonte de melhoria", "shrine": "Fonte",
     "door": "Porta", "lever": "Alavanca", "fishing": "Local de pesca",
     "chest": "Baú", "interactive": "Objeto interativo",
+    "loot": "Item", "gold": "Ouro", "breakable": "Objeto destrutível",
+    "waypoint": "Waypoint", "stat_shrine": "Fonte de atributos", "gem_shrine": "Fonte de gemas",
 }
 
 NPC_ROLE_LABELS = {
     "merchant": "Mercador", "gambler": "Mercador (Apostador)",
     "enchanter": "Encantador", "transmuter": "Transmutador",
     "gem_recover": "Recuperador de gemas", "gem_destroy": "Removedor de gemas",
+    "stash": "Baú pessoal", "shared_stash": "Baú compartilhado", "retirement": "Aposentadoria",
 }
 QUEST_STATUS_LABELS = {
     "available": "Missão disponível (!)", "in_progress": "Missão em andamento (?)",
@@ -45,7 +48,11 @@ QUEST_STATUS_LABELS = {
 }
 
 
-def classify_prop(identifier: str, name: str) -> str:
+def classify_prop(identifier: str, name: str, unit_type: int = 0) -> str:
+    typed = {122: "fishing", 157: "enchant_shrine", 158: "stat_shrine", 159: "gem_shrine",
+             171: "waypoint", 173: "portal", 165: "portal", 43: "portal", 34: "gold"}
+    if unit_type in typed:
+        return typed[unit_type]
     # The internal NAME is independent of translations; DISPLAYNAME is a fallback.
     text = unicodedata.normalize("NFKD", f"{identifier} {name}").encode("ascii", "ignore").decode().upper()
     rules = (
@@ -77,6 +84,8 @@ class WorldEntity:
     identifier: str = ""
     npc_role: str = ""
     quest_status: str = ""
+    unit_type: int = 0
+    interaction_method: str = ""
 
     @property
     def label(self) -> str:
@@ -120,6 +129,19 @@ class WorldCamera:
             return None
         px, py = round((x + 1) * width / 2), round((1 - y) * height / 2)
         return (px, py) if 2 <= px < width - 2 and 2 <= py < height - 2 else None
+
+    def ground_direction(self, lx: float, ly: float) -> tuple[float, float]:
+        """Camera-relative stick direction on the Ogre X/Z plane."""
+        if not self.valid or not all(math.isfinite(v) for v in (lx, ly)):
+            return 0., 0.
+        right = (self.view[0], self.view[2])
+        up = (self.view[4], self.view[6])
+        rn, un = math.hypot(*right), math.hypot(*up)
+        if rn < 1e-6 or un < 1e-6:
+            return 0., 0.
+        dx, dz = lx * right[0] / rn - ly * up[0] / un, lx * right[1] / rn - ly * up[1] / un
+        length, magnitude = math.hypot(dx, dz), min(1., math.hypot(lx, ly))
+        return (dx / length * magnitude, dz / length * magnitude) if length > 1e-6 else (0., 0.)
 
 
 @dataclass(frozen=True, slots=True)

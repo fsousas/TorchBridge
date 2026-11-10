@@ -37,7 +37,8 @@ bool strict_world = false, strict_warps = false, was_moving = false;
 uintptr_t highlighted_object = 0, highlight_level = 0, authorized_target = 0;
 uintptr_t authorized_player = 0, authorized_level = 0;
 ULONGLONG authorized_until = 0, ordered_at = 0;
-uint32_t last_action = 0, scope = 0;
+uint32_t scope = 0;
+ActionLatch actions;
 float last_dx = 0, last_dz = 0;
 Reply status{};
 
@@ -129,6 +130,7 @@ using ModeFn = void(__thiscall*)(void*, int);
 using PickupFn = void(__thiscall*)(void*, float, void*);
 using HighlightFn = void(__thiscall*)(void*, bool);
 using IsaFn = bool(__thiscall*)(void*, int);
+using PositionFn = float*(__thiscall*)(void*, float*, int);
 using UpdateFn = void(__fastcall*)(void*, void*, uint32_t, uint32_t, float);
 using WarpFn = void(__fastcall*)(void*, void*);
 using InteractFn = uint32_t(__fastcall*)(void*, void*, void*);
@@ -137,7 +139,9 @@ MoveFn move_to = nullptr;
 TargetFn original_target = nullptr, original_item = nullptr;
 UpdateFn original_update = nullptr;
 WarpFn original_warp = nullptr;
+InteractFn original_activate = nullptr;
 IsaFn is_a = nullptr;
+PositionFn get_position = nullptr;
 std::array<InteractFn, 64> original_interacts{};
 std::unordered_map<uintptr_t, size_t> interact_hooks;
 
@@ -175,18 +179,35 @@ void __fastcall warp_hook(void* self, void* edx) {
     if (strict_warps && !scope) { ++status.blocked_warps; return; }
     original_warp(self, edx);
 }
+uint32_t __fastcall activate_hook(void* self, void* edx, void* user) {
+    const auto address = reinterpret_cast<uintptr_t>(self);
+    // Logic volumes can call Activate directly, bypassing Interact. Protect
+    // usable world props at this boundary too; leave hidden/non-usable
+    // environment mechanics and enemy scripts to the original game.
+    if (strict_world && !scope && field<uint8_t>(address, 0x6E) &&
+        field<uint8_t>(address, 0x161) && field<uint8_t>(address, 0x19C) &&
+        !field<uint8_t>(address, 0x19D)) {
+        ++status.blocked_interactions;
+        return 0;
+    }
+    return original_activate(self, edx, user);
+}
 template<size_t N> uint32_t __fastcall interact_hook(void* self, void* edx, void* user) {
     const auto address = reinterpret_cast<uintptr_t>(self);
     const bool local = reinterpret_cast<uintptr_t>(user) == scene.player;
     const bool allowed = local && authorized(address);
-    if (strict_world && local && !allowed) {
+    const bool anonymous_world_use = !user && field<uint8_t>(address, 0x6E) &&
+        field<uint8_t>(address, 0x161);
+    if (strict_world && !scope && (local || anonymous_world_use) &&
+        !allowed && !(class_info(address).mask & breakable)) {
         ++status.blocked_interactions;
         return 0;
     }
-    if (allowed) ++scope;
+    const bool dispatch_scope = allowed || (local && !strict_world);
+    if (dispatch_scope) ++scope;
     const auto result = original_interacts[N](self, edx, user);
+    if (dispatch_scope) --scope;
     if (allowed) {
-        --scope;
         status.executed = static_cast<uint32_t>(address);
         status.action_result = accepted;
         authorized_target = 0; // One dispatch per physical button press.
@@ -197,27 +218,46 @@ template<size_t... N> constexpr auto dispatch_table(std::index_sequence<N...>) {
     return std::array<InteractFn, sizeof...(N)>{&interact_hook<N>...};
 }
 constexpr auto dispatches = dispatch_table(std::make_index_sequence<64>{});
-bool guard_interaction(uintptr_t object) {
-    const auto address = field<uint32_t>(field<uint32_t>(object), 0x13C);
+bool register_interaction(uintptr_t address) {
     if (!code(address)) return false;
     if (interact_hooks.find(address) != interact_hooks.end()) return true;
     const auto n = interact_hooks.size();
     if (n >= dispatches.size()) return false;
     if (MH_CreateHook(reinterpret_cast<void*>(address), reinterpret_cast<void*>(dispatches[n]),
-                      reinterpret_cast<void**>(&original_interacts[n])) != MH_OK ||
-        MH_EnableHook(reinterpret_cast<void*>(address)) != MH_OK) return false;
+                      reinterpret_cast<void**>(&original_interacts[n])) != MH_OK) return false;
     interact_hooks.emplace(address, n);
     return true;
 }
-bool position(uintptr_t p, Candidate& out) {
-    uintptr_t source = p + 0x70;
-    if (field<uint32_t>(p, 0x50)) {
-        const auto node = field<uint32_t>(p, 0x58);
-        if (!node || field<uint8_t>(node, 0xA0)) return false;
-        source = node + 0x10C;
+bool guard_interaction(uintptr_t object) {
+    const auto address = field<uint32_t>(field<uint32_t>(object), 0x13C);
+    return interact_hooks.find(address) != interact_hooks.end();
+}
+bool register_item_dispatches() {
+    const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+    const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(image + dos->e_lfanew);
+    const auto sections = IMAGE_FIRST_SECTION(nt);
+    for (unsigned s = 0; s < nt->FileHeader.NumberOfSections; ++s) {
+        if (std::memcmp(sections[s].Name, ".rdata", 6)) continue;
+        const auto first = image + sections[s].VirtualAddress;
+        const auto end = first + sections[s].Misc.VirtualSize;
+        for (auto vt = first + 4; vt + 0x140 < end; vt += 4) {
+            const auto col = field<uint32_t>(vt - 4);
+            if (col < first || col + 20 >= end || field<uint32_t>(col) ||
+                field<uint32_t>(col, 4) || field<uint32_t>(col, 8)) continue;
+            // A stack-local vtable value lets the normal RTTI reader inspect
+            // the class without constructing or touching a live game object.
+            const uint32_t object = static_cast<uint32_t>(vt);
+            if (class_info(reinterpret_cast<uintptr_t>(&object)).mask & item)
+                if (!register_interaction(field<uint32_t>(vt, 0x13C))) return false;
+        }
     }
-    float xyz[3];
-    if (!read_raw(source, xyz, sizeof xyz)) return false;
+    return !interact_hooks.empty();
+}
+bool position(uintptr_t p, Candidate& out) {
+    // The game thread may safely refresh a dirty derived scene transform.
+    // External telemetry must not do that, so its read-only reader can lag.
+    float xyz[3]{};
+    get_position(reinterpret_cast<void*>(p), xyz, 1);
     out.x = xyz[0]; out.y = xyz[1]; out.z = xyz[2];
     return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z) &&
         std::fabs(out.x) < 1e6f && std::fabs(out.y) < 1e6f && std::fabs(out.z) < 1e6f;
@@ -253,7 +293,8 @@ bool list(uint32_t offset, std::vector<Candidate>& candidates, std::unordered_se
             if (!guard_interaction(p)) return false;
             candidate.type = 2;
         }
-        if (position(p, candidate)) candidates.push_back(candidate);
+        if (!position(p, candidate)) return false;
+        candidates.push_back(candidate);
     }
     return true;
 }
@@ -322,9 +363,11 @@ void use(const Candidate& candidate, ULONGLONG now) {
 }
 void frame() {
     ++status.frames;
-    Command command{};
-    ULONGLONG received = 0;
-    uint32_t generation = current_generation;
+    // A contended network publication must not manufacture a neutral frame.
+    // Keep the last command; its original receive time still expires normally.
+    static Command command{};
+    static ULONGLONG received = 0;
+    static uint32_t generation = 0;
     if (TryAcquireSRWLockShared(&channel_lock)) {
         command = latest; received = received_at; generation = connection_generation;
         ReleaseSRWLockShared(&channel_lock);
@@ -332,8 +375,9 @@ void frame() {
     const auto now = GetTickCount64();
     if (generation != current_generation) {
         current_generation = generation;
-        last_action = 0; authorized_target = 0;
+        authorized_target = 0;
     }
+    const bool fresh_action = actions.consume(generation, command.action);
     status.sequence = command.sequence;
     status.lease_age = static_cast<uint32_t>(std::min<ULONGLONG>(now - received, UINT32_MAX));
     const auto game = field<uint32_t>(game_global);
@@ -341,23 +385,48 @@ void frame() {
     scene.player = field<uint32_t>(scene.client, 0x2C);
     scene.level = field<uint32_t>(scene.client, 0x38);
     scene.ui = field<uint32_t>(scene.client, 0x3C);
-    std::vector<Candidate> candidates;
-    std::unordered_set<uintptr_t> objects;
-    bool roster_ok = scene.level && list(0x5C, candidates, objects) && list(0x68, candidates, objects);
-    status.flags = ready | (roster_ok ? complete : 0u);
-    status.count = static_cast<uint32_t>(candidates.size());
-    status.selected = 0;
     const bool live = received && now - received <= 200 && command.flags & active;
     const bool same = scene.player && scene.level && scene.player == command.player &&
         scene.level == command.level && (class_info(scene.player).mask & player);
     const bool focus = focused();
+    const bool menus = menu_open();
+    const bool inspect_world = live && same && focus && !menus && command.flags & direct;
+    std::vector<Candidate> candidates;
+    std::unordered_set<uintptr_t> objects;
+    bool roster_ok = inspect_world && scene.level &&
+        list(0x5C, candidates, objects) && list(0x68, candidates, objects);
+    if (!inspect_world && highlighted_object && highlight_level == scene.level) {
+        // Only collect membership for a safe highlight release; never patch
+        // dispatches or interpret positions while a level/menu is loading.
+        for (const auto offset : {0x5Cu, 0x68u}) {
+            const auto container = field<uint32_t>(scene.level, offset);
+            auto node = field<uint32_t>(container);
+            std::unordered_set<uintptr_t> seen;
+            while (node && seen.size() < 4096 && seen.emplace(node).second) {
+                objects.emplace(field<uint32_t>(node));
+                node = field<uint32_t>(node, 4);
+            }
+        }
+    }
+    status.flags = ready | (roster_ok ? complete : 0u);
+    status.count = static_cast<uint32_t>(candidates.size());
+    status.selected = 0;
     if (live && focus && (same || !(command.flags & direct)))
-        strict_world = (command.flags & direct) != 0;
+        strict_world = (command.flags & direct) != 0 && !menus;
     if (strict_world) { strict_warps = true; status.flags |= protected_world; }
-    if (!live || !same || !focus || menu_open() || !roster_ok || !(command.flags & direct)) {
-        stop(); authorized_target = 0; highlight(0, objects);
+    if (!inspect_world || !roster_ok) {
+        stop();
+        if (authorized_target && (!live || !same || !focus) &&
+            scene.player == authorized_player && scene.level == authorized_level) {
+            original_target(reinterpret_cast<void*>(scene.player), nullptr);
+            original_item(reinterpret_cast<void*>(scene.player), nullptr);
+            stop_path(reinterpret_cast<void*>(scene.player));
+        }
+        authorized_target = 0;
+        if (!live) strict_world = false; // Mouse play remains possible after the app closes.
+        highlight(0, objects);
         status.reason = !live ? no_session : !focus ? no_focus : !same ? wrong_scene :
-            !roster_ok ? incomplete : menu_open() ? menu : idle;
+            menus ? menu : !(command.flags & direct) ? idle : !roster_ok ? incomplete : idle;
     } else {
         Candidate hero{};
         const bool have_position = position(scene.player, hero);
@@ -375,10 +444,9 @@ void frame() {
             original_item(reinterpret_cast<void*>(scene.player), nullptr);
             stop_path(reinterpret_cast<void*>(scene.player));
         }
-        const bool action = command.action && newer(command.action, last_action);
-        if (action) {
-            last_action = command.action;
-            if (selected && may_interact && !locked()) use(*selected, now);
+        if (fresh_action) {
+            if (selected && may_interact && !locked() && recent_action(command, now-received))
+                use(*selected, now);
             else { stop(); status.reason = no_target; status.action_result = unavailable; }
         } else if (locked()) {
             // The skill may now own this path (dash/charge). Do not stop it.
@@ -411,7 +479,35 @@ void frame() {
         ReleaseSRWLockExclusive(&channel_lock);
     }
 }
+void cancel_before_update(void* self) {
+    if (!was_moving && !authorized_target) return;
+    Command command{};
+    ULONGLONG received = 0;
+    if (!TryAcquireSRWLockShared(&channel_lock)) return;
+    command = latest; received = received_at;
+    ReleaseSRWLockShared(&channel_lock);
+    const auto now = GetTickCount64();
+    const auto game = field<uint32_t>(game_global), client = field<uint32_t>(game, 0x64);
+    const auto p = field<uint32_t>(client, 0x2C), level = field<uint32_t>(client, 0x38);
+    if (reinterpret_cast<uintptr_t>(self) != p) return;
+    const bool cancelled = !received || now-received > 200 || !focused() ||
+        !(command.flags & active) || !(command.flags & direct) ||
+        command.player != p || command.level != level ||
+        (authorized_target && now > authorized_until);
+    if (cancelled) {
+        // Cancel before original AI can complete an old approach/talk/use.
+        if (authorized_target && p == authorized_player && level == authorized_level) {
+            original_target(self, nullptr);
+            original_item(self, nullptr);
+            stop_path(self);
+        } else if (was_moving) {
+            stop_path(self);
+        }
+        was_moving = false; authorized_target = 0;
+    }
+}
 void __fastcall update_hook(void* self, void* edx, uint32_t a, uint32_t b, float dt) {
+    cancel_before_update(self);
     original_update(self, edx, a, b, dt);
     const auto game = field<uint32_t>(game_global), client = field<uint32_t>(game, 0x64);
     if (reinterpret_cast<uintptr_t>(self) == field<uint32_t>(client, 0x2C)) frame();
@@ -430,15 +526,28 @@ bool initialize() {
     const bool gog = nt->FileHeader.TimeDateStamp == 0x4FFC6815;
     if (!steam && !gog) return false;
     game_global = image + (steam ? 0x7F0E0C : 0x81AD64);
+    // Steam's startup unpacker/constructors must finish before executable code
+    // is patched. Installing from the loader's early DLL initialization races
+    // that startup and can leave the game waiting in its splash screen.
+    bool constructed = false;
+    for (unsigned attempt = 0; attempt < 3600; ++attempt) {
+        const auto game = field<uint32_t>(game_global), client = field<uint32_t>(game, 0x64);
+        if (client && field<uint32_t>(client, 0x3C)) { constructed = true; break; }
+        Sleep(25);
+    }
+    if (!constructed) return false;
     const auto player_vt = find_vtable("CPlayer"), warper_vt = find_vtable("CWarper");
     if (!player_vt || !warper_vt) return false;
     const auto at = [](uint32_t preferred) { return image + preferred - 0x400000; };
     const auto destination = at(steam ? 0x492AD0 : 0x494B30);
     const auto stopping = at(steam ? 0x484360 : 0x486150);
+    const auto activation = at(steam ? 0x4DE6C0 : 0x4E1180);
     const uint8_t pathfinder[] = {0x0C,0x02,0,0}, holding[] = {0x0A,0x02,0,0};
     const uint8_t moving_field[] = {0x08,0x02,0,0};
     if (!contains(destination, 160, pathfinder, 4) || !contains(destination, 160, holding, 4) ||
         !contains(stopping, 48, moving_field, 4)) return false;
+    const uint8_t interactable_field[] = {0x9C,0x01,0,0};
+    if (!contains(activation, 160, interactable_field, 4)) return false;
     // The warper action follows its scalar deleting destructor. Verify the
     // client-list access before using this build-dependent boundary.
     const auto warp = field<uint32_t>(warper_vt) + 0x20;
@@ -446,6 +555,7 @@ bool initialize() {
     if (!contains(warp, 160, clients, 4)) return false;
     move_to = reinterpret_cast<MoveFn>(destination);
     is_a = reinterpret_cast<IsaFn>(at(steam ? 0x47EAF0 : 0x480760));
+    get_position = reinterpret_cast<PositionFn>(at(steam ? 0x50E3F0 : 0x510EB0));
     stop_path = reinterpret_cast<VoidFn>(stopping);
     if (MH_Initialize() != MH_OK) return false;
     if (!hook(field<uint32_t>(player_vt, 0xFC), reinterpret_cast<void*>(&update_hook),
@@ -454,7 +564,9 @@ bool initialize() {
               reinterpret_cast<void**>(&original_target)) ||
         !hook(at(steam ? 0x492A50 : 0x494AB0), reinterpret_cast<void*>(&item_hook),
               reinterpret_cast<void**>(&original_item)) ||
-        !hook(warp, reinterpret_cast<void*>(&warp_hook), reinterpret_cast<void**>(&original_warp))) {
+        !hook(activation, reinterpret_cast<void*>(&activate_hook), reinterpret_cast<void**>(&original_activate)) ||
+        !hook(warp, reinterpret_cast<void*>(&warp_hook), reinterpret_cast<void**>(&original_warp)) ||
+        !register_item_dispatches()) {
         MH_Uninitialize(); return false;
     }
     std::memcpy(status.magic, magic, 8); status.version = version; status.flags = ready;
@@ -490,7 +602,8 @@ DWORD WINAPI serve(void*) {
         setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof timeout);
         BOOL enabled = TRUE;
         setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&enabled), sizeof enabled);
-        size_t have = 0; Command incoming{}; uint32_t sequence = 0; bool seen = false;
+        size_t have = 0; Command incoming{}; uint32_t sequence = 0;
+        bool seen = false, session_published = false;
         while (true) {
             const auto got = recv(client, reinterpret_cast<char*>(&incoming) + have,
                                   static_cast<int>(sizeof incoming - have), 0);
@@ -500,12 +613,26 @@ DWORD WINAPI serve(void*) {
             have = 0;
             if (!valid(incoming, endpoint.token) || (seen && !newer(incoming.sequence, sequence))) break;
             sequence = incoming.sequence;
+            seen = true;
+            // Drain to the newest complete frame before publishing. An EOF
+            // behind queued input cancels the connection before old input can
+            // execute when the process resumes after a long OS/game pause.
+            u_long pending = 0;
+            if (ioctlsocket(client, FIONREAD, &pending)) break;
+            if (pending) continue;
+            fd_set readable;
+            FD_ZERO(&readable); FD_SET(client, &readable);
+            timeval immediate{};
+            if (select(0, &readable, nullptr, nullptr, &immediate) > 0) {
+                char byte;
+                if (recv(client, &byte, 1, MSG_PEEK) <= 0) break;
+            }
             AcquireSRWLockExclusive(&channel_lock);
             // A reconnect does not replay an action. Python action IDs are
             // monotonically increasing within this game process/session.
             latest = incoming; received_at = GetTickCount64();
-            if (!seen) ++connection_generation;
-            seen = true;
+            if (!session_published) ++connection_generation;
+            session_published = true;
             const auto reply = published;
             ReleaseSRWLockExclusive(&channel_lock);
             size_t sent = 0;

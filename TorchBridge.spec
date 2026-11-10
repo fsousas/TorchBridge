@@ -4,6 +4,10 @@ import sys
 
 native_overlay = Path(SPECPATH) / "assets" / "native" / "x86" / "d3d9.dll"
 native_datas = [(str(native_overlay), "assets/native/x86")] if native_overlay.is_file() else []
+native_input = Path(SPECPATH) / "assets/native/x86/winmm.dll"
+if native_input.is_file():
+    native_datas.append((str(native_input), "assets/native/x86"))
+native_datas.append(("native/input/vendor/minhook/LICENSE.txt", "licenses/minhook"))
 
 analysis = Analysis(
     ["launcher.py"],

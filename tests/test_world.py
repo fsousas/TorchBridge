@@ -20,6 +20,21 @@ def world_fixture(now=10.):
 
 
 class WorldTests(unittest.TestCase):
+    def test_internal_interaction_types_do_not_depend_on_translated_names(self):
+        for unit_type, kind in {122:"fishing",157:"enchant_shrine",158:"stat_shrine",
+                                159:"gem_shrine",171:"waypoint",173:"portal",
+                                165:"portal",43:"portal",34:"gold"}.items():
+            self.assertEqual(classify_prop("UNKNOWN", "名前", unit_type), kind)
+
+    def test_camera_relative_directions_preserve_magnitude_and_reject_invalid_basis(self):
+        camera = replace(CAMERA, view=(1,0,0,0,0,.707,.707,0,0,-.707,.707,-5,0,0,0,1))
+        self.assertEqual(camera.ground_direction(1,0),(1.,0.))
+        self.assertEqual(camera.ground_direction(0,-1),(0.,1.))
+        dx,dz=camera.ground_direction(.3,-.4)
+        self.assertAlmostEqual(math.hypot(dx,dz),.5)
+        self.assertEqual(CAMERA.ground_direction(1,0),(0.,0.))
+        self.assertEqual(camera.ground_direction(math.nan,0),(0.,0.))
+
     def test_requested_categories_and_localized_names(self):
         cases = {"PORTAL": "portal", "STAIRSDOWN": "stairs", "STAIRSUP": "stairs",
                  "HEALINGSHRINE": "health_shrine", "MANASHRINE": "mana_shrine",

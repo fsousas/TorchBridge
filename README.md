@@ -10,7 +10,8 @@ O motor, os menus, o teclado virtual, os perfis e os desenhos são compartilhado
 
 No Windows, usa `SendInput`, overlay Qt e um módulo Direct3D 9 opcional para
 fullscreen exclusivo. No Omarchy, usa entrada virtual e overlay Wayland acima do
-fullscreen, sem DLL no jogo. Instalação, Steam/Proton, permissões, matriz de
+fullscreen. O movimento seguro usa um módulo x86 no jogo nos dois sistemas.
+Instalação, Steam/Proton, permissões, matriz de
 funcionalidades e evidências: **[docs/LINUX.md](docs/LINUX.md)**.
 
 ### Começar no Omarchy
@@ -146,8 +147,7 @@ e âncora à direita), mantendo o alvo na área visível.
 
 Em movimento direto, aproxime-se de um NPC, portal, escadas, fonte, porta,
 alavanca ou local de pesca. O overlay indica o alvo mais próximo; pressione
-**D-pad ↑** para interagir. O clique só sai depois que o jogo confirma que o
-cursor está sobre esse alvo. Segurar não repete a ação.
+**D-pad ↑** para interagir. O módulo valida a instância e o alcance no próprio jogo. Segurar não repete a ação.
 
 Ao ativar **Modo de calibração** no ícone TB, o overlay também mostra as
 coordenadas, os marcadores dos elementos do cenário e o raio de interação.
@@ -159,21 +159,20 @@ Windows/Omarchy: [docs/POSICIONAMENTO.md](docs/POSICIONAMENTO.md).
 
 ### Movimento direto
 
-É o modo padrão para exploração e combate. Ao inclinar o analógico esquerdo, o
-TorchBridge coloca o cursor em um raio ao redor do herói e mantém o clique
-esquerdo. Isso aproveita o próprio sistema de `click-to-move` do Torchlight e dá
-sensação de controle direto sem alterar o jogo.
+O analógico esquerdo envia destinos à navegação do próprio jogo e pede parada
+quando volta ao centro. A caminhada não mantém clique esquerdo nem desloca o
+cursor. O alvo interativo mais próximo recebe o highlight nativo, sem precisar
+apontar o mouse, e **D-pad ↑** envia a interação explícita. Segurar não repete.
 
-O analógico direito assume o cursor quando é movimentado. Use o botão A
-(clique esquerdo) para atacar e o X (clique direito) para lançar uma
-habilidade na posição indicada.
+Com o jogo fechado, use **Instalar movimento seguro...** no menu do ícone TB e
+selecione Torchlight.exe. O módulo necessário já acompanha o projeto. No
+Omarchy, reinicie o jogo pelo modo --launch para carregar o módulo e permitir
+leitura de memória. Na calibração aparecem estado, direção, destino, highlight
+e eventuais bloqueios. Instalação, tipos cobertos e detalhes:
+[Movimento seguro](docs/MOVIMENTO-SEGURO.md).
 
-Ao devolver o analógico esquerdo ao centro, o cursor volta automaticamente para
-a âncora do herói, que serve de referência para o próximo `click-to-move`.
-Como a caminhada ainda usa o clique esquerdo, ela pode acionar NPCs e objetos
-sob o cursor. A separação entre andar e interagir está estudada em
-[Proposta de movimento nativo](docs/CONCEITO-MOVIMENTO-CONSOLE.md); ainda não
-foi implementada.
+O analógico direito continua movendo a mira. A/Cruz ataca com Shift no overworld;
+X/Quadrado usa a habilidade do clique direito. Menus suspendem a caminhada.
 
 ### Cursor / menus
 
@@ -239,8 +238,8 @@ Os campos mais úteis são:
 
 - `deadzone`: aumente se o personagem andar sozinho; reduza para maior resposta.
 - `response_curve`: maior deixa o começo do analógico mais preciso.
-- `movement_radius_percent`: raio circular do click-to-move, em fração da altura da janela (mesmo alcance nos eixos x e y). Aumente se o personagem andar pouco.
-- `click_center_fraction`: a que distância da âncora (em fração do raio) o cursor começa ao sair da deadzone. É onde o clique do click-to-move cai. Baixo = clique mais perto do herói (não acerta NPC/inimigo); o cursor depois cresce até o raio cheio conforme o stick é empurrado.
+- `movement_radius_percent`: raio do marcador visual de direção, em fração da altura da janela.
+- `click_center_fraction`: alcance inicial do marcador visual ao sair da deadzone; não gera cliques nem determina o destino nativo.
 - `speed_pixels_per_second`: velocidade do cursor analógico.
 - `bindings`: troca as teclas ligadas aos botões e à roda 1–6.
 - `overlay.enabled`: use `false` para desligar somente os elementos visuais.

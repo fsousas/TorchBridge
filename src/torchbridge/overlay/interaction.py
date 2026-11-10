@@ -86,6 +86,15 @@ class WorldInteractionOverlayMixin:
         player = world.player_position if fresh else None
         cfg = config["interaction"]
         lines = [f"POSICIONAMENTO · {world.level_name or 'Cenário'}"]
+        if snapshot.movement_status:
+            dx, dz = snapshot.movement_direction
+            tx, tz = snapshot.movement_destination
+            lines.extend([
+                f"Movimento seguro: {snapshot.movement_status}",
+                f"Direção: {dx:.2f}, {dz:.2f} · Destino: {tx:.2f}, {tz:.2f}",
+                f"Highlight: {'ativo' if snapshot.native_highlight else 'inativo'} · "
+                f"Bloqueios: {snapshot.blocked_interactions} usos / {snapshot.blocked_warps} transições",
+            ])
         painter.save()
         try:
             painter.setFont(self._font(max(8, round(9 * scale))))

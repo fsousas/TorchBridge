@@ -4,7 +4,7 @@
 - Navegação entre abas com L2/R2 (1 -> 2 -> 3 -> 1 e 1 -> 3 -> 2 -> 1)
 - Navegação pelo grid 3x7 via D-pad com wrap-around horizontal e bloqueio inferior
 - Transição suave entre grid inferior e slots de equipamento superiores
-- Preservação do movimento direto do personagem (Left Stick) e menu radial (LB) quando apenas o inventário está aberto
+- Caminhada suspensa e cursor disponível no inventário; menu radial (LB) preservado
 - Reset ao fechar o inventário
 """
 import unittest
@@ -354,7 +354,7 @@ class InventoryNavigationEngineTests(unittest.TestCase):
         self.engine._handle_inventory_navigation(state_d, self.rect, self.hub_mock)
         self.assertEqual(self.engine._inventory_focus, (1, 7))
 
-    def test_direct_mode_preserved_when_only_inventory_open(self):
+    def test_walking_suspended_when_inventory_open(self):
         # 1. Quando somente o inventário está aberto: effective_mode = direct
         self.engine._mode = "direct"
         self.engine._memory_state = GameMemoryState(
@@ -367,7 +367,8 @@ class InventoryNavigationEngineTests(unittest.TestCase):
         self.engine._move_pointer(state, self.rect, self.config.get(), 0.016)
 
         # Moveu o ponteiro com click-to-move direto
-        self.assertTrue(self.engine._direct_move_active)
+        self.assertFalse(self.engine._direct_move_active)
+        self.engine.injector.move.assert_called()
 
     def test_cursor_mode_activated_when_multiple_menus_open(self):
         # 2. Quando mercador / baú / pet também está aberto: effective_mode = cursor
@@ -384,7 +385,7 @@ class InventoryNavigationEngineTests(unittest.TestCase):
         # Não ativa o click-to-move de direct move
         self.assertFalse(self.engine._direct_move_active)
 
-    def test_direct_mode_preserved_when_only_pet_open(self):
+    def test_walking_suspended_when_pet_open(self):
         # Quando somente o menu de Pet está aberto: effective_mode = direct
         self.engine._mode = "direct"
         self.engine._memory_state = GameMemoryState(
@@ -397,7 +398,8 @@ class InventoryNavigationEngineTests(unittest.TestCase):
         self.engine._move_pointer(state, self.rect, self.config.get(), 0.016)
 
         # Moveu o ponteiro com click-to-move direto
-        self.assertTrue(self.engine._direct_move_active)
+        self.assertFalse(self.engine._direct_move_active)
+        self.engine.injector.move.assert_called()
 
     def test_radial_menu_allowed_when_only_inventory_or_pet_open(self):
         # Permitido durante gameplay normal (sem menus)

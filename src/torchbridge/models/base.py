@@ -121,6 +121,13 @@ class OverlaySnapshot:
     world: WorldSnapshot = field(default_factory=WorldSnapshot)
     interaction_target: WorldEntity | None = None
     interaction_button: str = "dpad_up"
+    movement_status: str = ""
+    native_input_ready: bool = False
+    movement_direction: tuple[float, float] = (0., 0.)
+    movement_destination: tuple[float, float] = (0., 0.)
+    native_highlight: bool = False
+    blocked_interactions: int = 0
+    blocked_warps: int = 0
     char_name_len: int = 0
     title_menu_focus: str | None = None
     char_create_focus: str | None = None

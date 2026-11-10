@@ -47,8 +47,13 @@ jobs:
           python-version: '3.13'
       - run: python scripts/build_fullscreen.py
       - run: ctest --test-dir build/fullscreen -C Release --output-on-failure
+      - name: Preserve shipped input module for its loader test
+        run: |
+          New-Item -ItemType Directory -Force build/input | Out-Null
+          Copy-Item assets/native/x86/winmm.dll build/input/bundled-winmm.dll
       - run: python scripts/build_native_input.py
       - run: ctest --test-dir build/input -C Release --output-on-failure
+      - run: build/input/Release/input_loader_test.exe build/input/bundled-winmm.dll
       - uses: actions/upload-artifact@v6
         with:
           name: torchbridge-input-x86

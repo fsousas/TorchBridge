@@ -1,3 +1,8 @@
+> Movimento seguro (TB-18): o módulo PE32 incluído deve ser instalado pelo menu
+> **Instalar movimento seguro...**, com o jogo fechado. Inicie pelo --launch;
+> o launcher acrescenta o override WinMM somente ao ambiente do jogo. O overlay
+> permanece nativo Wayland. Guia: [MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md).
+
 # TorchBridge no Omarchy Linux — TB-21
 
 O TorchBridge roda como aplicação **Linux nativa**, com Python, SDL/pygame-ce,

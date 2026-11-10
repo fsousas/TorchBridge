@@ -494,6 +494,66 @@ class TorchlightMemoryReader:
                 return buf.raw
         return b""
 
+    def find_export(self, module_name: str, export_name: str) -> int | None:
+        """Read a PE32 export in the selected process, including Wine/ASLR.
+
+        The input endpoint is discovered in this process's memory, not in a
+        shared file or by guessing a Windows PID from the Linux PID.
+        """
+        if not self._handle or not self.pid:
+            return None
+        bases = []
+        if self._linux is not None:
+            from .linux_process import mapped_files
+            try:
+                maps = (self._linux.proc / str(self.pid) / "maps").read_text()
+            except OSError:
+                return None
+            bases = [start for start, _, offset, path in mapped_files(maps)
+                     if offset == 0 and Path(path).name.casefold() == module_name.casefold()]
+        else:
+            modules = (wintypes.HMODULE * 256)()
+            count = wintypes.DWORD()
+            if not psapi.EnumProcessModulesEx(self._handle, modules, ctypes.sizeof(modules),
+                                              ctypes.byref(count), LIST_MODULES_32BIT):
+                return None
+            for base in modules[:min(256, count.value // ctypes.sizeof(wintypes.HMODULE))]:
+                name = ctypes.create_unicode_buffer(32768)
+                if psapi.GetModuleFileNameExW(self._handle, base, name, len(name)):
+                    if Path(name.value).name.casefold() == module_name.casefold():
+                        bases.append(int(base))
+        for base in dict.fromkeys(bases):
+            header = self.read_bytes(base, 64)
+            if len(header) != 64 or header[:2] != b"MZ":
+                continue
+            pe = base + struct.unpack_from("<I", header, 60)[0]
+            optional = self.read_bytes(pe, 128)
+            if (len(optional) != 128 or optional[:4] != b"PE\0\0"
+                    or struct.unpack_from("<H", optional, 24)[0] != 0x10B):
+                continue
+            rva, size = struct.unpack_from("<II", optional, 120)
+            if not rva or size > 1024 * 1024:
+                continue
+            table = self.read_bytes(base + rva, 40)
+            if len(table) != 40:
+                continue
+            functions, names, function_rva, name_rva, ordinal_rva = struct.unpack_from("<5I", table, 20)
+            if not 0 < names <= 2048 or not 0 < functions <= 4096:
+                continue
+            for index in range(names):
+                string_rva = self.read_u32(base + name_rva + index * 4)
+                name = self.read_bytes(base + string_rva, 64) if string_rva else b""
+                if name.split(b"\0", 1)[0] != export_name.encode("ascii"):
+                    continue
+                raw = self.read_bytes(base + ordinal_rva + index * 2, 2)
+                if len(raw) != 2:
+                    continue
+                ordinal = struct.unpack("<H", raw)[0]
+                entry = self.read_u32(base + function_rva + ordinal * 4) if ordinal < functions else None
+                if entry and not rva <= entry < rva + size:
+                    return base + entry
+        return None
+
     def read_u32(self, address: int) -> int | None:
         if not self._handle or not address:
             return None

@@ -23,7 +23,8 @@ MAX_NPC_TAGS = 128
 MAX_TAG_NAMES = 512
 # Vanilla Steam/GOG UNITTYPE ids (UNITTYPES.HIE): classify the role, not the NPC's name.
 NPC_ROLES = {41: "merchant", 127: "gambler", 130: "enchanter", 134: "transmuter",
-             132: "gem_recover", 133: "gem_destroy"}
+             132: "gem_recover", 133: "gem_destroy", 128: "stash", 170: "shared_stash",
+             175: "retirement"}
 QUEST_TAGS = {"QUEST COMPLETE": "ready_to_turn_in", "QUEST GIVING": "available",
               "QUEST INCOMPLETE": "in_progress", "QUEST PASSIVE": "unavailable"}
 
@@ -46,8 +47,10 @@ class WorldMemoryReader:
 
     def reset(self) -> None:
         self._classes: dict[int, str] = {}
+        self._class_bases: dict[int, frozenset[str]] = {}
         self._tag_names: dict[int, str] = {}
         self._context = None
+        self._entities_complete = True
 
     def _string(self, address: int, header: bytes | None = None) -> str:
         """MSVC 2008 std::wstring: allocator, union[16], size, capacity (28 bytes)."""
@@ -87,7 +90,21 @@ class WorldMemoryReader:
         result = name[4:-2].decode("ascii", errors="replace")
         if len(self._classes) >= MAX_CLASSES:
             self._classes.clear()
+            self._class_bases.clear()
         self._classes[vt] = result
+        bases = {result}
+        hierarchy = self.memory.read_u32(col + 16)
+        count = self.memory.read_u32(hierarchy + 8) if pointer(hierarchy) else 0
+        array = self.memory.read_u32(hierarchy + 12) if pointer(hierarchy) else 0
+        if isinstance(count, int) and 0 < count <= 64 and pointer(array):
+            for i in range(count):
+                descriptor = self.memory.read_u32(array + i * 4)
+                base_td = self.memory.read_u32(descriptor) if pointer(descriptor) else 0
+                base_name = self.memory.read_bytes(base_td + 8, 96) if pointer(base_td) else b""
+                base_name = base_name.split(b"\0", 1)[0]
+                if base_name.startswith(b".?AVC") and base_name.endswith(b"@@"):
+                    bases.add(base_name[4:-2].decode("ascii", errors="replace"))
+        self._class_bases[vt] = frozenset(bases)
         return result
 
     def _position(self, address: int, header: bytes | None = None) -> WorldPosition | None:
@@ -133,7 +150,9 @@ class WorldMemoryReader:
         if address in (player, pet):
             return None
         cls = self._class(address)
-        if cls not in (("CMonster", "CCharacter") if characters else ("CTriggerUnit",)):
+        bases = self._class_bases.get(self.memory.read_u32(address), frozenset({cls}))
+        if not bases.intersection(("CMonster", "CCharacter") if characters else
+                                  ("CItem", "CTriggerUnit", "CEquipment", "CItemGold", "CBreakable")):
             return None
         # Batch the fixed fields: one process read instead of a syscall per flag,
         # coordinate and string header on the 50 Hz path.
@@ -156,18 +175,25 @@ class WorldMemoryReader:
             quest_status = self._npc_quest_status(raw)
             name = self._string(address + CHARACTER_NAME, raw[CHARACTER_NAME:CHARACTER_NAME + 28])
         else:
-            # Ordinary loot, gold and breakables are deliberately outside the interaction roster.
             if raw[0x19C] != 1 or raw[0x19D] != 0:
                 return None
             name = self._string(address + ITEM_NAME, raw[ITEM_NAME:ITEM_NAME + 28])
             kind = "interactive"
         pos = self._position(address, raw)
         if pos is None:
+            self._entities_complete = False
             return None
         identifier = self._string(address + OBJECT_NAME, raw[OBJECT_NAME:OBJECT_NAME + 28])
+        unit_type = struct.unpack_from("<I", raw, 0x174)[0]
         if not characters:
-            kind = classify_prop(identifier, name)
-        return WorldEntity(address, kind, name or identifier, pos, identifier, npc_role, quest_status)
+            if "CBreakable" in bases:
+                kind = "breakable"
+            elif not bases.intersection(("CTriggerUnit",)):
+                kind = "gold" if cls == "CItemGold" or unit_type == 34 else "loot"
+            else:
+                kind = classify_prop(identifier, name, unit_type)
+        return WorldEntity(address, kind, name or identifier, pos, identifier, npc_role, quest_status,
+                           unit_type, "talk" if characters else "item")
 
     def _npc_quest_status(self, raw: bytes) -> str:
         """Read the same active/pending tag templates CBaseUnit::HasTag checks.
@@ -244,6 +270,7 @@ class WorldMemoryReader:
         characters, chars_ok = self._list(level, LEVEL_CHARACTERS, budget)
         props, props_ok = self._list(level, LEVEL_ITEMS, budget)
         entities = {}
+        self._entities_complete = True
         for addresses, is_character in ((characters, True), (props, False)):
             for address in addresses:
                 entity = self._entity(address, is_character, player, pet)
@@ -253,7 +280,7 @@ class WorldMemoryReader:
         if mem.read_u32(client + 0x38) != level or mem.read_u32(client + 0x2C) != player:
             self.reset()
             return WorldSnapshot(status="Transição de cenário")
-        complete = chars_ok and props_ok
+        complete = chars_ok and props_ok and self._entities_complete
         return WorldSnapshot(level, self._string(level + LEVEL_NAME), player, position,
                              tuple(entities.values()), self._camera(client), now, complete,
                              "Disponível" if complete else "Lista do cenário incompleta")
