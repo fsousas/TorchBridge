@@ -44,7 +44,8 @@ class NativeInputClient:
     def __init__(self):
         self.socket = None
         self.status = NativeInputStatus()
-        self.message = "Instale o movimento seguro e reinicie o jogo"
+        self.message = "Aguardando conexão com Torchlight"
+        self._preparation = None
         self._context = None
         self._endpoint_address = None
         self._token = bytes(16)
@@ -89,19 +90,39 @@ class NativeInputClient:
             self._endpoint_address = None
             self._retry_at = 0.
             self._action = 0
+            self._preparation = None
         if self.socket is not None or now < self._retry_at or not memory.pid:
             return
         self._retry_at = now + .5
         try:
             address = self._endpoint_address or memory.find_export("winmm.dll", "TorchBridgeInputEndpoint")
             if address is None:
-                self.message = "Instale o movimento seguro e reinicie o jogo"
+                exe = getattr(memory, "_exe_path", "")
+                if exe:
+                    from .game_setup import prepare_async
+                    if self._preparation is None:
+                        self._preparation = prepare_async(exe=exe)
+                    if not self._preparation.done():
+                        self.message = "Preparando os controles do Torchlight"
+                    else:
+                        try:
+                            self._preparation.result()
+                        except Exception as error:
+                            self.message = str(error)
+                        else:
+                            self.message = "Reinicie o Torchlight para ativar os controles"
+                else:
+                    self.message = "Aguardando conexão com Torchlight"
                 return
             raw = memory.read_bytes(address, ENDPOINT.size)
             if len(raw) != ENDPOINT.size:
                 return
             magic, version, port, token, pid, image_base, capabilities, error = ENDPOINT.unpack(raw)
-            if magic != MAGIC or version != VERSION or image_base != context[1]:
+            if magic != MAGIC:
+                self.message = "Aguardando inicialização do Torchlight"
+                return
+            if version != VERSION or image_base != context[1]:
+                self.message = "Módulo de controles incompatível; repare a integração e reinicie o jogo"
                 return
             self._endpoint_address = address
             if error:

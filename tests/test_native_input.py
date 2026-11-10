@@ -5,6 +5,8 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import Future
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 from torchbridge.native_input import (NativeInputClient, MAGIC, VERSION, ENDPOINT, COMMAND,
@@ -175,6 +177,28 @@ class LoopbackInputTests(unittest.TestCase):
         self.assertIsNone(self.client.socket)
         self.assertFalse(self.client.ready)
 
+    def test_missing_loaded_module_is_prepared_once_and_requests_restart(self):
+        self.memory.find_export=lambda *_:None
+        self.memory._exe_path="/games/Torchlight.exe"
+        future=Future()
+        with patch("torchbridge.game_setup.prepare_async",return_value=future) as prepare:
+            self.client.connect(self.memory,10)
+            self.assertIn("Preparando",self.client.message)
+            future.set_result([Path(self.memory._exe_path)])
+            self.client.connect(self.memory,11)
+            self.client.connect(self.memory,12)
+        prepare.assert_called_once_with(exe=self.memory._exe_path)
+        self.assertIn("Reinicie o Torchlight",self.client.message)
+        self.assertNotIn("Instale",self.client.message)
+
+    def test_failed_preparation_reports_the_actual_conflict(self):
+        self.memory.find_export=lambda *_:None
+        self.memory._exe_path="/games/Torchlight.exe"
+        future=Future();future.set_exception(FileExistsError("Outro módulo usa winmm.dll"))
+        with patch("torchbridge.game_setup.prepare_async",return_value=future):
+            self.client.connect(self.memory,10)
+        self.assertEqual(self.client.message,"Outro módulo usa winmm.dll")
+
 
 class NativeInputInstallationTests(unittest.TestCase):
     def setUp(self):
@@ -206,6 +230,35 @@ class NativeInputInstallationTests(unittest.TestCase):
         target=install(self.game,self.source);target.write_bytes(target.read_bytes()+b"modified")
         with self.assertRaises(ValueError):remove(self.game)
         self.assertTrue(target.exists())
+        with self.assertRaises(ValueError):install(self.game,self.source)
+
+    def test_repeating_installation_keeps_the_existing_managed_module(self):
+        target=install(self.game,self.source)
+        before=(target.stat().st_mtime_ns,(self.root/MANIFEST).read_bytes())
+        self.assertEqual(install(self.game,self.source),target)
+        self.assertEqual((target.stat().st_mtime_ns,(self.root/MANIFEST).read_bytes()),before)
+
+    def test_update_of_an_intact_managed_module_preserves_activation_record(self):
+        import json
+        target=install(self.game,self.source)
+        record=json.loads((self.root/MANIFEST).read_text())
+        record["wine"]={"prefix":"/games/prefix","previous":"builtin"}
+        (self.root/MANIFEST).write_text(json.dumps(record))
+        self.source.write_bytes(self.source.read_bytes()+b"new build")
+        install(self.game,self.source)
+        self.assertEqual(target.read_bytes(),self.source.read_bytes())
+        current=json.loads((self.root/MANIFEST).read_text())
+        self.assertEqual(current["wine"],record["wine"])
+        self.assertNotEqual(current["sha256"],record["sha256"])
+
+    def test_failed_record_update_restores_previous_dll(self):
+        target=install(self.game,self.source)
+        before=target.read_bytes();record=(self.root/MANIFEST).read_bytes()
+        self.source.write_bytes(self.source.read_bytes()+b"new build")
+        with patch("torchbridge.native_input_setup.write_record",side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):install(self.game,self.source)
+        self.assertEqual(target.read_bytes(),before)
+        self.assertEqual((self.root/MANIFEST).read_bytes(),record)
 
     def test_unknown_game_build_is_rejected(self):
         self.game.write_bytes(pe_file())

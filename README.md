@@ -164,10 +164,11 @@ quando volta ao centro. A caminhada não mantém clique esquerdo nem desloca o
 cursor. O alvo interativo mais próximo recebe o highlight nativo, sem precisar
 apontar o mouse, e **D-pad ↑** envia a interação explícita. Segurar não repete.
 
-Com o jogo fechado, use **Instalar movimento seguro...** no menu do ícone TB e
-selecione Torchlight.exe. O módulo necessário já acompanha o projeto. No
-Omarchy, reinicie o jogo pelo modo --launch para carregar o módulo e permitir
-leitura de memória. Na calibração aparecem estado, direção, destino, highlight
+O TorchBridge prepara automaticamente a integração nas instalações Steam/GOG
+reconhecidas. Abra o aplicativo e o jogo normalmente; se o Torchlight já estava
+aberto durante uma atualização, reinicie o jogo uma vez. No Omarchy, a ativação
+fica associada ao Torchlight no Proton e o próprio módulo fornece acesso somente
+de leitura, sem exigir --launch. Na calibração aparecem estado, direção, destino, highlight
 e eventuais bloqueios. Instalação, tipos cobertos e detalhes:
 [Movimento seguro](docs/MOVIMENTO-SEGURO.md).
 

@@ -28,7 +28,8 @@ def main():
         binary = build / "winmm.dll"
         subprocess.run([compiler, "-std=c++17", "-O2", "-Wall", "-Wextra", "-Werror",
                         "-DNOMINMAX", "-DWIN32_LEAN_AND_MEAN", "-shared", "-static",
-                        str(source / "proxy.cpp"), str(source / "runtime.cpp"), *objects,
+                        str(source / "proxy.cpp"), str(source / "runtime.cpp"),
+                        str(source / "linux_memory.cpp"), *objects,
                         str(source / "winmm.def"), "-luser32", "-lws2_32", "-lbcrypt",
                         "-o", str(binary)], check=True)
     else:

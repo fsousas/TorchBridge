@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import sys
@@ -40,13 +41,37 @@ def proxy(folder):
     return next((p for p in folder.iterdir() if p.name.casefold() == "winmm.dll"), None)
 
 
+def installed_record(folder, target):
+    manifest = folder / MANIFEST
+    if target.is_symlink() or manifest.is_symlink():
+        raise ValueError("A integração contém links; nenhum arquivo foi substituído")
+    data = target.read_bytes()
+    validate_module(data)
+    record = json.loads(manifest.read_text(encoding="utf-8"))
+    if (not isinstance(record, dict) or record.get("owner") != "TorchBridge"
+            or record.get("version") != 2
+            or record.get("sha256") != hashlib.sha256(data).hexdigest()):
+        raise ValueError("O módulo foi alterado desde a instalação; nenhum arquivo foi substituído")
+    return record, data
+
+
+def write_record(folder, record):
+    import tempfile
+    fd, filename = tempfile.mkstemp(prefix=".torchbridge-input-", suffix=".tmp", dir=folder)
+    temporary = Path(filename)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump(record, out, indent=2)
+        temporary.replace(folder / MANIFEST)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def install(exe, source=None):
     folder = directory(exe)
     target = proxy(folder)
-    if target is not None:
-        raise FileExistsError(f"Já existe {target.name}. Nenhum módulo foi substituído")
     manifest = folder / MANIFEST
-    if manifest.exists() or manifest.is_symlink():
+    if target is None and (manifest.exists() or manifest.is_symlink()):
         raise FileExistsError("Já existe um registro de instalação do movimento")
     source = Path(source) if source else bundled_dll()
     if not source.is_file():
@@ -54,6 +79,33 @@ def install(exe, source=None):
                                 "ou use uma distribuição que inclua winmm.dll")
     data = source.read_bytes()
     validate_module(data)
+    if target is not None:
+        if not manifest.is_file():
+            raise FileExistsError(f"Outro módulo usa {target.name}. Nenhum arquivo foi substituído")
+        record, previous = installed_record(folder, target)
+        if previous == data:
+            return target
+        # Update only an intact managed installation. A loaded DLL on Windows
+        # cannot be replaced; report the need to close the game in that case.
+        import tempfile
+        fd, filename = tempfile.mkstemp(prefix=".torchbridge-input-", suffix=".dll", dir=folder)
+        temporary = Path(filename)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                out.write(data)
+            try:
+                temporary.replace(target)
+            except PermissionError as error:
+                raise PermissionError("Feche o Torchlight para atualizar os controles") from error
+            record["sha256"] = hashlib.sha256(data).hexdigest()
+            try:
+                write_record(folder, record)
+            except Exception:
+                target.write_bytes(previous)
+                raise
+        finally:
+            temporary.unlink(missing_ok=True)
+        return target
     target = folder / "winmm.dll"
     wrote_binary = wrote_manifest = False
     try:
@@ -78,17 +130,15 @@ def remove(exe):
     target, manifest = proxy(folder), folder / MANIFEST
     if target is None or not manifest.is_file():
         raise FileNotFoundError("Movimento seguro não está instalado nesta pasta")
-    if target.is_symlink() or manifest.is_symlink():
-        raise ValueError("A instalação contém links; nenhum arquivo foi removido")
-    data = target.read_bytes()
-    validate_module(data)
-    record = json.loads(manifest.read_text(encoding="utf-8"))
-    if (not isinstance(record, dict) or record.get("owner") != "TorchBridge"
-            or record.get("version") != 2
-            or record.get("sha256") != hashlib.sha256(data).hexdigest()):
-        raise ValueError("O módulo foi alterado desde a instalação; nenhum arquivo foi removido")
+    record, _ = installed_record(folder, target)
+    from .game_setup import restore_wine_activation
+    restore_wine_activation(exe, record)
     target.unlink()
     manifest.unlink()
+    from .memory_handoff import HOST_FILE, MAGIC
+    host = folder / HOST_FILE
+    if host.is_file() and not host.is_symlink() and host.read_bytes().startswith(MAGIC):
+        host.unlink()
 
 
 def launch_environment(environment):
@@ -109,7 +159,7 @@ def configure_dialog(*, uninstall=False):
     from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
     app = QApplication.instance() or QApplication(sys.argv[:1])
     filename, _ = QFileDialog.getOpenFileName(
-        None, "Feche o jogo e selecione Torchlight.exe", "", "Torchlight (Torchlight.exe)")
+        None, "Selecione Torchlight.exe", "", "Torchlight (Torchlight.exe)")
     if not filename:
         return 0
     try:
@@ -117,11 +167,12 @@ def configure_dialog(*, uninstall=False):
             remove(filename)
             message = "Movimento seguro removido. Reinicie o jogo."
         else:
-            install(filename)
-            message = "Movimento seguro instalado. Reinicie o Torchlight pelo TorchBridge."
+            from .game_setup import prepare
+            prepare(exe=Path(filename))
+            message = "Integração pronta. Se o Torchlight estiver aberto, reinicie o jogo."
         QMessageBox.information(None, "TorchBridge", message)
         return 0
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         QMessageBox.warning(None, "TorchBridge", str(error))
         return 1
 
@@ -135,12 +186,14 @@ def main(argv=None):
         return configure_dialog(uninstall=args.action == "remove")
     try:
         if args.action == "install":
-            print(f"Instalado: {install(args.game)}. Reinicie o jogo.")
+            from .game_setup import prepare
+            prepare(exe=args.game)
+            print("Integração pronta. Se o Torchlight estiver aberto, reinicie o jogo.")
         else:
             remove(args.game)
             print("Movimento seguro removido.")
         return 0
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
         return 1
 

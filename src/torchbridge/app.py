@@ -321,7 +321,7 @@ def main() -> int:
     if os.name == "nt":
         _add_fullscreen_actions(menu)
     from .native_input_setup import configure_dialog as configure_native_input
-    menu.addAction("Instalar movimento seguro...").triggered.connect(
+    menu.addAction("Reparar integração com Torchlight...").triggered.connect(
         lambda _checked=False: configure_native_input())
     menu.addAction("Remover movimento seguro...").triggered.connect(
         lambda _checked=False: configure_native_input(uninstall=True))
@@ -334,7 +334,7 @@ def main() -> int:
     # Aviso inicial da bandeja ao iniciar.
     tray.showMessage(
         "TorchBridge iniciado",
-        "Conecte o controle e abra o Torchlight.",
+        "Preparando a integração com Torchlight...",
         QSystemTrayIcon.MessageIcon.Information,
         2600,
     )
@@ -397,21 +397,41 @@ def main() -> int:
 
     # A thread do motor começa aqui; app.exec() roda até 'Sair'.
     engine.start()
-    if args.launch is not None:
-        import subprocess
+    from .game_setup import prepare_async
+    preparation = prepare_async(args.launch or (), environment=launch_environment)
+    preparation_timer = QTimer(app)
+    preparation_timer.setInterval(100)
+    game_timer = QTimer(app)
+
+    def finish_preparation() -> None:
+        if not preparation.done():
+            return
+        preparation_timer.stop()
         try:
-            # Popen keeps TorchBridge as an ancestor of Proton and the PE process.
-            # Yama's default scope=1 then permits read-only memory access.
-            game = subprocess.Popen(args.launch, env=launch_environment)
-        except OSError as error:
-            logging.exception("Não foi possível iniciar o jogo")
-            print(f"Não foi possível iniciar o jogo: {error}", file=sys.stderr)
-            cleanup()
-            return 2
-        # Reap the launcher without terminating the game if TorchBridge is closed.
-        game_timer = QTimer()
-        game_timer.timeout.connect(game.poll)
-        game_timer.start(1000)
+            preparation.result()
+        except Exception as error:
+            shared.toast(str(error), 8.0)
+            tray.showMessage("TorchBridge", str(error), QSystemTrayIcon.MessageIcon.Warning, 8000)
+        else:
+            tray.showMessage("TorchBridge pronto", "Conecte o controle e abra o Torchlight.",
+                             QSystemTrayIcon.MessageIcon.Information, 2600)
+        if args.launch is not None:
+            import subprocess
+            try:
+                # Prepare before Proton loads the game, preserving the original
+                # command and ancestry required by Yama scope=1.
+                game = subprocess.Popen(args.launch, env=launch_environment)
+            except OSError as error:
+                logging.exception("Não foi possível iniciar o jogo")
+                tray.showMessage("TorchBridge", f"Não foi possível iniciar o jogo: {error}",
+                                 QSystemTrayIcon.MessageIcon.Critical, 8000)
+                app.exit(2)
+                return
+            game_timer.timeout.connect(game.poll)
+            game_timer.start(1000)
+
+    preparation_timer.timeout.connect(finish_preparation)
+    preparation_timer.start()
     # Event loop Qt (bandeja + overlay) até o usuário sair.
     result = app.exec()
     cleanup()

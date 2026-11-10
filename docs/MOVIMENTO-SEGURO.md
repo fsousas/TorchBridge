@@ -10,21 +10,30 @@ O módulo Windows x86 necessário já está incluído em assets/native/x86/winmm
 Ele funciona no Windows e no processo PE32 do jogo sob Proton. Não é necessário
 instalar compilador para usar o aplicativo.
 
-1. Feche o Torchlight.
-2. No menu do ícone TB, escolha **Instalar movimento seguro...** e selecione
-   Torchlight.exe. Também é possível usar o comando abaixo.
-3. Reinicie o jogo. No Omarchy, inicie pelo modo **--launch** do TorchBridge,
-   como descrito em [LINUX.md](LINUX.md). O launcher preserva os overrides Wine
-   existentes e acrescenta winmm=n,b ao ambiente somente desse lançamento.
+Abra o TorchBridge e o jogo normalmente. O aplicativo localiza as instalações
+Steam/GOG reconhecidas, prepara o módulo incluído e ativa sua carga no Proton
+somente para Torchlight.exe. Repetir essa preparação é seguro: uma instalação
+íntegra já existente é reaproveitada, e versões anteriores próprias são atualizadas.
+
+Se o jogo já estava aberto durante uma atualização, reinicie-o uma vez para
+carregar a versão nova. Instalações fora dos locais reconhecidos podem ser
+selecionadas em **Reparar integração com Torchlight...**. O comando equivalente
+para manutenção continua disponível:
 
 ~~~sh
 python -m torchbridge.native_input_setup install "/caminho/Torchlight.exe"
 ~~~
 
-O instalador acrescenta winmm.dll e .torchbridge-input.json. Não altera o arquivo
+O preparador acrescenta winmm.dll e .torchbridge-input.json. No Omarchy também
+publica um registro temporário .torchbridge-input-host, privado ao usuário.
+Não altera o arquivo
 Torchlight.exe, saves ou configurações do desktop. Recusa substituir proxies de
 outros mods. A remoção pelo mesmo menu ou pelo comando abaixo confere o hash da
 instalação antes de remover arquivos.
+
+No Proton, a configuração anterior da carga de WinMM é registrada e restaurada
+na remoção, se o usuário não a tiver alterado depois. Outras DLLs e aplicativos
+do prefixo permanecem com suas configurações originais.
 
 ~~~sh
 python -m torchbridge.native_input_setup remove "/caminho/Torchlight.exe"

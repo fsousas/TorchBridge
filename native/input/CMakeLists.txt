@@ -11,7 +11,7 @@ endif()
 add_library(tb_minhook STATIC vendor/minhook/src/buffer.c vendor/minhook/src/hook.c
     vendor/minhook/src/trampoline.c vendor/minhook/src/hde/hde32.c)
 target_include_directories(tb_minhook PUBLIC vendor/minhook/include)
-add_library(torchbridge_input SHARED proxy.cpp runtime.cpp winmm.def)
+add_library(torchbridge_input SHARED proxy.cpp runtime.cpp linux_memory.cpp winmm.def)
 add_executable(input_loader_test proxy_test.cpp)
 target_compile_features(input_loader_test PRIVATE cxx_std_17)
 add_test(NAME input_loader COMMAND input_loader_test $<TARGET_FILE:torchbridge_input>)

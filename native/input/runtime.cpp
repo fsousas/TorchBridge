@@ -21,6 +21,7 @@ extern "C" __declspec(dllexport) tbinput::Endpoint TorchBridgeInputEndpoint{};
 extern "C" const char* TorchBridgeInputIdentity() {
     return "TorchBridge.NativeInput.v2.x86";
 }
+void tb_start_linux_memory();
 
 namespace {
 using namespace tbinput;
@@ -525,6 +526,7 @@ bool initialize() {
     const bool steam = nt->FileHeader.TimeDateStamp == 0x4B5F7519;
     const bool gog = nt->FileHeader.TimeDateStamp == 0x4FFC6815;
     if (!steam && !gog) return false;
+    tb_start_linux_memory();
     game_global = image + (steam ? 0x7F0E0C : 0x81AD64);
     // Steam's startup unpacker/constructors must finish before executable code
     // is patched. Installing from the loader's early DLL initialization races

@@ -1,7 +1,8 @@
-> Movimento seguro (TB-18): o módulo PE32 incluído deve ser instalado pelo menu
-> **Instalar movimento seguro...**, com o jogo fechado. Inicie pelo --launch;
-> o launcher acrescenta o override WinMM somente ao ambiente do jogo. O overlay
-> permanece nativo Wayland. Guia: [MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md).
+> Movimento seguro (TB-18): a integração é preparada automaticamente ao abrir o
+> TorchBridge. Abra o jogo normalmente; após uma atualização com o jogo aberto,
+> reinicie-o uma vez. O módulo oferece leitura somente de memória por um canal
+> privado, sem exigir --launch ou mudar ptrace_scope. O overlay permanece nativo
+> Wayland. Guia: [MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md).
 
 # TorchBridge no Omarchy Linux — TB-21
 
@@ -51,6 +52,17 @@ perfil, seleção persistente do controle e saída. O menu de instalação de DL
 é exclusivo do Windows; no Linux, a camada Wayland já cobre fullscreen.
 
 ## Steam e leitura de memória
+
+O fluxo padrão é abrir o TorchBridge e o jogo normalmente pelo Steam. A ativação
+de WinMM fica no registro Wine específico de Torchlight.exe. Um socket Unix em
+diretório privado recebe do próprio jogo um descritor O_RDONLY de sua memória.
+SO_PEERCRED identifica o processo emissor; PID, instante de criação, inode e modo
+de abertura são validados antes do uso. O leitor mantém o mesmo acesso por pread,
+sem anexar debugger, pedir privilégios ou alterar a política global do Linux.
+O descritor é fechado quando o processo termina. Não há API de escrita nesse canal.
+
+O modo --launch abaixo continua disponível como alternativa e para prefixos
+externos. Ele não é requisito quando o módulo atual está carregado.
 
 O Linux normalmente usa `kernel.yama.ptrace_scope=1`. Isso permite ler processos
 filhos, mas pode impedir que um programa leia um jogo iniciado separadamente.
