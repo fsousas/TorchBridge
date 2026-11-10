@@ -47,6 +47,13 @@ jobs:
           python-version: '3.13'
       - run: python scripts/build_fullscreen.py
       - run: ctest --test-dir build/fullscreen -C Release --output-on-failure
+      - run: python scripts/build_native_input.py
+      - run: ctest --test-dir build/input -C Release --output-on-failure
+      - uses: actions/upload-artifact@v6
+        with:
+          name: torchbridge-input-x86
+          path: assets/native/x86/winmm.dll
+          if-no-files-found: error
       - uses: actions/upload-artifact@v6
         with:
           name: torchbridge-fullscreen-x86
