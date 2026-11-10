@@ -78,6 +78,7 @@ class LoopbackInputTests(unittest.TestCase):
         try:
             peer,_=self.listener.accept()
             self.peer=peer;peer.settimeout(.2)
+            peer.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
             pending=bytearray()
             while not self.stop.is_set():
                 try:data=peer.recv(4096)
@@ -116,9 +117,11 @@ class LoopbackInputTests(unittest.TestCase):
     def test_action_is_a_sequence_not_a_repeated_button(self):
         self.until(lambda:self.client.ready)
         self.client.interact()
-        self.until(lambda:any(f[-2]==1 for f in self.frames))
-        self.until(lambda:len(self.frames)>=5)
-        self.assertEqual({f[-2] for f in self.frames[1:]},{0,1})
+        self.until(lambda:sum(f[-2]==1 for f in self.frames)>=3)
+        actions=[f[-2] for f in self.frames]
+        self.assertEqual(actions[0],0)
+        self.assertEqual(set(actions),{0,1})
+        self.assertTrue(all(action==1 for action in actions[actions.index(1):]))
         self.assertEqual(self.client._action,1)
 
     def test_invalid_movement_closes_transport_instead_of_sending(self):
@@ -142,9 +145,14 @@ class LoopbackInputTests(unittest.TestCase):
         self.until(lambda:self.client.ready)
         self.stop.set()
         self.thread.join(timeout=1)
-        self.client._reply_at=time.monotonic()-.3
-        self.client._in.clear()
-        self.client.send(flags=ACTIVE,player=0,level=0,now=time.monotonic()+.4)
+        self.assertFalse(self.thread.is_alive())
+        # Replies already in the OS receive queue may still arrive after the
+        # peer stops. Drain them through the client, then let its real deadline
+        # expire instead of assuming that TCP delivered everything immediately.
+        deadline=time.monotonic()+2
+        while self.client.socket is not None and time.monotonic()<deadline:
+            self.client.send(flags=ACTIVE,player=0,level=0)
+            time.sleep(.01)
         self.assertIsNone(self.client.socket)
 
     def test_frozen_game_frames_do_not_report_ready_despite_network_replies(self):
