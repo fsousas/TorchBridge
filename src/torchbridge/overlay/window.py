@@ -477,4 +477,7 @@ class GameOverlayBase(QWidget):
         self._draw_mode_badge(painter, snapshot, scale)
         # Desenhado antes do toast para o aviso temporário cobrir o indicador quando sobreposto.
         self._draw_active_panels(painter, snapshot, scale)
+        # Tela de Boas-Vindas (TB-17) desenhada sobre os menus do jogo
+        if hasattr(self, "_draw_welcome_screen"):
+            self._draw_welcome_screen(painter, snapshot, scale)
         self._draw_toast(painter, snapshot, scale)

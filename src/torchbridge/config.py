@@ -16,6 +16,8 @@ from .mathutils import clamp
 DEFAULT_CONFIG: dict[str, Any] = {
     # Versão do esquema do arquivo; reservada para migrações futuras.
     "version": 1,
+    # Mensagem de boas-vindas / onboarding (TB-17): 1 para exibir no primeiro acesso, 0 após concluído.
+    "show-welcome": 1,
     # Alvo da janela: só envia entrada quando um processo/título destes está em primeiro plano.
     "target": {
         "process_names": ["Torchlight.exe"],
@@ -281,6 +283,16 @@ class ConfigManager:
         # D-pad: nunca mais dispara no overworld — vira "" mesmo em perfil antigo.
         for dpad_key in ("dpad_up", "dpad_right", "dpad_down", "dpad_left"):
             data["bindings"][dpad_key] = ""
+
+        # Mensagem de boas-vindas (TB-17)
+        show_welcome = data.get("show-welcome", DEFAULT_CONFIG.get("show-welcome", 1))
+        if isinstance(show_welcome, bool):
+            data["show-welcome"] = 1 if show_welcome else 0
+        elif isinstance(show_welcome, (int, float)):
+            data["show-welcome"] = 1 if int(show_welcome) != 0 else 0
+        else:
+            data["show-welcome"] = 1
+
         return data
 
     @staticmethod
@@ -391,6 +403,14 @@ class ConfigManager:
         with self._lock:
             data = deepcopy(self._data)
             data["overlay"]["show_calibration"] = bool(enabled)
+            self._write(data)
+        self.reload(force=True)
+
+    # Altera o estado da mensagem de boas-vindas e grava no perfil (TB-17).
+    def set_show_welcome(self, value: int) -> None:
+        with self._lock:
+            data = deepcopy(self._data)
+            data["show-welcome"] = 1 if int(value) != 0 else 0
             self._write(data)
         self.reload(force=True)
 

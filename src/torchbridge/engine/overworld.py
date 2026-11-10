@@ -574,6 +574,20 @@ class OverworldNavigationMixin:
                 self._radial_cancel_lock = raw_selection
                 hub.rumble(0.04, 0.08, 30)
 
+        # TB-17: Botão Norte (Y no Xbox, Triângulo no PS, X no Nintendo) enquanto segura o menu radial
+        # dispara a mensagem de boas-vindas novamente com opção de fechar (can_close=True).
+        north_pressed = state.pressed("y") and not self._previous.pressed("y")
+        if open and north_pressed:
+            self._radial_dismissed = True
+            self._radial_selection = None
+            self._radial_cancel_lock = None
+            self._pet_submenu = False
+            self.shared.update(radial_active=False, radial_selection=None, pet_submenu_open=False)
+            if hasattr(self, "_open_welcome"):
+                self._open_welcome(can_close=True, rect=rect)
+            hub.rumble(0.04, 0.10, 35)
+            return
+
         self.shared.update(
             radial_active=open,
             radial_selection=self._radial_selection if open else None,

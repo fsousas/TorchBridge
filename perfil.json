@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "show-welcome": 1,
   "target": {
     "process_names": [
       "Torchlight.exe"

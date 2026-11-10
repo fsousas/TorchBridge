@@ -8,11 +8,13 @@ from .pet_submenu import PetSubmenuOverlayMixin
 from .keyboard import VirtualKeyboardOverlayMixin, KeyboardInputSurface
 from .shortcut_config import ShortcutConfigOverlayMixin
 from .calibration import CalibrationOverlayMixin
+from .welcome import WelcomeOverlayMixin
 
 log = logging.getLogger(__name__)
 
 
 class GameOverlay(
+    WelcomeOverlayMixin,
     RadialOverlayMixin,
     BottomHudOverlayMixin,
     PetSubmenuOverlayMixin,

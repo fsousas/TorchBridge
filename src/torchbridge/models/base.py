@@ -190,6 +190,12 @@ class OverlaySnapshot:
     shortcut_grid_cols: int = 8
     shortcut_grid_rows: int = 3
     shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
+    # Tela de Boas-Vindas / Onboarding (TB-17)
+    welcome_screen_open: bool = False
+    welcome_screen_page: int = 1
+    welcome_screen_total_pages: int = 9
+    welcome_screen_focus: str = "next"
+    welcome_screen_can_close: bool = False
 
 
 

@@ -188,6 +188,18 @@ class BridgeEngineCore(threading.Thread):
         self._shortcut_grid_cols: int = 8
         self._shortcut_grid_rows: int = 3
         self._shortcut_grid_counts: tuple[int, ...] = (8, 8, 8)
+        # Estado da Tela de Boas-Vindas (TB-17)
+        if hasattr(self, "_init_welcome_state"):
+            self._init_welcome_state()
+        else:
+            self._welcome_open = False
+            self._welcome_page = 1
+            self._welcome_focus = "next"
+            self._welcome_can_close = False
+            self._welcome_first_checked = False
+            self._welcome_close_latched = False
+            self._welcome_close_until = 0.0
+            self._welcome_total_pages = 9
         self._previous_physical_esc: bool = False
         # Toggle interno da sublinha de pet actions (4 quadradinhos sob o slot 'P'): d-pad
         # para BAIXO abre, para CIMA fecha. Desmarca o setor 'P' ou fecha a roda: a sublinha
@@ -910,6 +922,62 @@ class BridgeEngineCore(threading.Thread):
         dt: float,
     ) -> None:
         self._update_trigger_edges(state)
+        # Tela de Boas-Vindas (TB-17) - Bloqueio modal absoluto de comandos para as camadas inferiores
+        if getattr(self, "_welcome_open", False) and not (
+            hasattr(self, "_is_welcome_suppressed") and self._is_welcome_suppressed()
+        ):
+            if hasattr(self, "_handle_welcome_navigation"):
+                self._handle_welcome_navigation(hub, state, rect, cfg, now)
+            return
+
+        # Trava anti-vazamento (Latch) ao fechar a tela de boas-vindas:
+        # Aguarda a liberação física dos botões de fechamento (A, B, Start, clique do mouse)
+        # e respeita um cooldown mínimo para não disparar comandos no jogo/menus (ex: botão Continue na Tela Inicial)
+        if getattr(self, "_welcome_close_latched", False):
+            confirm_btn = "b" if any(n in state.controller_type.lower() for n in ("nintendo", "switch")) else "a"
+            cancel_btn = "a" if any(n in state.controller_type.lower() for n in ("nintendo", "switch")) else "b"
+            controller_held = (
+                state.pressed(confirm_btn)
+                or state.pressed(cancel_btn)
+                or state.pressed("a")
+                or state.pressed("b")
+                or state.pressed("start")
+            )
+            mouse_held = False
+            try:
+                if hasattr(self, "injector") and callable(getattr(self.injector, "key_pressed", None)):
+                    res = self.injector.key_pressed("MOUSE_LEFT")
+                    if isinstance(res, bool):
+                        mouse_held = res
+            except Exception:
+                pass
+
+            still_held = controller_held or mouse_held
+            timeout_passed = (now >= getattr(self, "_welcome_close_until", 0.0))
+
+            if still_held or not timeout_passed:
+                self._release_all()
+                return
+
+            self._welcome_close_latched = False
+            self._release_all()
+            if self._memory_state.is_connected and self._memory_state.state_id == 0:
+                if hasattr(self, "_title_focus") and self._title_focus:
+                    try:
+                        tx, ty = title_menu_button_point(rect, self._title_focus)
+                        self.injector.move(tx, ty)
+                    except Exception:
+                        pass
+            elif self._memory_state.is_connected and self._memory_state.is_in_game:
+                if rect.valid:
+                    try:
+                        cx = rect.left + rect.width // 2
+                        cy = rect.top + rect.height // 2
+                        self.injector.move(cx, cy)
+                    except Exception:
+                        pass
+            return
+
         if self._memory_state.is_connected and self._memory_state.state_id == 1:
             was_open = self._virtual_keyboard_open
             self._handle_char_create_navigation(state, rect, hub)
@@ -1976,6 +2044,21 @@ class BridgeEngineCore(threading.Thread):
 
                         self._active_panels = [left, right]
 
+                # Disparo automático da mensagem de boas-vindas na primeira inicialização (TB-17)
+                # Só dispara quando o jogo atingir a Tela Inicial (menu principal) ou estiver em jogo,
+                # nunca no launcher ou em telas de loading antes do menu principal.
+                if (
+                    game_found
+                    and not getattr(self, "_welcome_first_checked", False)
+                    and hasattr(self, "_is_welcome_allowed_to_show")
+                    and self._is_welcome_allowed_to_show()
+                ):
+                    show_welcome = int(cfg.get("show-welcome", 1))
+                    if show_welcome == 1 and not getattr(self, "_welcome_open", False):
+                        if hasattr(self, "_open_welcome"):
+                            self._open_welcome(can_close=False, rect=rect)
+                    self._welcome_first_checked = True
+
                 is_only_inventory = (self._memory_state.open_menus in (["Inventário"], ["Pet"]))
                 effective_mode = (
                     "blocked"
@@ -2044,6 +2127,14 @@ class BridgeEngineCore(threading.Thread):
                     attr_points_remaining=getattr(self._memory_state, "attr_points_remaining", 0),
                     skill_points_remaining=getattr(self._memory_state, "skill_points_remaining", 0),
                     skill_upgradeable=dict(getattr(self._memory_state, "skill_upgradeable", {})),
+                    welcome_screen_open=(
+                        getattr(self, "_welcome_open", False)
+                        and not (hasattr(self, "_is_welcome_suppressed") and self._is_welcome_suppressed())
+                    ),
+                    welcome_screen_page=getattr(self, "_welcome_page", 1),
+                    welcome_screen_total_pages=getattr(self, "_welcome_total_pages", 9),
+                    welcome_screen_focus=getattr(self, "_welcome_focus", "next"),
+                    welcome_screen_can_close=getattr(self, "_welcome_can_close", False),
                 )
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
