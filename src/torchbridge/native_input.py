@@ -153,6 +153,11 @@ class NativeInputClient:
         if self.socket is None:
             return
         try:
+            # Invalid intent cancels immediately, including while a previous
+            # packet is queued or the send-rate limiter has not elapsed.
+            if (not all(math.isfinite(v) for v in (dx, dz, radius))
+                    or math.hypot(dx, dz) > 1.001 or not .5 <= radius <= 8):
+                raise ValueError("Invalid movement")
             if self._connecting:
                 import select
                 _, writable, errors = select.select([], [self.socket], [self.socket], 0)
@@ -188,9 +193,6 @@ class NativeInputClient:
             if now - (self._reply_at or self._connected_at) > .2:
                 raise OSError("Input module stalled")
             if not self._out and now - self._last_send >= 1 / 120:
-                if (not all(math.isfinite(v) for v in (dx, dz, radius))
-                        or math.hypot(dx, dz) > 1.001 or not .5 <= radius <= 8):
-                    raise ValueError("Invalid movement")
                 self._sequence = (self._sequence + 1) & 0xFFFFFFFF
                 self._out = COMMAND.pack(MAGIC, VERSION, self._sequence, self._token, flags,
                                          player, level, dx, dz, radius, self._action,

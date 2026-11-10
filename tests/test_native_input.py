@@ -128,7 +128,7 @@ class LoopbackInputTests(unittest.TestCase):
 
     def test_invalid_movement_closes_transport_instead_of_sending(self):
         self.until(lambda:self.client.ready)
-        time.sleep(.01)
+        self.client._last_send=time.monotonic()+1
         self.pump(flags=ACTIVE|DIRECT|WALKING,dx=float("nan"))
         self.assertIsNone(self.client.socket)
         self.assertFalse(any(f[7]!=f[7] for f in self.frames))
