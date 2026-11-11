@@ -6,7 +6,8 @@ contextuais. No overworld, A (Xbox/Nintendo) ou Cruz (PlayStation) coleta o item
 no chão selecionado, antes de disparar ataque/habilidade, ou ataca o destrutível
 selecionado mantendo posição, conforme o alcance da arma. D-pad ↑ usa NPCs e
 outros objetos próximos (TB-18).
-D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. A caminhada não gera clique. A interação
+D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. Durante a caminhada,
+o cursor acompanha a mira do analógico sem gerar clique. A interação
 é validada pelo módulo nativo no próprio jogo: [POSICIONAMENTO.md](POSICIONAMENTO.md).
 
 ---

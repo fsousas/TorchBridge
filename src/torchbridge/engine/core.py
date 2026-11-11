@@ -843,18 +843,20 @@ class BridgeEngineCore(threading.Thread):
                 float(movement["anchor_x"]) + anchor_shift, 0.05, 0.95
             )
             anchor_y = rect.top + rect.height * float(movement["anchor_y"])
-            # Anchor for the visual direction marker.
+            # Shared anchor for the aim marker and the system cursor.
             self._last_anchor = (round(anchor_x), round(anchor_y))
             # Raio circular: fração da ALTURA da janela nos dois eixos (área de movimento = círculo
             # ideal, sem ovalizar nas laterais como quando o eixo x usava a largura).
             radius = rect.height * float(movement["movement_radius_percent"])
-            # Direction marker only: this point is never sent to the mouse.
+            # Keep the cursor on the same aim point as the direction marker.
+            # Movement itself remains a separate native navigation command.
             center_frac = float(movement["click_center_fraction"])
             reach = center_frac + (1.0 - center_frac) * lmag
             target_x = round(anchor_x + (lx / max(lmag, 1e-6)) * radius * reach)
             target_y = round(anchor_y + (ly / max(lmag, 1e-6)) * radius * reach)
             target_x = int(clamp(target_x, rect.left + 2, rect.right - 2))
             target_y = int(clamp(target_y, rect.top + 2, rect.bottom - 2))
+            self.injector.move(target_x, target_y)
             aim_local = (target_x - rect.left, target_y - rect.top)
             world = self._memory_state.world
             if world.fresh(time.monotonic()) and world.camera is not None:
@@ -887,7 +889,7 @@ class BridgeEngineCore(threading.Thread):
                 self.injector.move(target_x, target_y)
                 aim_local = (target_x - rect.left, target_y - rect.top)
 
-        # Walking never owns or recenters the system cursor.
+        # A neutral stick leaves the cursor at its last aim point.
         self._direct_move_active = bool(any(self._native_direction) and self.native_input.ready)
 
         # Publica o marcador de mira no overlay (posição relativa à janela).
@@ -1791,11 +1793,12 @@ class BridgeEngineCore(threading.Thread):
             and is_overworld
         )
 
-        # Only an explicit attack may place the aim cursor along the walking
-        # heading. Walking itself never moves it. Right-stick aiming overrides
-        # this heading, and a scene change invalidates the remembered direction.
+        # Walking has already aligned the cursor with the visible aim marker.
+        # After stopping, an explicit attack may use the remembered heading.
+        # Right-stick aiming overrides it; a scene change invalidates it.
         world = self._memory_state.world
-        if (want_shift and self._native_heading is not None and world.camera is not None
+        if (want_shift and not any(self._native_direction)
+                and self._native_heading is not None and world.camera is not None
                 and world.fresh(time.monotonic())
                 and self._native_heading_scene == (world.player_address, world.level_address)):
             hx, hz = self._native_heading

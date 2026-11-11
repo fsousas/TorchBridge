@@ -114,7 +114,7 @@ Detalhes, limites e roteiro: [docs/FULLSCREEN.md](docs/FULLSCREEN.md).
 
 | Controle | Ação no Torchlight |
 | --- | --- |
-| Analógico esquerdo | Movimento direto; mantém o clique na direção escolhida |
+| Analógico esquerdo | Movimento pela navegação nativa; cursor acompanha a mira |
 | Analógico direito | Mira e cursor |
 | A / Cruz (botão de baixo) | Clique esquerdo: atacar, mover, coletar e confirmar |
 | X / Quadrado (botão da esquerda) | Clique direito: habilidade secundária |
@@ -174,8 +174,9 @@ Windows/Omarchy: [docs/POSICIONAMENTO.md](docs/POSICIONAMENTO.md).
 ### Movimento direto
 
 O analógico esquerdo envia destinos à navegação do próprio jogo e pede parada
-quando volta ao centro. A caminhada não mantém clique esquerdo nem desloca o
-cursor. O alvo interativo mais próximo recebe o highlight nativo, sem precisar
+quando volta ao centro. Durante a caminhada, o cursor acompanha a mira indicada
+pelo analógico, sem manter clique esquerdo. Ao soltar o analógico, o cursor fica
+na última posição. O alvo interativo mais próximo recebe o highlight nativo, sem precisar
 apontar o mouse, e **D-pad ↑** envia a interação explícita. Segurar não repete.
 
 O TorchBridge prepara automaticamente a integração nas instalações Steam/GOG
@@ -255,8 +256,8 @@ Os campos mais úteis são:
 
 - `deadzone`: aumente se o personagem andar sozinho; reduza para maior resposta.
 - `response_curve`: maior deixa o começo do analógico mais preciso.
-- `movement_radius_percent`: raio do marcador visual de direção, em fração da altura da janela.
-- `click_center_fraction`: alcance inicial do marcador visual ao sair da deadzone; não gera cliques nem determina o destino nativo.
+- `movement_radius_percent`: raio da mira e do cursor durante a caminhada, em fração da altura da janela.
+- `click_center_fraction`: alcance inicial da mira e do cursor ao sair da deadzone; não gera cliques nem determina o destino nativo.
 - `speed_pixels_per_second`: velocidade do cursor analógico.
 - `bindings`: troca as teclas ligadas aos botões e à roda 1–6.
 - `overlay.enabled`: use `false` para desligar somente os elementos visuais.

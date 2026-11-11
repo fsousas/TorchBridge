@@ -296,7 +296,7 @@ class WorldInteractionTests(unittest.TestCase):
         self.assertEqual(self.native.actions,1)
         self.assertEqual(self.injector.events,[])
 
-    def test_left_stick_only_sends_camera_relative_native_movement(self):
+    def test_left_stick_moves_cursor_with_marker_and_navigates_natively(self):
         world = self.engine._memory_state.world
         camera = WorldCamera((1,0,0,0,0,.707,.707,0,0,-.707,.707,-5,0,0,0,1),
                              world.camera.projection)
@@ -306,10 +306,14 @@ class WorldInteractionTests(unittest.TestCase):
         self.assertTrue(command["flags"] & WALKING)
         self.assertAlmostEqual(command["dx"],1.)
         self.assertAlmostEqual(command["dz"],0.)
-        self.assertEqual(self.injector.events,[])
+        snapshot = self.shared.get()
+        self.assertEqual(self.injector.events, [("move", self.rect.left + snapshot.aim_x,
+                                               self.rect.top + snapshot.aim_y)])
+        events = self.injector.events.copy()
         self.tick(10.1,replace(self.state,buttons=frozenset()))
         self.assertFalse(self.native.commands[-1]["flags"] & WALKING)
-        self.assertEqual(self.injector.events,[])
+        self.assertEqual(self.injector.events,events)
+        self.assertEqual(self.native.actions,0)
 
     def test_action_takes_priority_over_held_walking_stick(self):
         self.tick(state=replace(self.state,lx=1.))
@@ -323,11 +327,31 @@ class WorldInteractionTests(unittest.TestCase):
                            world.camera.projection)
         self.engine._memory_state=replace(self.engine._memory_state,world=replace(world,camera=camera))
         self.tick(state=replace(self.state,lx=1.,buttons=frozenset()))
-        self.assertEqual(self.injector.events,[])
+        self.assertEqual(len(self.injector.moved), 1)
+        self.assertTrue(all(event[0] == "move" for event in self.injector.events))
         self.tick(10.1,replace(self.state,buttons=frozenset({"a"})))
         self.assertTrue(self.injector.moved)
         self.assertIn(("key","SHIFT",True),self.injector.events)
         self.assertIn(("mouse","left",True),self.injector.events)
+
+    def test_attack_with_stick_held_keeps_cursor_on_the_visible_aim(self):
+        world = self.engine._memory_state.world
+        camera = replace(world.camera, view=(1,0,0,0,0,.707,.707,0,0,-.707,.707,-5,0,0,0,1))
+        self.engine._memory_state = replace(self.engine._memory_state, world=replace(world, camera=camera))
+        self.tick(state=replace(self.state, lx=1., buttons=frozenset({"a"})))
+        snapshot = self.shared.get()
+        self.assertEqual(self.injector.moved, [(self.rect.left + snapshot.aim_x,
+                                               self.rect.top + snapshot.aim_y)])
+        self.assertIn(("key", "SHIFT", True), self.injector.events)
+        self.assertIn(("mouse", "left", True), self.injector.events)
+
+    def test_right_stick_aim_takes_priority_over_walking_aim(self):
+        self.tick(state=replace(self.state, lx=1., rx=1., buttons=frozenset()))
+        snapshot = self.shared.get()
+        self.assertEqual(self.injector.moved, [(self.rect.left + snapshot.aim_x,
+                                               self.rect.top + snapshot.aim_y)])
+        self.assertFalse(self.native.commands[-1]["flags"] & WALKING)
+        self.assertTrue(all(event[0] == "move" for event in self.injector.events))
 
     def test_focus_guard_cancels_before_native_command_and_release_closes_channel(self):
         self.engine.injector = InputSession(self.injector,lambda:False)

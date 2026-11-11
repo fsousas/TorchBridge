@@ -116,7 +116,7 @@ class RadialSessionResetTests(unittest.TestCase):
 
 
 class DirectMovementCircleTests(unittest.TestCase):
-    """The direction marker keeps its geometry without moving the system cursor."""
+    """Walking aim and cursor share circular geometry without generating clicks."""
     def test_marker_is_circular_and_never_clicks(self):
         from torchbridge.memory import GameMemoryState
         with tempfile.TemporaryDirectory() as directory:
@@ -132,9 +132,10 @@ class DirectMovementCircleTests(unittest.TestCase):
                 engine._move_pointer(ControllerState(connected=True,lx=dx,ly=dy),rect,cfg,.05)
                 snap = engine.shared.get()
                 self.assertAlmostEqual(((snap.aim_x-ax)**2+(snap.aim_y-ay)**2)**.5,radius,delta=1)
-            self.assertEqual(engine.injector.events,[])
+                self.assertEqual(engine.injector.moved[-1], (snap.aim_x, snap.aim_y))
+            self.assertTrue(all(event[0] == "move" for event in engine.injector.events))
 
-    def test_low_stick_changes_marker_without_moving_cursor(self):
+    def test_low_stick_moves_cursor_with_marker(self):
         from torchbridge.memory import GameMemoryState
         with tempfile.TemporaryDirectory() as directory:
             config = ConfigManager(Path(directory) / "perfil.json")
@@ -146,7 +147,7 @@ class DirectMovementCircleTests(unittest.TestCase):
             snap=engine.shared.get()
             self.assertGreater(snap.aim_x,960)
             self.assertLess(snap.aim_x-960,1080*cfg["movement"]["movement_radius_percent"]*.55)
-            self.assertEqual(engine.injector.events,[])
+            self.assertEqual(engine.injector.events, [("move", snap.aim_x, snap.aim_y)])
 
     def test_releasing_stick_clears_marker_without_repositioning_cursor(self):
         from torchbridge.memory import GameMemoryState
@@ -157,9 +158,42 @@ class DirectMovementCircleTests(unittest.TestCase):
             rect=Rect(0,0,1920,1080)
             engine._move_pointer(ControllerState(connected=True,lx=1),rect,config.get(),.05)
             self.assertIsNotNone(engine.shared.get().aim_x)
+            events = engine.injector.events.copy()
             engine._move_pointer(ControllerState(connected=True),rect,config.get(),.05)
             self.assertIsNone(engine.shared.get().aim_x)
-            self.assertEqual(engine.injector.events,[])
+            self.assertEqual(engine.injector.events, events)
+
+    def test_cursor_matches_marker_with_window_offset_and_edge_clamping(self):
+        from torchbridge.memory import GameMemoryState
+        with tempfile.TemporaryDirectory() as directory:
+            config = ConfigManager(Path(directory) / "perfil.json")
+            engine = BridgeEngine(config, SharedOverlayState())
+            engine.injector = FakeInjector()
+            engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True)
+            cfg = config.get()
+            cfg["movement"].update(anchor_x=.95, anchor_y=.95)
+            rect = Rect(-1500, 120, 1280, 720)
+            engine._move_pointer(ControllerState(connected=True, lx=.7071, ly=.7071), rect, cfg, .05)
+            snap = engine.shared.get()
+            self.assertEqual(engine.injector.moved, [(rect.right - 2, rect.bottom - 2)])
+            self.assertEqual(engine.injector.moved[-1], (rect.left + snap.aim_x, rect.top + snap.aim_y))
+
+    def test_hiding_marker_does_not_disable_cursor_following(self):
+        from torchbridge.memory import GameMemoryState
+        with tempfile.TemporaryDirectory() as directory:
+            config = ConfigManager(Path(directory) / "perfil.json")
+            engine = BridgeEngine(config, SharedOverlayState())
+            engine.injector = FakeInjector()
+            engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True)
+            cfg = config.get()
+            rect = Rect(100, 80, 1920, 1080)
+            state = ControllerState(connected=True, lx=1.)
+            engine._move_pointer(state, rect, cfg, .05)
+            cfg["overlay"]["show_aim_marker"] = False
+            engine._move_pointer(state, rect, cfg, .05)
+            self.assertEqual(engine.injector.moved, [engine.injector.moved[0]] * 2)
+            self.assertIsNone(engine.shared.get().aim_x)
+            self.assertTrue(all(event[0] == "move" for event in engine.injector.events))
 
     def test_right_stick_still_moves_cursor(self):
         with tempfile.TemporaryDirectory() as directory:

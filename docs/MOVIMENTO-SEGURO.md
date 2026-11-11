@@ -1,7 +1,9 @@
 # Movimento seguro e interação explícita — TB-18
 
 O analógico esquerdo usa destinos e parada na navegação do próprio Torchlight.
-Ele não mantém clique esquerdo nem desloca o cursor. A câmera orienta a direção,
+O cursor acompanha a mira do analógico durante a caminhada, sem manter clique
+esquerdo. Ao voltar ao centro, o analógico deixa o cursor na última posição.
+A câmera orienta a direção,
 e o jogo continua responsável por caminhos, obstáculos e habilidades.
 
 ## Ativação
@@ -64,8 +66,10 @@ fullscreen continua independente e opcional.
   Coleta e ataque a destrutíveis selecionados consomem o pressionamento e usam
   comandos nativos. É preciso soltar o botão entre ações: segurá-lo não ataca
   após a coleta nem coleta automaticamente o loot que cair de um destrutível.
-  Um ataque explícito pode posicionar a mira na direção da caminhada; a
-  caminhada sozinha não o faz. O analógico direito continua permitindo mira livre.
+  Durante a caminhada, cursor e marcador de mira usam o mesmo ponto, inclusive
+  ao atacar com A. Após parar, um ataque pode usar a última direção de caminhada.
+  O analógico direito continua permitindo mira livre e tem prioridade sobre
+  a mira da caminhada.
 - Menus suspendem caminhada e highlight. O modo cursor mantém seus cliques
   explícitos; eles não são gerados pela aproximação do personagem.
 
