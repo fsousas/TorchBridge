@@ -820,8 +820,8 @@ bool initialize() {
     const auto fishing_base = relative_call(fishing, 16, fishing_base_call, sizeof fishing_base_call);
     const uint8_t fishing_state[] = {0x83,0xF8,0x21};
     const uint8_t start_fishing[] = {0x6A,0x20};
-    if (!fishing_base || !contains(fishing_base, 80, fishing_state, sizeof fishing_state) ||
-        !contains(fishing_base, 80, start_fishing, sizeof start_fishing)) return false;
+    if (!fishing_base || !contains(fishing_base, 128, fishing_state, sizeof fishing_state) ||
+        !contains(fishing_base, 128, start_fishing, sizeof start_fishing)) return false;
     if (MH_Initialize() != MH_OK) return false;
     if (!hook(field<uint32_t>(player_vt, 0xFC), reinterpret_cast<void*>(&update_hook),
               reinterpret_cast<void**>(&original_update)) ||
