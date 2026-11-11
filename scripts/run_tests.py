@@ -14,6 +14,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+if sys.platform == "win32":
+    # Unlike the Windows QPA plugin, offscreen uses FreeType and does not
+    # discover the Windows font directory. Without it Qt measures placeholder
+    # boxes instead of Segoe UI glyphs, making text/rendering tests misleading.
+    os.environ.setdefault("QT_QPA_FONTDIR", str(Path(os.environ.get("WINDIR") or r"C:\Windows") / "Fonts"))
 
 
 def main() -> int:

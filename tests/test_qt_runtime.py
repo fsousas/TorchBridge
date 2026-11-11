@@ -7,6 +7,25 @@ import unittest
 
 
 class QtRuntimeTests(unittest.TestCase):
+    def test_offscreen_uses_real_proportional_font_metrics(self):
+        code = textwrap.dedent("""
+            from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics
+            from PySide6.QtWidgets import QApplication
+            app = QApplication([])
+            assert QFontDatabase.families(), "Offscreen font database is empty"
+            font = QFont("Segoe UI")
+            font.setPixelSize(13)
+            metrics = QFontMetrics(font)
+            assert metrics.horizontalAdvance("WWW") > metrics.horizontalAdvance("iii"), (
+                "Offscreen is measuring placeholder glyphs", font.toString())
+        """)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_signal_emissions_and_normal_shutdown(self):
         # PYSIDE-3474: PySide6 6.12.0 over-releases singleton references on
         # Python <= 3.11. Assertions inside the suite can pass even though
