@@ -13,7 +13,9 @@ mkdir "$apt_workdir/empty"
 apt_mirror=""
 for candidate in https://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu; do
     if curl --ipv4 --fail --silent --show-error --location \
-        --connect-timeout 5 --max-time 15 "$candidate/dists/noble/InRelease" \
+        --connect-timeout 15 --max-time 30 \
+        --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 90 \
+        "$candidate/dists/noble/InRelease" \
         --output "$apt_workdir/InRelease"; then
         apt_mirror="$candidate"
         break
