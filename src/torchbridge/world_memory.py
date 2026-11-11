@@ -5,6 +5,7 @@ game calls/writes live here. See docs/POSICIONAMENTO.md for layout evidence.
 """
 from __future__ import annotations
 
+import math
 import struct
 from typing import Protocol
 
@@ -146,7 +147,38 @@ class WorldMemoryReader:
                 units.append(unit)
         return units, node == 0  # None (unreadable) is not an empty list.
 
-    def _entity(self, address: int, characters: bool, player: int, pet: int) -> WorldEntity | None:
+    def _native_label_rect(self, raw: bytes, viewport: tuple[float, float]) -> tuple[float, float, float, float] | None:
+        # CItem::Show/HideLabel tracks attachment at +1A4, with the actual
+        # GuiLook/ItemText window at +198. Its cached unclipped screen rectangle
+        # (+360) follows the game's overlap avoidance, zoom and camera movement.
+        # Reading it also observes physical Alt and the HUD toggle/D-pad left.
+        window = struct.unpack_from("<I", raw, 0x198)[0]
+        width, height = viewport
+        if raw[0x1A4] != 1 or not pointer(window) or not width or not height:
+            return None
+        rect = self.memory.read_bytes(window + 0x360, 16)
+        if len(rect) != 16:
+            return None
+        left, top, right, bottom = struct.unpack("<4f", rect)
+        if not (all(math.isfinite(v) for v in (left, top, right, bottom))
+                and 0 <= left < right <= width and 0 <= top < bottom <= height):
+            return None
+        # CEGUI::Window::isVisible(false) includes every parent's visible bit.
+        seen = set()
+        while window:
+            if not pointer(window) or window in seen or len(seen) >= 16:
+                return None
+            seen.add(window)
+            if self.memory.read_u8(window + 0x1A1) != 1:
+                return None
+            parent = self.memory.read_u32(window + 0x80)
+            if parent is None:
+                return None
+            window = parent
+        return left / width, top / height, right / width, bottom / height
+
+    def _entity(self, address: int, characters: bool, player: int, pet: int,
+                viewport: tuple[float, float] = (0., 0.)) -> WorldEntity | None:
         if address in (player, pet):
             return None
         cls = self._class(address)
@@ -192,8 +224,11 @@ class WorldMemoryReader:
                 kind = "gold" if cls == "CItemGold" or unit_type == 34 else "loot"
             else:
                 kind = classify_prop(identifier, name, unit_type)
+        radius = struct.unpack_from("<f", raw, 0x15C)[0] if kind == "fishing" else 0.0
+        label_rect = (self._native_label_rect(raw, viewport)
+                      if kind not in ("npc", "loot", "gold", "breakable") else None)
         return WorldEntity(address, kind, name or identifier, pos, identifier, npc_role, quest_status,
-                           unit_type, "talk" if characters else "item")
+                           unit_type, "talk" if characters else "item", radius, label_rect)
 
     def _npc_quest_status(self, raw: bytes) -> str:
         """Read the same active/pending tag templates CBaseUnit::HasTag checks.
@@ -271,9 +306,14 @@ class WorldMemoryReader:
         props, props_ok = self._list(level, LEVEL_ITEMS, budget)
         entities = {}
         self._entities_complete = True
+        ui = mem.read_u32(client + 0x3C)
+        viewport = mem.read_bytes(ui + 0x13E4, 8) if pointer(ui) else b""
+        viewport = struct.unpack("<2f", viewport) if len(viewport) == 8 else (0., 0.)
+        if not all(math.isfinite(v) and 64 <= v <= 32768 for v in viewport):
+            viewport = (0., 0.)
         for addresses, is_character in ((characters, True), (props, False)):
             for address in addresses:
-                entity = self._entity(address, is_character, player, pet)
+                entity = self._entity(address, is_character, player, pet, viewport)
                 if entity:
                     entities[address] = entity
         # Discard a torn snapshot if a level/player switch happened during traversal.

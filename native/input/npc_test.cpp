@@ -1,7 +1,7 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-// Run the actual game-thread dispatcher against a synthetic NPC/pathfinder.
+// Run the actual game-thread dispatcher against synthetic NPCs/items/pathfinding.
 // No window, controller, mouse event or game installation is needed.
 #include "runtime.cpp"
 #include <cassert>
@@ -12,6 +12,8 @@ namespace {
 ULONGLONG test_now = 10000;
 bool test_focus = true, navigation_available = true, advance_path = true;
 unsigned npc_updates = 0;
+bool collect_immediately = false, collect_next_update = false;
+unsigned pickup_calls = 0;
 std::vector<std::pair<float, float>> destinations;
 DWORD WINAPI test_window(HWND, LPDWORD pid) {
     *pid = test_focus ? GetCurrentProcessId() : 0;
@@ -43,8 +45,31 @@ float* __fastcall test_position(void* self, void*, float* out, int) {
 }
 bool __fastcall test_is_a(void*, void*, int type) { return type == 131; }
 void __fastcall test_highlight(void*, void*, bool) {}
+uint32_t __fastcall test_interact(void*, void*, void*) { return 1; }
+void complete_pickup(void* self) {
+    const auto hero = reinterpret_cast<uintptr_t>(self);
+    const auto item = field<uint32_t>(hero, 0x298);
+    if (item) put<uint8_t>(item, 0x19D, 1);
+    test_item(self, nullptr, nullptr);
+    test_mode(self, nullptr, 0);
+    test_stop(self, nullptr);
+}
+void __fastcall test_pickup(void* self, void*, float, void*) {
+    ++pickup_calls;
+    if (collect_immediately) complete_pickup(self);
+}
+bool __fastcall test_range(void*, void*, bool) { return true; }
+bool __fastcall test_sight(void*, void*, void*, bool) { return true; }
+bool __fastcall test_attack(void* self, void*) {
+    const auto hero = reinterpret_cast<uintptr_t>(self);
+    test_mode(self, nullptr, 3);
+    put<uint32_t>(hero, 0x2D0, hero);
+    put<uint8_t>(hero, 0x20B, 1);
+    return true;
+}
 void __fastcall test_update(void* self, void*, uint32_t, uint32_t, float) {
     const auto hero = reinterpret_cast<uintptr_t>(self);
+    if (field<uint32_t>(hero, 0x284) == 7 && collect_next_update) complete_pickup(self);
     if (field<uint32_t>(hero, 0x284) != 9) return;
     ++npc_updates;
     const auto npc = field<uint32_t>(hero, 0x290);
@@ -75,6 +100,7 @@ struct Fixture {
     Fixture(float distance = 4.49f, float radius = 4.5f) {
         test_now += 10000; test_focus = navigation_available = advance_path = true;
         npc_updates = 0; destinations.clear();
+        collect_immediately = collect_next_update = false; pickup_calls = 0;
         image = 0x10000; image_end = UINT32_MAX; classes.clear();
         const auto hvt = reinterpret_cast<uintptr_t>(hero_vt.data());
         const auto nvt = reinterpret_cast<uintptr_t>(npc_vt.data());
@@ -117,6 +143,23 @@ struct Fixture {
         received_at = test_now;
         frame(); // Prime the connection without replaying a held action.
         assert(status.selected == n);
+    }
+    void as_item(uint32_t type, float distance, float radius = 0) {
+        characters = 0; items = reinterpret_cast<uintptr_t>(node.data());
+        const auto vt = reinterpret_cast<uintptr_t>(npc_vt.data());
+        classes[vt] = {item | (type == 4 ? breakable : type == 3 ? 0u : trigger), "CItem"};
+        npc_vt[0x13C / 4] = reinterpret_cast<uintptr_t>(&test_interact);
+        interact_hooks.emplace(reinterpret_cast<uintptr_t>(&test_interact), 0);
+        hero_vt[0x1B4 / 4] = reinterpret_cast<uintptr_t>(&test_pickup);
+        put<uint8_t>(n, 0x19C, 1);
+        put<float>(n, 0x70, distance); put<float>(n, 0x15C, radius);
+        put<uint32_t>(n, 0x174, type == 5 ? 122 : 0);
+        basic_attack = reinterpret_cast<AttackFn>(&test_attack);
+        attack_in_range = reinterpret_cast<RangeFn>(&test_range);
+        attack_in_sight = reinterpret_cast<SightFn>(&test_sight);
+        latest.flags = active | direct | allow_interaction |
+            (type == 4 ? attack_action : type == 3 ? pickup_action : world_action);
+        frame();
     }
     void press() { ++latest.action; received_at = test_now; frame(); }
     void step(ULONGLONG milliseconds = 250) {
@@ -185,6 +228,47 @@ int main() {
         if (cancelled == 2) put<uint32_t>(reinterpret_cast<uintptr_t>(f.manager.data()), 0xD84, 7);
         f.step(16);
         assert(!authorized_target && !field<uint32_t>(f.h, 0x290) && !field<uint8_t>(f.h, 0x208));
+    }
+    // Selection and the use dispatcher agree on exclusive destructible/fishing
+    // ranges, including the exact circle contact point and the next .01 unit.
+    for (const auto type : {2u, 3u, 4u, 5u}) {
+        Fixture f;
+        const auto limit = type == 4 ? 9.f : type == 5 ? 7.75f : 4.5f;
+        f.as_item(type, limit, 3.25f);
+        assert(status.selected == f.n);
+        put<float>(f.n, 0x70, limit + .01f); f.step(16);
+        assert(!status.selected && (status.flags & complete));
+    }
+    for (bool immediate : {true, false}) {
+        Fixture f; f.as_item(3, 1.f);
+        collect_immediately = immediate;
+        f.press();
+        assert(pickup_calls == 1);
+        if (!immediate) {
+            assert(authorized_target == f.n);
+            collect_next_update = true; f.step(16);
+        }
+        assert(!authorized_target && !field<uint32_t>(f.h, 0x298));
+        f.walk(); assert(status.flags & moving);
+        assert(pickup_calls == 1); // Held/old action cannot collect another item.
+    }
+    {
+        Fixture f; f.as_item(3, 4.49f); f.press();
+        assert(authorized_target == f.n);
+        collect_next_update = true; f.walk();
+        assert(!authorized_target && !field<uint8_t>(f.n, 0x19D));
+        assert(status.flags & moving); // Cancels before the old pickup AI runs.
+    }
+    {
+        Fixture f; f.as_item(4, 8.99f); f.press();
+        assert(!authorized_target && stationary_attack && !pickup_calls);
+        assert(status.executed == f.n && locked());
+        f.walk();
+        assert(status.reason == skill_lock && destinations.empty());
+        put<uint32_t>(f.h, 0x2D0, 0); put<uint8_t>(f.h, 0x20B, 0);
+        f.walk();
+        assert(status.flags & moving); // First free frame, far before 1500 ms.
+        assert(!stationary_attack && !field<uint32_t>(f.h, 0x298));
     }
     assert(MH_DisableHook(MH_ALL_HOOKS) == MH_OK);
     assert(MH_Uninitialize() == MH_OK);

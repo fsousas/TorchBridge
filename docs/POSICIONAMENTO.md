@@ -19,6 +19,13 @@ no chão (`loot`/`gold`) usam **A no Xbox/Nintendo** e **× no PlayStation**, co
 com `dpad-up-*.png`. As seis imagens ficam em `assets/hud/general` e substituem
 somente a indicação do botão; os demais textos permanecem no aviso.
 
+Para objetos do D-pad ↑, exceto NPCs, o nome nativo visível por Alt ou D-pad ←
+substitui o texto do aviso: o overlay desenha somente o ícone à esquerda desse
+tooltip, acompanhando sua posição real. Se o jogo esconder o nome, o aviso
+volta a mostrar ícone, nome e distância. A leitura é feita no próprio objeto e
+na janela CEGUI, incluindo a visibilidade dos pais; não depende de estimar se o
+último D-pad ← ligou ou desligou o Alt. NPCs, coleta e destrutíveis mantêm seus avisos.
+
 A família visual segue `overlay.controller_layout` ou o controle detectado,
 como o restante da HUD. No Nintendo, o A físico é o botão lógico `b` do SDL;
 a coleta o consome antes da habilidade comum. A coleta não envia ataque,
@@ -33,6 +40,20 @@ e recebem um ataque básico mantendo posição. O D-pad não aciona destrutívei
 O módulo cancela o caminho e preserva o estado parado; não entra no estado de
 aproximar/coletar. Alcance da arma, obstáculos e disponibilidade do ataque são
 verificados pelo jogo. Fora de alcance, o personagem permanece parado.
+O raio de seleção é **2 × `interaction.radius`**, exclusivamente para destrutíveis:
+4,5 no perfil produz 9 unidades para esses objetos, mantendo 4,5 para itens,
+NPCs e props comuns. Isso amplia a seleção sem aumentar o alcance da arma.
+
+Fishing holes têm um círculo próprio: usa-se o raio físico do objeto, com
+mínimo de 2,5 e máximo de 8 unidades (inclusive para holes sem colisão).
+A seleção permite interação quando a distância entre os centros é menor ou
+igual à soma desse círculo com `interaction.radius`. Python e DLL usam a mesma
+geometria e conservam o limite de altura de 2,5 unidades entre andares.
+
+Coleta e ataque não retêm a autorização de uso por 1,5 s depois de concluídos.
+O ataque aceito passa a obedecer somente ao bloqueio nativo de habilidade;
+a coleta libera a autorização ao deixar o estado de pickup ou perder o alvo.
+Uma nova direção do analógico também cancela coleta pendente antes da próxima IA.
 
 A caminhada é independente de cliques. O módulo confere novamente jogador,
 cenário, disponibilidade e distância ao executar; projeção, categoria ou
@@ -86,6 +107,8 @@ a visualização de posicionamento, sem precisar habilitar `show_positions`:
   com nome, categoria, coordenadas e distância;
 - contorno do raio de interação: verde para elementos próximos, azul para
   distantes e amarelo para o alvo selecionado; o jogador aparece em rosa;
+- círculo laranja com o dobro do raio para destrutíveis e círculo azul em
+  volta de cada fishing hole;
 - painel com até cinco elementos mais próximos, incluindo os que estão fora
   do raio ou da tela, e aviso quando faltam dados ou a câmera.
 
@@ -214,6 +237,23 @@ alcance em `0x00490180` e visibilidade em `0x0048B060`, antes de atacar.
 O módulo resolve essas chamadas relativas e confere assinaturas, reutilizando
 as verificações sem executar Pickup/MoveTo nem escrever posições ou dano.
 
+O alcance de uso em `0x0048D290` subtrai os raios físicos em `CBaseUnit+0x15C`.
+Fishing holes (UNITTYPE 122) têm seu ramo próprio nessa rotina; a seleção do
+bridge agora leva em conta um círculo em torno do hole antes do uso nativo.
+O pickup de equipamento/ouro em `0x00498CF5` muda o estado para 0 e chama
+`0x004969B0`, sem passar necessariamente pelo hook de `CItem::Interact` que
+liberava a autorização. Esse caminho explica a pausa residual de 1,5 s.
+O ataque estacionário também não precisa de uma autorização de Interact
+depois de aceito: o estado e o bloqueio da animação pertencem ao jogo.
+
+O mesmo executável confirmou `CItem+0x198` como a janela `GuiLook/ItemText`,
+`+0x1A4` como sua ligação visível e `0x0053A490` como o setter do label.
+Show/Hide em `0x004CEF00`/`0x004CEF30` anexam/removem essa janela do pai.
+Em `CEGUIBase.dll`, `Window::getUnclippedPixelRect` (`0x1009EF00`) usa o cache
+`+0x360`; `isVisible(false)` (`0x1009ECF0`) lê `+0x1A1` e percorre pais em
+`+0x80`. O viewport em `CGameUI+0x13E4/+0x13E8` normaliza o retângulo para o
+overlay, sem misturar pixels do jogo, escala Qt ou origem da janela no desktop.
+
 A rotina de conversa do mesmo Steam, virtual `+0x1B8` (`0x00496DF0`), não chama
 MoveTo. Ela espera um caminho já ativo e só avança para diálogo/serviço ao
 alcançar o NPC: a desmontagem mostra os limites de 2 e 2,75 unidades. Com o
@@ -245,6 +285,28 @@ e os ponteiros do processo corrente, incluindo ASLR/relocação do Proton.
 
 ## Validação
 
+Em 11/11/2026 passaram **656 testes Python**, **48 testes de overlay** com
+`QT_SCALE_FACTOR=1.5`, `compileall` e `git diff --check`. As regressões cobrem os
+dez atalhos mantidos pressionados, soltura e nova pressão rápida, troca de LT,
+supressão pela roda/painéis, raios exclusivos, toque entre círculos de pesca,
+leitura de labels nos dois transportes e ícone à esquerda do tooltip nativo.
+Os pontos de hit-test da HUD foram atualizados para o SVG já versionado no
+commit `c6fb046`; o desenho do usuário não foi alterado.
+
+O módulo PE32 foi recompilado e os quatro executáveis de teste passaram sob
+GE-Proton11-12 em prefixo isolado: policy, NPC/itens, interaction e loader.
+O teste da thread real do módulo simula coleta imediata/adiada, cancelamento
+antes da IA, ataque bloqueado pela animação e caminhada no primeiro frame
+livre (16 ms), sem esperar 1,5 s. As verificações de NPC e transições adiadas
+também continuam passando. São testes com objetos de jogo simulados, sem
+homologação desta mudança numa sessão interativa do Torchlight.
+
+DLL instalada e distribuída: SHA-256
+`a75099b9d08cd57d3b7215d3b35121b6c4d91d922b42d5f34fdf1f86a4a04d98`.
+A capacidade `ACTION_RANGES` (512) exige essa atualização antes de conectar,
+evitando que o overlay com os novos alcances converse com a seleção antiga.
+Reiniciar TorchBridge e Torchlight carrega o novo código Python e a DLL.
+
 Comando: `python scripts/run_tests.py`. A suíte cobre o leitor, o controlador
 nativo, o transporte local e o overlay. Os testes novos exercitam os dois
 transportes de leitura (Win32 simulado e Proton simulado), bases diferentes,
@@ -255,8 +317,7 @@ menus/perda de foco. O aviso é renderizado offscreen em várias resoluções e
 escalas e pelo mesmo renderer do fullscreen nativo. O workflow existente executa
 a suíte em Windows/Linux e Python 3.11/3.13.
 
-Também passaram 38 testes de overlay com `QT_SCALE_FACTOR=1.5`, `compileall`
-e `git diff --check`. O wheel Linux foi gerado, instalado em ambiente virtual
+Em validações anteriores, o wheel Linux foi gerado, instalado em ambiente virtual
 isolado fora do checkout e verificado quanto aos imports do motor/overlay,
 carregamento do transporte nativo e comando `torchbridge-cenario`.
 

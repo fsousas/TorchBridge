@@ -90,8 +90,12 @@ d-pad ← = botão roxo da HUD
 ```
 
 **Notas técnicas (fechado)**
-- 1..4 (Triângulo/Y, Círculo/B, R1/RB, R2/RT) são **toques na borda de subida**
-  do botão/gatilho — segurar não repete.
+- Habilidades **1..0** disparam ao pressionar e repetem a cada 120 ms enquanto
+  o botão/gatilho continuar pressionado, respeitando o cooldown e os requisitos
+  do jogo. Soltar interrompe a repetição; pressionar novamente dispara de imediato.
+  Isso inclui os seis combos LT/L2/ZL. Trocar o modificador com o botão segurado
+  troca a habilidade repetida. ESC, cliques de inventário, coleta, destrutíveis
+  e D-pad de interação continuam exigindo um novo pressionamento para outra ação.
 - RB/R1/R e R2/ZR/RT **não seguram mais Shift/Alt**. Os holds antigos
   (`rb_hold`/`l3_hold`) foram removidos; se um dia voltarem, voltam como
   binding novo, não reusando as chaves velhas.
@@ -106,7 +110,9 @@ d-pad ← = botão roxo da HUD
   coleta esses itens nem ataca destrutíveis. Barris e outros `breakable` usam
   esse mesmo A/Cruz para ataque nativo, sem aproximação ou clique adicional.
   O tooltip usa `interact-*.png` para coleta e destrutíveis e
-  `dpad-up-*.png` para os demais objetos.
+  `dpad-up-*.png` para os demais objetos. Para props com nome nativo visível
+  pelo Alt/D-pad ←, o overlay desenha apenas o ícone à esquerda desse nome.
+  Sem o nome nativo, mostra ícone, nome e distância; NPCs mantêm o aviso completo.
 
 ---
 

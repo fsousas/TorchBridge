@@ -20,6 +20,7 @@ class RecordingPainter(QPainter):
         super().__init__(image)
         self.texts = []
         self.images = []
+        self.image_rects = []
 
     def drawText(self, *args):
         self.texts.append(args[-1])
@@ -27,6 +28,7 @@ class RecordingPainter(QPainter):
 
     def drawPixmap(self, *args):
         self.images.append(args[1])
+        self.image_rects.append(args[0])
         return super().drawPixmap(*args)
 
 
@@ -59,6 +61,7 @@ class WorldOverlayTests(unittest.TestCase):
             painter.end()
         self.drawn_text = painter.texts
         self.drawn_images = painter.images
+        self.drawn_image_rects = painter.image_rects
         return bytes(image.constBits())
 
     def test_all_six_assets_render_for_the_correct_controller_and_action(self):
@@ -84,6 +87,39 @@ class WorldOverlayTests(unittest.TestCase):
         with patch.object(self.overlay, "_interaction_icon", wraps=self.overlay._interaction_icon) as icon:
             self.render(replace(self.snapshot, controller_type="xbox"))
         icon.assert_called_once_with("playstation", False)
+
+    def test_visible_native_prop_label_gets_only_an_icon_on_its_left(self):
+        for kind in ("door", "portal", "stairs", "lever", "chest", "interactive", "fishing"):
+            for width, height, scale in ((1920, 1080, 1.), (1280, 720, 1.5)):
+                with self.subTest(kind=kind, width=width):
+                    target = replace(self.snapshot.interaction_target, kind=kind,
+                                     native_label_rect=(.4, .3, .6, .35))
+                    snap = replace(self.snapshot, game_rect=Rect(-1280, 80, width, height),
+                                   interaction_target=target)
+                    self.render(snap, scale)
+                    self.assertEqual(self.drawn_text, [])
+                    self.assertEqual(len(self.drawn_images), 1)
+                    rect = self.drawn_image_rects[0]
+                    self.assertAlmostEqual(rect.right(), width * .4 - 6 * scale)
+                    self.assertAlmostEqual(rect.center().y(), height * .325)
+                    # No duplicate box/text is painted over the game's own name.
+                    self.assertLess(rect.right(), width * .4)
+
+    def test_hidden_native_label_restores_the_overlay_name_and_icon(self):
+        target = replace(self.snapshot.interaction_target, kind="door", native_label_rect=(.4, .3, .6, .35))
+        self.render(replace(self.snapshot, interaction_target=target))
+        self.assertEqual(self.drawn_text, [])
+        self.render(replace(self.snapshot, interaction_target=replace(target, native_label_rect=None)))
+        self.assertEqual(self.drawn_text, ["Vasman · 0.5"])
+        self.assertEqual(len(self.drawn_images), 1)
+
+    def test_native_label_does_not_replace_npc_pickup_or_destructible_prompts(self):
+        for kind in ("npc", "loot", "gold", "breakable"):
+            with self.subTest(kind=kind):
+                target = replace(self.snapshot.interaction_target, kind=kind,
+                                 native_label_rect=(.4, .3, .6, .35))
+                self.render(replace(self.snapshot, interaction_target=target))
+                self.assertEqual(self.drawn_text, ["Vasman · 0.5"])
 
     def test_icon_replaces_only_the_button_and_preserves_npc_details(self):
         target = replace(self.snapshot.interaction_target, name="Miner", quest_status="unavailable")

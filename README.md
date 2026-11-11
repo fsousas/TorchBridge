@@ -118,17 +118,21 @@ Detalhes, limites e roteiro: [docs/FULLSCREEN.md](docs/FULLSCREEN.md).
 | Analógico direito | Mira e cursor |
 | A / Cruz (botão de baixo) | Clique esquerdo: atacar, mover, coletar e confirmar |
 | X / Quadrado (botão da esquerda) | Clique direito: habilidade secundária |
-| B / Círculo | Atalho 1 |
-| Y / Triângulo | Atalho 2 |
+| B / Círculo | Atalho 2, repete enquanto segurado |
+| Y / Triângulo | Atalho 1, repete enquanto segurado |
 | Direcional cima | Interagir com o elemento próximo indicado no overlay |
 | Direcional direita | Tab, mapa/minimapa |
 | Direcional esquerda | Aciona o botão roxo da HUD e retorna o cursor |
 | Segurar LB / L1 + analógico direito | Roda de atalhos 1–6 |
-| RB / R1 | Segura Shift, para atacar sem avançar |
-| L3 | Segura Alt, para exibir itens |
-| R3 | Tab, mapa/minimapa |
+| RB / R1 | Atalho 3, repete enquanto segurado |
+| RT / R2 | Atalho 4, repete enquanto segurado |
+| LT / L2 + A, X, Y, B, RB, RT | Atalhos 5, 6, 7, 8, 9, 0; repetem enquanto segurados |
+| R3 | Clique esquerdo |
 | Back / Create / Select | Alterna entre movimento direto e modo cursor |
 | Start / Options | Esc, menus e retorno |
+
+As habilidades de 1 a 0 são acionadas novamente a cada 120 ms enquanto o botão
+estiver pressionado. O próprio jogo controla cooldown, mana e tempo de execução.
 
 Na roda, a posição superior é o atalho 1 e as demais seguem no sentido horário.
 O botão A confirma a seleção (com a roda aberta, A e X não geram clique de
@@ -159,13 +163,21 @@ ou **× (PlayStation)**, com o ícone `interact-*.png`,
 mantendo o personagem parado. O jogo verifica alcance da arma, obstáculos e
 disponibilidade do ataque. Com uma arma corpo a corpo fora de alcance, o personagem
 permanece parado; ele não caminha automaticamente até o objeto.
+O raio de seleção dos destrutíveis é o dobro do raio comum: 9 unidades no padrão
+de 4,5. Fishing holes têm um círculo próprio de pelo menos 2,5 unidades;
+a interação fica disponível quando esse círculo toca o raio do personagem.
 
 Itens, equipamentos e ouro no chão usam **A (Xbox/Nintendo)** ou **× (PlayStation)**
 para coleta nativa. O aviso usa `interact-*.png` para coletas e destrutíveis e
 `dpad-up-*.png` para os demais elementos, seguindo a família do controle ou o
 layout escolhido na HUD. Só a indicação do botão é substituída por imagem;
-nome, informações e distância continuam visíveis. Segurar a coleta não vira
+nome, informações e distância continuam visíveis. Quando Alt/D-pad ← mostra
+o nome nativo de um objeto usado pelo D-pad ↑, aparece somente o ícone à
+esquerda desse tooltip. NPCs mantêm suas informações completas.
+Segurar a coleta não vira
 ataque quando o item desaparece: é preciso soltar o botão antes de outra ação.
+Concluir uma coleta ou um ataque a destrutível libera a caminhada sem a espera
+extra de 1,5 s; a duração normal da ação do jogo continua sendo respeitada.
 
 Ao ativar **Modo de calibração** no ícone TB, o overlay também mostra as
 coordenadas, os marcadores dos elementos do cenário e o raio de interação.

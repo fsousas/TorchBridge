@@ -362,22 +362,20 @@ class HudClickPanelResetTests(unittest.TestCase):
         state = ControllerState(connected=True, buttons=frozenset({"a"}))
         engine._process_active(FakeHub(), state, rect, cfg, 0.0, 0.05)
 
-    # 1080p: barra de vida no centro da base (960, 1070) é verde no SVG → zona "hud".
+    # Ponto preenchido do disco central na máscara atual → zona "hud".
     def test_hud_click_does_not_reset_panels(self):
         self._require_mask()
         with tempfile.TemporaryDirectory() as directory:
-            engine, shared, _ = self._make_engine(directory, cursor=(960, 1070))
+            engine, shared, _ = self._make_engine(directory, cursor=(900, 1000))
             self._tick(engine)
             self.assertEqual(engine._active_panels, ["C", "I"])
             self.assertEqual(shared.get().active_panels, ["C", "I"])
 
-    # Ícone de habilidade no disco central (930, 1015 — dentro da metade esquerda do
-    # círculo, verde no SVG) também é zona "hud" → não reseta. O centro exato (960) cai
-    # na fenda vertical do disco (gap), que volta "center" (coberto no test_models).
+    # Botão da barra direita, preenchido na máscara atual, também não fecha painéis.
     def test_hud_icon_click_does_not_reset_panels(self):
         self._require_mask()
         with tempfile.TemporaryDirectory() as directory:
-            engine, _, _ = self._make_engine(directory, cursor=(930, 1015))
+            engine, _, _ = self._make_engine(directory, cursor=(1230, 1040))
             self._tick(engine)
             self.assertEqual(engine._active_panels, ["C", "I"])
 
@@ -1225,18 +1223,78 @@ class OverworldRemapTests(unittest.TestCase):
             self._tick(engine, self._state())
             self._tick(engine, self._state(rt=1.0))
             self.assertIn("4", engine.injector.tapped)
-            # Segurar o RT não repete (sem auto-repeat).
+            # O mesmo instante não envia um segundo pulso.
             engine.injector.tapped.clear()
             self._tick(engine, self._state(rt=1.0))
             self.assertNotIn("4", engine.injector.tapped)
 
-    # RB segurando não repete o 3 (borda de subida).
-    def test_rb_held_does_not_repeat(self):
+    # Pulsos repetidos são limitados por tempo, não pela taxa do polling.
+    def test_rb_does_not_repeat_before_interval(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, _, _ = self._engine(directory)
             self._tick(engine, self._state(("rb",)))
             self._tick(engine, self._state(("rb",)))
             self.assertEqual(engine.injector.tapped.count("3"), 1)
+
+    def test_all_ten_skill_slots_repeat_while_held_and_stop_on_release(self):
+        cases = [("1", ("y",), {}), ("2", ("b",), {}), ("3", ("rb",), {}),
+                 ("4", (), {"rt": 1.}), ("5", ("a",), {"lt": 1.}),
+                 ("6", ("x",), {"lt": 1.}), ("7", ("y",), {"lt": 1.}),
+                 ("8", ("b",), {"lt": 1.}), ("9", ("rb",), {"lt": 1.}),
+                 ("0", (), {"lt": 1., "rt": 1.})]
+        for slot, buttons, axes in cases:
+            with self.subTest(slot=slot), tempfile.TemporaryDirectory() as directory:
+                engine, _, injector = self._engine(directory)
+                state = self._state(buttons, **axes)
+                for now in (10., 10.05, 10.13, 10.26):
+                    self._tick(engine, state, now)
+                self.assertEqual(injector.tapped, [slot] * 3)
+                for now in (10.27, 10.5, 11.):
+                    self._tick(engine, self._state(), now)
+                self.assertEqual(injector.tapped, [slot] * 3)
+                self.assertFalse(engine._skill_repeat_sources)
+                self.assertFalse(engine._held_keys)
+
+    def test_quick_release_and_repress_fires_without_waiting_for_repeat_timer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, _, injector = self._engine(directory)
+            self._tick(engine, self._state(("rb",)), 10.)
+            self._tick(engine, self._state(), 10.01)
+            self._tick(engine, self._state(("rb",)), 10.02)
+            self.assertEqual(injector.tapped, ["3", "3"])
+
+    def test_changing_lt_while_holding_rb_or_rt_switches_the_repeating_slot(self):
+        for buttons, axes, normal, modified in [(("rb",), {}, "3", "9"), ((), {"rt": 1.}, "4", "0")]:
+            with self.subTest(normal=normal), tempfile.TemporaryDirectory() as directory:
+                engine, _, injector = self._engine(directory)
+                for now, lt in ((10., 0.), (10.01, 1.), (10.14, 1.), (10.15, 0.), (10.28, 0.)):
+                    self._tick(engine, self._state(buttons, lt=lt, **axes), now)
+                self.assertEqual(injector.tapped, [normal, modified, modified, normal, normal])
+
+    def test_panel_close_press_cannot_turn_into_a_repeating_skill(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, _, injector = self._engine(directory)
+            engine._active_panels = ["", "I"]
+            engine._previous_panels = ("", "I")
+            for now in (10., 10.13, 10.26, 10.5):
+                self._tick(engine, self._state(("b",)), now)
+            self.assertEqual(injector.tapped, ["ESC"])
+
+    def test_nonnumeric_binding_stays_one_action_per_press(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, _, injector = self._engine(directory)
+            engine.config._data["bindings"]["rb"] = "TAB"
+            for now in (10., 10.13, 10.26, 11.):
+                self._tick(engine, self._state(("rb",)), now)
+            self.assertEqual(injector.tapped, ["TAB"])
+
+    def test_radial_suppresses_held_skill_pulses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, _, injector = self._engine(directory)
+            self._tick(engine, self._state(("rb",)), 10.)
+            for now in (10.13, 10.26, 10.5):
+                self._tick(engine, self._state(("rb", "lb")), now)
+            self.assertEqual(injector.tapped, ["3"])
 
     # LT segurado + A na borda: toca o 5 (painéis fechados) e NÃO segura o clique comum.
     def test_lt_a_taps_5_when_closed(self):

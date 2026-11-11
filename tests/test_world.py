@@ -62,6 +62,27 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(CAMERA.project(WorldPosition(0, -4), 960, 540), (480, 270))
         self.assertEqual(CAMERA.project(WorldPosition(0, -4), 1920, 1080, 1), (960, 405))
 
+    def test_destructibles_alone_have_double_player_range(self):
+        for radius in (.5, 4.5, 8.):
+            world = replace(world_fixture(), player_position=WorldPosition(0, 0))
+            for kind in ("npc", "loot", "gold", "chest", "door", "stairs", "lever", "portal", "breakable"):
+                entity = WorldEntity(0x200000, kind, "", WorldPosition(radius * 2, 0))
+                with self.subTest(radius=radius, kind=kind):
+                    self.assertEqual(bool(replace(world, entities=(entity,)).nearby(radius)), kind == "breakable")
+            entity = replace(entity, position=WorldPosition(radius * 2 + .01, 0))
+            self.assertFalse(replace(world, entities=(entity,)).nearby(radius))
+
+    def test_fishing_circles_touch_and_remain_exclusive_to_fishing(self):
+        world = replace(world_fixture(), player_position=WorldPosition(0, 0))
+        for body_radius, circle in ((0., 2.5), (1., 2.5), (3., 3.), (100., 8.), (math.nan, 2.5)):
+            hole = WorldEntity(0x200000, "fishing", "", WorldPosition(4.5 + circle, 0),
+                               interaction_radius=body_radius)
+            with self.subTest(body_radius=body_radius):
+                self.assertEqual(replace(world, entities=(hole,)).nearby(4.5), (hole,))
+                self.assertFalse(replace(world, entities=(replace(hole, position=WorldPosition(4.51 + circle, 0)),)).nearby(4.5))
+                self.assertFalse(replace(world, entities=(replace(hole, kind="door"),)).nearby(4.5))
+                self.assertFalse(replace(world, entities=(replace(hole, position=WorldPosition(0, 0, 3)),)).nearby(4.5))
+
     def test_projection_rejects_behind_offscreen_invalid_or_clipped_points(self):
         for position in (WorldPosition(0, 1), WorldPosition(30, -4), WorldPosition(0, -.01),
                          WorldPosition(0, -1000), WorldPosition(math.nan, -4), WorldPosition(0, -4, math.inf)):

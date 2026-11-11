@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
 from ..models import OverlaySnapshot, Rect, controller_type_from_name
 from ..resources import resource_root
-from ..world import INTERACTION_LABELS, WorldPosition
+from ..world import INTERACTION_LABELS, WorldCamera, WorldEntity, WorldPosition
 
 
 class WorldInteractionOverlayMixin:
@@ -20,6 +20,40 @@ class WorldInteractionOverlayMixin:
             self._interaction_icon_cache[filename] = image
         image = self._interaction_icon_cache[filename]
         return None if image.isNull() else image
+
+    def _interaction_family(self, config: dict, snapshot: OverlaySnapshot) -> str:
+        layout = str(config["overlay"].get("controller_layout", "auto")).lower()
+        family = (layout if layout in ("xbox", "playstation", "nintendo") else
+                  snapshot.controller_type or controller_type_from_name(snapshot.controller_name))
+        return family if family in ("xbox", "playstation", "nintendo") else controller_type_from_name(family)
+
+    def _draw_native_interaction_icon(self, painter: QPainter, snapshot: OverlaySnapshot,
+                                      target: WorldEntity, scale: float, config: dict) -> bool:
+        rect = target.native_label_rect
+        if (target.kind == "npc" or target.uses_face_button or snapshot.interaction_button != "dpad_up"
+                or rect is None or len(rect) != 4 or not all(math.isfinite(v) for v in rect)):
+            return False
+        left, top, right, bottom = rect
+        if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1):
+            return False
+        left *= snapshot.game_rect.width
+        middle = (top + bottom) * snapshot.game_rect.height / 2
+        icon = self._interaction_icon(self._interaction_family(config, snapshot), False)
+        height, gap = 24 * scale, 6 * scale
+        painter.save()
+        if icon is not None:
+            width = height * icon.width() / icon.height()
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.drawPixmap(QRectF(left - width - gap, middle - height / 2, width, height),
+                               icon, QRectF(icon.rect()))
+        else:
+            painter.setFont(self._font(max(8, round(10 * scale)), True))
+            painter.setPen(QColor(255, 240, 210))
+            width = painter.fontMetrics().horizontalAdvance("[D-pad ↑]")
+            painter.drawText(QRectF(left - width - gap, middle - height / 2, width, height),
+                             Qt.AlignmentFlag.AlignVCenter, "[D-pad ↑]")
+        painter.restore()
+        return True
 
     def _draw_world_interaction(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         config = self.config.get()
@@ -35,16 +69,14 @@ class WorldInteractionOverlayMixin:
         if not world.fresh(time.monotonic()):
             return
         target = snapshot.interaction_target
-        if cfg["show_prompt"] and target is not None and world.camera is not None:
-            point = world.camera.project(target.position, snapshot.game_rect.width,
-                                         snapshot.game_rect.height, 1.6)
+        if cfg["show_prompt"] and target is not None:
+            native_prompt = self._draw_native_interaction_icon(painter, snapshot, target, scale, config)
+            point = (world.camera.project(target.position, snapshot.game_rect.width,
+                                          snapshot.game_rect.height, 1.6)
+                     if not native_prompt and world.camera is not None else None)
             if point is not None:
                 distance = world.player_position.distance_to(target.position)
-                layout = str(config["overlay"].get("controller_layout", "auto")).lower()
-                family = (layout if layout in ("xbox", "playstation", "nintendo") else
-                          snapshot.controller_type or controller_type_from_name(snapshot.controller_name))
-                if family not in ("xbox", "playstation", "nintendo"):
-                    family = controller_type_from_name(family)
+                family = self._interaction_family(config, snapshot)
                 icon = (self._interaction_icon(family, target.uses_face_button)
                         if target.uses_face_button or snapshot.interaction_button == "dpad_up" else None)
                 button = (("×" if family == "playstation" else "A") if target.uses_face_button else
@@ -138,16 +170,13 @@ class WorldInteractionOverlayMixin:
                 if camera is not None:
                     # Project the range on the same ground plane as the player.
                     painter.setPen(QPen(QColor(95, 230, 140, 160), 1.5 * scale, Qt.PenStyle.DashLine))
-                    previous = None
-                    for i in range(65):
-                        angle = i * math.tau / 64
-                        position = WorldPosition(player.x + math.cos(angle) * cfg["radius"],
-                                                 player.y + math.sin(angle) * cfg["radius"], player.height)
-                        point = camera.project(position, rect.width, rect.height)
-                        if previous is not None and point is not None:
-                            painter.drawLine(QPointF(*previous), QPointF(*point))
-                        previous = point
+                    self._draw_world_radius(painter, camera, rect, player, cfg["radius"])
+                    painter.setPen(QPen(QColor(255, 170, 90, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                    self._draw_world_radius(painter, camera, rect, player, cfg["radius"] * 2)
                     for entity in world.entities:
+                        if entity.kind == "fishing":
+                            painter.setPen(QPen(QColor(120, 215, 255, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                            self._draw_world_radius(painter, camera, rect, entity.position, entity.action_radius(0))
                         point = camera.project(entity.position, rect.width, rect.height)
                         if point is None:
                             continue
@@ -168,6 +197,7 @@ class WorldInteractionOverlayMixin:
                     f"Jogador: X {player.x:.2f}  Y {player.y:.2f}  altura {player.height:.2f}",
                     f"{len(world.entities)} elementos · {len(nearby)} próximos · {visible} visíveis",
                     f"Raio: {cfg['radius']:.1f} · {world.status}",
+                    f"Destrutíveis: raio {cfg['radius'] * 2:.1f} (laranja) · Pesca: círculo azul",
                     "Verde: próximo · Azul: distante · Amarelo: alvo",
                 ])
                 merchants = sum(entity.is_merchant for entity in world.entities)
@@ -194,6 +224,18 @@ class WorldInteractionOverlayMixin:
             self._draw_world_calibration_panel(painter, rect, lines, scale)
         finally:
             painter.restore()
+
+    def _draw_world_radius(self, painter: QPainter, camera: WorldCamera, rect: Rect,
+                           center: WorldPosition, radius: float) -> None:
+        previous = None
+        for i in range(65):
+            angle = i * math.tau / 64
+            position = WorldPosition(center.x + math.cos(angle) * radius,
+                                     center.y + math.sin(angle) * radius, center.height)
+            point = camera.project(position, rect.width, rect.height)
+            if previous is not None and point is not None:
+                painter.drawLine(QPointF(*previous), QPointF(*point))
+            previous = point
 
     def _draw_world_marker(self, painter: QPainter, rect: Rect, point: tuple[int, int],
                            label: str, details: str, color: QColor, scale: float, *, below: bool = False) -> None:

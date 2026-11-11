@@ -139,6 +139,72 @@ def memory_fixture(base=0x400000):
 
 
 class WorldMemoryTests(unittest.TestCase):
+    def test_live_native_nameplate_tracks_visibility_and_rect_on_both_transports(self):
+        for transport in ("Windows", "Proton"):
+            with self.subTest(transport=transport), patch("torchbridge.memory.kernel32") as kernel:
+                space, reader, client, level, player, _, _, props, _ = memory_fixture()
+                if transport == "Windows":
+                    reader._linux = None
+                    kernel.ReadProcessMemory.side_effect = space.windows_read
+                ui = space.allocate(0x1700)
+                space.u32(client + 0x3C, ui)
+                space.put(ui + 0x13E4, struct.pack("<2f", 1920., 1080.))
+                window, parent = space.allocate(0x400), space.allocate(0x400)
+                space.u32(window + 0x80, parent)
+                space.u8(window + 0x1A1, 1)
+                space.u8(parent + 0x1A1, 1)
+                space.u32(props[0] + 0x198, window)
+                space.put(window + 0x360, struct.pack("<4f", 600., 300., 800., 330.))
+
+                def label():
+                    return next(e for e in reader._world_reader.read(client, player, 10.).entities
+                                if e.address == props[0]).native_label_rect
+
+                self.assertIsNone(label())
+                space.u8(props[0] + 0x1A4, 1)  # Alt/HUD made this native label visible.
+                self.assertEqual(label(), (600/1920, 300/1080, 800/1920, 330/1080))
+                # Read native overlap avoidance/camera changes, never a projected guess.
+                space.put(window + 0x360, struct.pack("<4f", 700., 350., 900., 380.))
+                self.assertEqual(label(), (700/1920, 350/1080, 900/1920, 380/1080))
+                space.u8(parent + 0x1A1, 0)
+                self.assertIsNone(label())
+                space.u8(parent + 0x1A1, 1)
+                space.u8(props[0] + 0x1A4, 0)  # Alt/HUD hid it again, window still allocated.
+                self.assertIsNone(label())
+
+    def test_native_label_rejects_unreadable_cyclic_and_invalid_geometry(self):
+        space, reader, client, _, player, _, _, props, _ = memory_fixture()
+        ui, window = space.allocate(0x1700), space.allocate(0x400)
+        space.u32(client + 0x3C, ui)
+        space.put(ui + 0x13E4, struct.pack("<2f", 1280., 720.))
+        space.u32(props[0] + 0x198, window)
+        space.u8(props[0] + 0x1A4, 1)
+        space.u8(window + 0x1A1, 1)
+        for rect in ((0., 0., 0., 0.), (300., 20., 200., 40.), (math.nan, 20., 200., 40.),
+                     (20., 20., 1400., 40.)):
+            space.put(window + 0x360, struct.pack("<4f", *rect))
+            world = reader._world_reader.read(client, player, 10.)
+            self.assertTrue(world.roster_complete)
+            self.assertIsNone(next(e for e in world.entities if e.address == props[0]).native_label_rect)
+        space.put(window + 0x360, struct.pack("<4f", 20., 20., 200., 40.))
+        space.u32(window + 0x80, window)
+        world = reader._world_reader.read(client, player, 10.)
+        self.assertIsNone(next(e for e in world.entities if e.address == props[0]).native_label_rect)
+
+    def test_fishing_radius_is_read_without_giving_other_objects_extra_reach(self):
+        space, reader, client, level, player, *_ = memory_fixture()
+        hole = space.unit("CTriggerUnit", "Fishing Hole", "FISHINGHOLE")
+        door = space.unit("CTriggerUnit", "Door", "DOOR")
+        space.u32(hole + 0x174, 122)
+        for address in (hole, door):
+            space.f32(address + 0x15C, 3.25)
+        space.linked_list(level, 0x68, [hole, door])
+        entities = {e.address: e for e in reader._world_reader.read(client, player, 10.).entities}
+        self.assertEqual(entities[hole].interaction_radius, 3.25)
+        self.assertEqual(entities[hole].action_radius(4.5), 7.75)
+        self.assertEqual(entities[door].interaction_radius, 0.)
+        self.assertEqual(entities[door].action_radius(4.5), 4.5)
+
     def test_interactive_subclasses_are_discovered_through_rtti_bases(self):
         space, reader, client, level, player, pet, npc, props, _ = memory_fixture()
         custom=space.unit("CCustomDoor", "Porta", "CUSTOM_DOOR")

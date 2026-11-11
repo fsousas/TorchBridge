@@ -13,6 +13,7 @@ constexpr uint32_t typed_interactions = 32; // Endpoint capability, not a reply 
 constexpr uint32_t stationary_breakables = 64; // Attack destructibles without pathing.
 constexpr uint32_t destructible_actions = 128; // Separate face-button attack intent.
 constexpr uint32_t npc_approach = 256; // Native path and interruptible pending talk.
+constexpr uint32_t action_ranges = 512; // Per-kind range and completion releases movement.
 enum Reason : uint32_t { idle, walking_now, no_session, no_focus, wrong_scene, menu,
     skill_lock, no_target, acting, unsupported, incomplete, transport_error, attack_unavailable };
 enum ActionResult : uint32_t { none, accepted, unavailable, changed_target, blocked };
@@ -67,11 +68,12 @@ inline bool valid(const Command& c, const uint8_t* token) {
 struct Candidate {
     uintptr_t address = 0;
     float x = 0, y = 0, z = 0;
-    uint32_t type = 0; // 1 character, 2 prop, 3 ground pickup, 4 destructible
+    uint32_t type = 0; // 1 character, 2 prop, 3 ground pickup, 4 destructible, 5 fishing
+    float radius = 0;
 };
 inline bool action_matches(const Candidate& c, const Command& command) {
     if (command.flags & pickup_action) return c.type == 3;
-    if (command.flags & world_action) return c.type == 1 || c.type == 2;
+    if (command.flags & world_action) return c.type == 1 || c.type == 2 || c.type == 5;
     if (command.flags & attack_action) return c.type == 4;
     return true; // Existing v2 clients retain their original untyped action.
 }
@@ -83,6 +85,8 @@ inline bool nearer(const Candidate& a, const Candidate& b, float x, float z) {
     return da < db || (da == db && a.address < b.address);
 }
 inline bool in_range(const Candidate& c, float x, float y, float z, float radius) {
+    if (c.type == 4) radius *= 2;
+    if (c.type == 5) radius += std::fmax(2.5f, std::isfinite(c.radius) ? std::fmin(c.radius, 8.f) : 0.f);
     return std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z) &&
         std::fabs(c.y - y) <= 2.5f && distance2(c, x, z) <= double(radius) * radius;
 }

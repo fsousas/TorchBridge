@@ -124,6 +124,7 @@ class BridgeEngineCore(threading.Thread):
     _MODIFIER_CLICK_HOLD = 0.12
     _MODIFIER_RELEASE_HOLD = 0.18
     _MODIFIER_RELEASE_TIMEOUT = 0.05
+    _SKILL_REPEAT_INTERVAL = 0.12
     _MODIFIER_RELEASE_RETRY_INTERVAL = 0.005
     PET_PANEL_CLOSE_DELAY = 0.5
 
@@ -165,6 +166,8 @@ class BridgeEngineCore(threading.Thread):
         self._last_anchor: tuple[int, int] | None = None
         # Teclas e botões de mouse retidos agora (liberados todos na perda de foco/saída).
         self._held_keys: set[str] = set()
+        self._skill_repeat_at: dict[str, float] = {}
+        self._skill_repeat_sources: dict[str, str] = {}
         self._held_mouse: set[str] = set()
         # Nome do último controle visto — detecta troca/conexão/desconexão.
         # Última recarga do perfil (no mínimo 1 s entre tentativas).
@@ -492,6 +495,8 @@ class BridgeEngineCore(threading.Thread):
                 self._held_mouse.discard(button)
 
     def _release_all(self) -> None:
+        self._skill_repeat_at.clear()
+        self._skill_repeat_sources.clear()
         self.native_input.close()
         self.shared.update(native_input_ready=False, native_highlight=False,
                            movement_direction=(0., 0.), movement_status="Movimento suspenso")
@@ -688,6 +693,23 @@ class BridgeEngineCore(threading.Thread):
             if remaining <= 0:
                 return
             self._stop_event.wait(min(remaining, 1 / 120))
+
+    def _tap_skill_binding(self, source: str, value: Any, now: float, edge: bool) -> None:
+        if not isinstance(value, str):
+            return
+        key = value.strip().upper()
+        if key not in "1234567890" or len(key) != 1:
+            self._skill_repeat_sources.pop(source, None)
+            if edge:
+                self._tap_binding(value)
+            return
+        if edge:
+            self._skill_repeat_sources[source] = key
+        if self._skill_repeat_sources.get(source) != key:
+            return  # A press consumed by a panel/item cannot become a held spell.
+        if edge or now >= self._skill_repeat_at.get(key, float("-inf")):
+            self._tap_binding(value)
+            self._skill_repeat_at[key] = now + self._SKILL_REPEAT_INTERVAL
 
     def _tap_binding(self, value: Any) -> None:
         if not isinstance(value, str) or not value.strip():
@@ -903,6 +925,10 @@ class BridgeEngineCore(threading.Thread):
     def _process_active(self, hub, state, rect, cfg, now, dt) -> None:
         self._native_direction = (0., 0.)
         self._native_interaction_allowed = False
+        for source in tuple(self._skill_repeat_sources):
+            pressed = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD if source == "rt" else state.pressed(source)
+            if not pressed:
+                del self._skill_repeat_sources[source]
         self.native_input.connect(self.memory, now)
         try:
             self._process_active_inputs(hub, state, rect, cfg, now, dt)

@@ -157,7 +157,7 @@ int main() {
     Candidate barrel{object, 4, 0, 0, 4};
     use(barrel, GetTickCount64());
     assert(attacks == 1 && !pickups && path_stops == 1 && ai_mode == 0);
-    assert(attack_item == object && stationary_attack && !authorized(object));
+    assert(attack_item == object && stationary_attack && !authorized_target && !authorized(object));
     assert(status.executed == object && status.action_result == accepted && !scope);
     put<uint32_t>(scene.client, 0x2C, scene.player);
     latest.player = scene.player;

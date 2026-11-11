@@ -86,6 +86,9 @@ class WorldEntity:
     quest_status: str = ""
     unit_type: int = 0
     interaction_method: str = ""
+    interaction_radius: float = 0.0
+    # Native CEGUI nameplate, normalized to the game's render viewport (L/T/R/B).
+    native_label_rect: tuple[float, float, float, float] | None = None
 
     @property
     def label(self) -> str:
@@ -111,6 +114,16 @@ class WorldEntity:
     @property
     def uses_face_button(self) -> bool:
         return self.is_pickup or self.is_destructible
+
+    def action_radius(self, player_radius: float) -> float:
+        if self.is_destructible:
+            return player_radius * 2
+        if self.kind == "fishing":
+            radius = self.interaction_radius
+            # Fishing holes often have no collision body. Give those a usable
+            # circle too, while bounding corrupt/modded radii identically in C++.
+            return player_radius + max(2.5, min(radius, 8.0) if math.isfinite(radius) else 0.0)
+        return player_radius
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +192,7 @@ class WorldSnapshot:
         return tuple(sorted((entity for entity in self.entities
                              if entity.position.valid
                              and abs(entity.position.height - player.height) <= max_height
-                             and player.distance_to(entity.position) <= radius),
+                             and player.distance_to(entity.position) <= entity.action_radius(radius)),
                             key=lambda entity: (player.distance_to(entity.position), entity.address)))
 
 

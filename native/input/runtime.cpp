@@ -362,7 +362,9 @@ bool list(uint32_t offset, std::vector<Candidate>& candidates, std::unordered_se
             // Install at the actual virtual dispatch of each item family,
             // including inherited implementations and modded subclasses.
             if (!guard_interaction(p)) return false;
-            candidate.type = (mask & breakable) ? 4 : (mask & trigger) ? 2 : 3;
+            candidate.type = (mask & breakable) ? 4 : (mask & trigger) ?
+                (field<uint32_t>(p, 0x174) == 122 ? 5 : 2) : 3;
+            if (candidate.type == 5) candidate.radius = field<float>(p, 0x15C);
         }
         if (!position(p, candidate)) return false;
         candidates.push_back(candidate);
@@ -414,6 +416,16 @@ bool locked() {
         (field<float>(scene.player, 0x2C0) > 0 && !field<uint8_t>(scene.player, 0x2BD)));
 }
 bool pending_npc() { return authorized_target && authorized_kind == 1; }
+bool pending_pickup() { return authorized_target && authorized_kind == 3; }
+void finish_item() {
+    if (!authorized_target || authorized_kind == 1 || authorized_kind == 4) return;
+    // Pickup/use AI owns state 7. Equipment/gold collection and fishing can
+    // finish without dispatching CItem::Interact, which used to leave the
+    // authorization blocking movement for its entire 1500 ms deadline.
+    if (field<uint32_t>(scene.player, 0x284) != 7 ||
+        field<uint32_t>(scene.player, 0x298) != authorized_target)
+        authorized_target = 0;
+}
 void cancel_npc() {
     auto hero = reinterpret_cast<void*>(scene.player);
     original_target(hero, nullptr);
@@ -464,6 +476,9 @@ void use(const Candidate& candidate, ULONGLONG now) {
         if (attack_in_range(hero, false) &&
             attack_in_sight(hero, reinterpret_cast<void*>(scene.level), false) && basic_attack(hero)) {
             status.executed = static_cast<uint32_t>(candidate.address);
+            // The native attack now owns its animation/cooldown. It needs no
+            // interaction authorization and must not impose a second lockout.
+            authorized_target = 0;
         } else {
             original_item(hero, nullptr);
             authorized_target = 0;
@@ -486,6 +501,7 @@ void use(const Candidate& candidate, ULONGLONG now) {
         original_item(hero, reinterpret_cast<void*>(candidate.address));
         method<ModeFn>(scene.player, 0x174)(hero, 7);
         method<PickupFn>(scene.player, 0x1B4)(hero, 0.f, reinterpret_cast<void*>(scene.level));
+        finish_item();
     }
 }
 void frame() {
@@ -519,7 +535,12 @@ void frame() {
         scene.level == command.level && (class_info(scene.player).mask & player);
     const bool focus = focused();
     const bool menus = menu_open();
-    if (live && same && focus) finish_npc();
+    if (live && same && focus) {
+        finish_npc();
+        finish_item();
+        if (stationary_attack && field<uint32_t>(scene.player, 0x298) != status.executed)
+            stationary_attack = false;
+    }
     const bool inspect_world = live && same && focus && !menus && command.flags & direct;
     std::vector<Candidate> candidates;
     std::unordered_set<uintptr_t> objects;
@@ -548,7 +569,7 @@ void frame() {
         if (trigger_event.needs_session) trigger_event.clear();
         if (pending_npc() && same && !locked()) cancel_npc();
         stop();
-        if (authorized_target && (!live || !same || !focus) &&
+        if ((authorized_target || stationary_attack) && (!live || !same || !focus) &&
             scene.player == authorized_player && scene.level == authorized_level) {
             original_target(reinterpret_cast<void*>(scene.player), nullptr);
             original_item(reinterpret_cast<void*>(scene.player), nullptr);
@@ -631,7 +652,7 @@ void frame() {
     }
 }
 void cancel_before_update(void* self) {
-    if (!was_moving && !authorized_target) return;
+    if (!was_moving && !authorized_target && !stationary_attack) return;
     Command command{};
     ULONGLONG received = 0;
     if (!TryAcquireSRWLockShared(&channel_lock)) return;
@@ -641,21 +662,23 @@ void cancel_before_update(void* self) {
     const auto game = field<uint32_t>(game_global), client = field<uint32_t>(game, 0x64);
     const auto p = field<uint32_t>(client, 0x2C), level = field<uint32_t>(client, 0x38);
     if (reinterpret_cast<uintptr_t>(self) != p) return;
-    const bool walk_cancels_npc = pending_npc() && !locked() &&
+    const bool walk_cancels_action = (pending_npc() || pending_pickup() || stationary_attack) && !locked() &&
         (command.flags & walking) && std::hypot(command.dx, command.dz) > 0.001f;
     const bool cancelled = !received || now-received > 200 || !focused() ||
         !(command.flags & active) || !(command.flags & direct) ||
         command.player != p || command.level != level ||
-        (authorized_target && now > authorized_until) || walk_cancels_npc;
+        (authorized_target && now > authorized_until) || walk_cancels_action;
     if (cancelled) {
         // Cancel before original AI can complete an old approach/talk/use.
-        if (authorized_target && p == authorized_player && level == authorized_level) {
+        if ((authorized_target || stationary_attack) && p == authorized_player && level == authorized_level) {
             if (pending_npc()) {
                 cancel_npc();
             } else {
                 original_target(self, nullptr);
                 original_item(self, nullptr);
                 stop_path(self);
+                if (pending_pickup() && field<uint32_t>(p, 0x284) == 7)
+                    method<ModeFn>(p, 0x174)(self, 0);
             }
         } else if (was_moving) {
             stop_path(self);
@@ -776,7 +799,7 @@ DWORD WINAPI serve(void*) {
     getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
     endpoint.port = ntohs(address.sin_port);
     endpoint.capabilities = ready | protected_world | highlighted | typed_interactions |
-        stationary_breakables | destructible_actions | npc_approach;
+        stationary_breakables | destructible_actions | npc_approach | action_ranges;
     MemoryBarrier(); std::memcpy(endpoint.magic, magic, 8);
     initialized.store(true);
     for (;;) {

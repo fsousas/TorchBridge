@@ -60,6 +60,29 @@ int main() {
     a.x = std::numeric_limits<float>::infinity();
     assert(!in_range(a, 0, 0, 0, 4.5f));
 
+    // Doubling applies exclusively to destructibles; fishing uses intersecting
+    // player/hole circles. Height and deterministic nearest ordering stay intact.
+    for (const auto radius : {.5f, 4.5f, 8.f}) {
+        for (uint32_t type : {1u, 2u, 3u, 4u}) {
+            Candidate object{500, radius * 2, 0, 0, type};
+            assert(in_range(object, 0, 0, 0, radius) == (type == 4));
+            object.x += .01f;
+            assert(!in_range(object, 0, 0, 0, radius));
+        }
+    }
+    for (const auto body : {0.f, 1.f, 3.f, 100.f, std::numeric_limits<float>::quiet_NaN()}) {
+        const auto circle = std::fmax(2.5f, std::isfinite(body) ? std::fmin(body, 8.f) : 0.f);
+        Candidate hole{600, 4.5f + circle, 0, 0, 5, body};
+        command.flags = world_action;
+        assert(action_matches(hole, command) && in_range(hole, 0, 0, 0, 4.5f));
+        command.flags = pickup_action;
+        assert(!action_matches(hole, command));
+        hole.x += .01f;
+        assert(!in_range(hole, 0, 0, 0, 4.5f));
+        hole.x = 0; hole.y = 3;
+        assert(!in_range(hole, 0, 0, 0, 4.5f));
+    }
+
     // Stairs/entrances emit state outputs on the next frame, after the
     // synchronous Interact scope has ended. Only that exact output may warp.
     for (uint32_t state : {0u, 1u}) {

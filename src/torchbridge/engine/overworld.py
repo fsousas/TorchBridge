@@ -130,36 +130,41 @@ class OverworldNavigationMixin:
         if ("Pet" in open_menus or "Baú" in open_menus or "Vendedor (Loja)" in open_menus or "Atributos" in open_menus or any(m in open_menus for m in ("Transmutador", "Sockets", "Encantador"))) and cur_x < mid_x:
             return
         lt_now = self._lt_current
-        # RB: borda de subida → 9 com LT ativo (prioridade), senão 3 (sempre toque —
-        # o antigo hold SHIFT morreu no remap).
-        if state.pressed("rb") and not self._previous.pressed("rb"):
-            self._tap_binding(bindings.get("lt_rb", "9") if lt_now else bindings.get("rb", "3"))
-        # RT: borda de subida (histerese no limiar) → 0 com LT ativo, senão 4.
-        if self._rt_edge_up:
-            self._tap_binding(bindings.get("lt_rt", "0") if lt_now else bindings.get("rt", "4"))
-        # A com LT: borda de subida → Ctrl+clique (painel aberto) ou toque 5 (fechado).
+        # Numeric skills repeat while held; UI/non-numeric bindings stay on edges.
+        if state.pressed("rb"):
+            self._tap_skill_binding("rb", bindings.get("lt_rb", "9") if lt_now else bindings.get("rb", "3"),
+                                    now, not self._previous.pressed("rb") or self._lt_was_active != lt_now)
+        if state.rt >= self.TRIGGER_ACTIVE_THRESHOLD:
+            self._tap_skill_binding("rt", bindings.get("lt_rt", "0") if lt_now else bindings.get("rt", "4"),
+                                    now, self._rt_edge_up or self._lt_was_active != lt_now)
+        # LT+A repete 5 com painéis fechados; Ctrl+clique continua uma vez por pressão.
         # O A com LT segurado NUNCA segura o clique esquerdo comum: o _process_active
         # desliga o left_pressed enquanto LT está ativo (o combo tem prioridade).
-        if state.pressed("a") and not self._previous.pressed("a") and lt_now:
+        if state.pressed("a") and lt_now:
             stable = self._previous_panels
             if bool(stable[0]) or bool(stable[1]):
                 # Ctrl+clique: arma a sequência — o left up (120 ms) e o Ctrl up
                 # (180 ms) saem nos ticks seguintes via _handle_modifier_release;
                 # os ticks em curso ficam sob o gate do _process_active.
-                self._start_modifier_click("CTRL", now)
+                if not self._previous.pressed("a"):
+                    self._start_modifier_click("CTRL", now)
             else:
-                self._tap_binding(bindings.get("lt_a", "5"))
-        # X com LT: borda de subida → 6 (o X com LT nunca segura o clique direito comum).
-        if state.pressed("x") and not self._previous.pressed("x") and lt_now:
-            self._tap_binding(bindings.get("lt_x", "6"))
-        # Y com LT: borda de subida → 7 SEMPRE (o remap contextual de Y=Shift+clique
+                self._tap_skill_binding("a", bindings.get("lt_a", "5"), now,
+                                        not self._previous.pressed("a") or self._lt_edge_up)
+        # LT+X repete 6 e não segura o clique direito comum.
+        if state.pressed("x") and lt_now:
+            self._tap_skill_binding("x", bindings.get("lt_x", "6"), now,
+                                    not self._previous.pressed("x") or self._lt_edge_up)
+        # Y com LT: repete 7 (o remap contextual de Y=Shift+clique
         # confere o LT antes — o LT+ tem prioridade sobre o remap, igual ao LT+B=8).
-        if state.pressed("y") and not self._previous.pressed("y") and lt_now:
-            self._tap_binding(bindings.get("lt_y", "7"))
-        # B com LT: borda de subida → 8 SEMPRE (o LT+ tem prioridade sobre o remap
+        if state.pressed("y") and lt_now:
+            self._tap_skill_binding("y", bindings.get("lt_y", "7"), now,
+                                    not self._previous.pressed("y") or self._lt_edge_up)
+        # B com LT: repete 8 (o LT+ tem prioridade sobre o remap
         # contextual de B=ESC — o _handle_overworld_remap confere o LT antes).
-        if state.pressed("b") and not self._previous.pressed("b") and lt_now:
-            self._tap_binding(bindings.get("lt_b", "8"))
+        if state.pressed("b") and lt_now:
+            self._tap_skill_binding("b", bindings.get("lt_b", "8"), now,
+                                    not self._previous.pressed("b") or self._lt_edge_up)
 
     def _handle_overworld_remap(
         self,
@@ -183,6 +188,11 @@ class OverworldNavigationMixin:
         lt_now = self._lt_current
         stable = self._previous_panels
         panels_open = bool(stable[0]) or bool(stable[1])
+        if not panels_open and not lt_now:
+            for button in ("b", "y"):
+                if state.pressed(button):
+                    self._tap_skill_binding(button, bindings.get(button), now,
+                                            not self._previous.pressed(button) or self._lt_was_active)
         # B: LT+B (8) já foi consumido pelos combos — não reprocessar aqui (senão
         # sairia ESC E 8 no mesmo tick). Sem LT: com painel aberto no tick anterior,
         # B = ESC + reset; senão B toca o 2.
@@ -195,8 +205,6 @@ class OverworldNavigationMixin:
                 # segue intacto — a parte de cursor roda depois no mesmo tick.
                 self.injector.tap("ESC")
                 self._reset_active_panels()
-            else:
-                self._tap_binding(bindings.get("b"))
         # Y: LT+Y (7) já foi consumido pelos combos. Sem LT: com painel aberto no tick
         # anterior, Y = Shift + clique esquerdo; senão Y toca o 1.
         if state.pressed("y") and not self._previous.pressed("y") and not lt_now:
@@ -225,8 +233,6 @@ class OverworldNavigationMixin:
                     self._active_panels[1] = ""
                 if [left, right] != self._active_panels:
                     self.shared.update(active_panels=list(self._active_panels))
-            else:
-                self._tap_binding(bindings.get("y"))
 
     def _handle_overworld_dpad(
         self,
