@@ -32,6 +32,18 @@ Clientes v2 anteriores, sem esses flags, continuam compatíveis com o protocolo.
 `destructible_actions` identifica a DLL que aceita o ataque por A/× e recusa
 trocas de família entre coleta, NPC/prop e destrutível, sem consumir outro alvo.
 
+NPCs recebem MoveTo até sua posição antes do estado 9. A rotina nativa de
+conversa (`+0x1B8`) espera um caminho existente; sozinha ela desiste fora de
+2--2,75 unidades, embora a seleção aceite o raio configurado (padrão 4,5).
+A autorização acompanha o progresso da aproximação, com prazo renovado a
+cada avanço de pelo menos 0,1 unidade e cancelamento após 1,5 s sem progresso.
+Se a rotina desistir, o NPC desaparecer ou a sessão/contexto ficar indisponível,
+o alvo e o caminho pendentes são liberados. Um novo vetor de caminhada cancela
+a aproximação antes da IA e é executado na mesma atualização, preservando
+habilidades que controlam o caminho. Só a entrada no estado de diálogo/serviço
+confirma a execução. `npc_approach` identifica a DLL com essa correção e exige
+reinício quando o jogo ainda carrega a versão anterior.
+
 Destrutíveis são candidatos próprios (tipo 4), reconhecidos por CBreakable na
 hierarquia RTTI, incluindo barris comuns/explosivos e subclasses de mods. A/×
 mantém o jogador no estado parado (0), cancela o caminho e chama o ataque básico
@@ -84,6 +96,11 @@ executável que não é o jogo. Os testes Python usam TCP real de loopback.
 O teste de interação executa os hooks reais com objetos simulados, incluindo
 o Interact aninhado que consome o alvo e os eventos 0 e 46/47 no frame seguinte;
 não abre janela nem envia entrada ao desktop.
+O teste de NPC executa o dispatcher e update_hook reais com NPC, navegação e
+relógio simulados: bordas de 4,5/8 unidades, aproximação lenta, conversa,
+cancelamento pelo analógico na mesma atualização, caminho recusado, inatividade,
+desaparecimento do NPC, perda de foco, troca de modo e menus. A mesma regressão
+contra o runtime anterior falha por ausência da chamada de navegação.
 
 Dependência vendorizada: MinHook v1.3.4, commit
 c3fcafdc10146beb5919319d0683e44e3c30d537, sob BSD-2-Clause. Licença completa em

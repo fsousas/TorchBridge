@@ -62,6 +62,13 @@ fullscreen continua independente e opcional.
   Se o tipo do alvo mudar entre o aviso e a execução, a ação é recusada;
   um comando de coleta nunca conversa com um NPC ou abre uma porta.
   Segurar o botão ou reconectar o canal não repete uma ação antiga.
+- Uma interação com NPC inicia o caminho até ele antes do estado nativo de
+  conversar. Isso cobre NPCs selecionados na borda do raio, além do alcance de
+  conversa do jogo. O analógico pode cancelar a aproximação na mesma atualização,
+  sem esperar o prazo da tentativa. Uma desistência da rotina nativa libera a
+  tentativa imediatamente; aproximações que avançam renovam o prazo, enquanto
+  caminhos sem progresso expiram após 1,5 s. A conclusão só é registrada quando
+  o jogo avança para o estado de diálogo/serviço.
 - O ataque comum com A/Cruz mantém o modificador no overworld, inclusive sobre NPCs.
   Coleta e ataque a destrutíveis selecionados consomem o pressionamento e usam
   comandos nativos. É preciso soltar o botão entre ações: segurá-lo não ataca

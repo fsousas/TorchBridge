@@ -40,6 +40,13 @@ posição na tela não fazem um objeto mais distante tomar o lugar do mais próx
 Os métodos originais preservam requisitos de missão, chaves, colisões e serviços.
 Menus, combos, dados incompletos, carregamento e perda de foco suspendem a ação.
 
+Para NPCs na borda do raio, D-pad ↑ inicia a navegação nativa e depois o estado
+de conversa. Um novo comando do analógico cancela essa aproximação antes da
+próxima atualização da IA e já pode iniciar a caminhada nessa atualização.
+Se a conversa desistir, o alvo desaparecer ou o caminho falhar, a tentativa é
+liberada sem impor o restante da espera de 1,5 s. Aproximações lentas que
+continuam avançando renovam esse prazo de inatividade.
+
 Instalação, famílias adicionais e proteção de ativação/transições:
 [MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md).
 
@@ -206,6 +213,14 @@ O ramo de destrutíveis em `Pickup` (virtual `+0x1B4`, `0x00498B00`) verifica
 alcance em `0x00490180` e visibilidade em `0x0048B060`, antes de atacar.
 O módulo resolve essas chamadas relativas e confere assinaturas, reutilizando
 as verificações sem executar Pickup/MoveTo nem escrever posições ou dano.
+
+A rotina de conversa do mesmo Steam, virtual `+0x1B8` (`0x00496DF0`), não chama
+MoveTo. Ela espera um caminho já ativo e só avança para diálogo/serviço ao
+alcançar o NPC: a desmontagem mostra os limites de 2 e 2,75 unidades. Com o
+estado 9 isolado, um jogador parado a 4,49 unidades perde o alvo e retorna ao
+estado 2; manter a autorização antiga por 1,5 s bloqueava o analógico mesmo
+após essa desistência. A correção inicia MoveTo antes do estado 9, acompanha
+progresso/conclusão e permite cancelar a aproximação antes da IA atualizar.
 
 A inspeção do fluxo de escadas/entradas confirmou que
 `CTriggerUnit::Activate` (`0x004DE6C0`) muda o estado em `+0x1EC` e agenda

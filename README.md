@@ -150,6 +150,10 @@ Em movimento direto, aproxime-se de um NPC, portal, escadas, fonte, porta,
 alavanca ou local de pesca. O overlay indica o alvo mais próximo; pressione
 **D-pad ↑** para interagir. O módulo valida a instância e o alcance no próprio jogo. Segurar não repete a ação.
 
+Se o NPC estiver dentro do raio, mas além do alcance da conversa, o personagem
+se aproxima pela navegação do jogo antes de conversar. Mover o analógico durante
+essa aproximação cancela a conversa pendente e retoma a caminhada imediatamente.
+
 Barris comuns, explosivos e demais destrutíveis recebem um ataque com **A (Xbox/Nintendo)**
 ou **× (PlayStation)**, com o ícone `interact-*.png`,
 mantendo o personagem parado. O jogo verifica alcance da arma, obstáculos e

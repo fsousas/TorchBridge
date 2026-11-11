@@ -12,6 +12,7 @@ constexpr uint32_t ready = 1, protected_world = 2, highlighted = 4, moving = 8, 
 constexpr uint32_t typed_interactions = 32; // Endpoint capability, not a reply flag.
 constexpr uint32_t stationary_breakables = 64; // Attack destructibles without pathing.
 constexpr uint32_t destructible_actions = 128; // Separate face-button attack intent.
+constexpr uint32_t npc_approach = 256; // Native path and interruptible pending talk.
 enum Reason : uint32_t { idle, walking_now, no_session, no_focus, wrong_scene, menu,
     skill_lock, no_target, acting, unsupported, incomplete, transport_error, attack_unavailable };
 enum ActionResult : uint32_t { none, accepted, unavailable, changed_target, blocked };

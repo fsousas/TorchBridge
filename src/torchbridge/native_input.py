@@ -18,6 +18,7 @@ PICKUP_ACTION, WORLD_ACTION, ATTACK_ACTION = 16, 32, 64
 TYPED_INTERACTIONS = 32
 STATIONARY_BREAKABLES = 64
 DESTRUCTIBLE_ACTIONS = 128
+NPC_APPROACH = 256
 READY, PROTECTED, HIGHLIGHTED, MOVING, COMPLETE = 1, 2, 4, 8, 16
 REASONS = ("Parado", "Caminhando", "Aguardando controle", "Jogo sem foco",
            "Cenário mudou", "Menu aberto", "Habilidade em execução", "Nenhum alvo próximo",
@@ -140,9 +141,9 @@ class NativeInputClient:
                 return
             if not 0 < port <= 65535 or not capabilities & READY:
                 return
-            required = TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS
+            required = TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS | NPC_APPROACH
             if capabilities & required != required:
-                # Older DLLs cannot enforce the separate A/collect/attack intents.
+                # Require typed actions and the interruptible NPC approach.
                 # Prepare the bundled update and require a new game process.
                 self.message = "Reinicie o Torchlight para atualizar as interações"
                 exe = getattr(memory, "_exe_path", "")

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from torchbridge.native_input import (NativeInputClient, MAGIC, VERSION, ENDPOINT, COMMAND,
                                       REPLY, ACTIVE, DIRECT, WALKING, PICKUP_ACTION,
                                       WORLD_ACTION, ATTACK_ACTION, TYPED_INTERACTIONS,
-                                      STATIONARY_BREAKABLES, DESTRUCTIBLE_ACTIONS)
+                                      STATIONARY_BREAKABLES, DESTRUCTIBLE_ACTIONS, NPC_APPROACH)
 from torchbridge.native_input_setup import (IDENTITY, MANIFEST, install, remove,
                                             launch_environment)
 from test_fullscreen import pe_file
@@ -66,7 +66,7 @@ class LoopbackInputTests(unittest.TestCase):
         self.thread.start()
         self.client=NativeInputClient()
         raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,0x100,0x400000,
-                          7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS,0)
+                          7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS | NPC_APPROACH,0)
         self.memory=SimpleNamespace(pid=9876,_module_base=0x400000,_linux=SimpleNamespace(start="1"),
                                     find_export=lambda *_:0x800000,read_bytes=lambda *_:raw)
         self.addCleanup(self.cleanup)
@@ -174,6 +174,15 @@ class LoopbackInputTests(unittest.TestCase):
     def test_module_with_dpad_destructibles_requires_the_face_button_update(self):
         raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
                           0x100,0x400000,7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES,0)
+        self.memory.read_bytes=lambda *_:raw
+        self.client.connect(self.memory,10.)
+        self.assertIsNone(self.client.socket)
+        self.assertIn("Reinicie o Torchlight",self.client.message)
+        self.assertEqual(self.frames,[])
+
+    def test_module_without_npc_approach_requires_restart_before_connecting(self):
+        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
+                          0x100,0x400000,7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS,0)
         self.memory.read_bytes=lambda *_:raw
         self.client.connect(self.memory,10.)
         self.assertIsNone(self.client.socket)

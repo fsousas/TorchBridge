@@ -39,6 +39,8 @@ bool strict_world = false, strict_warps = false, was_moving = false;
 bool stationary_attack = false;
 uintptr_t highlighted_object = 0, highlight_level = 0, authorized_target = 0;
 uintptr_t authorized_player = 0, authorized_level = 0;
+uint32_t authorized_kind = 0;
+double npc_progress_distance = 0;
 ULONGLONG authorized_until = 0, ordered_at = 0;
 uint32_t scope = 0;
 ActionLatch actions;
@@ -411,13 +413,44 @@ bool locked() {
     return skill && (field<uint8_t>(scene.player, 0x20B) ||
         (field<float>(scene.player, 0x2C0) > 0 && !field<uint8_t>(scene.player, 0x2BD)));
 }
+bool pending_npc() { return authorized_target && authorized_kind == 1; }
+void cancel_npc() {
+    auto hero = reinterpret_cast<void*>(scene.player);
+    original_target(hero, nullptr);
+    original_item(hero, nullptr);
+    stop_path(hero);
+    if (field<uint32_t>(scene.player, 0x284) == 9)
+        method<ModeFn>(scene.player, 0x174)(hero, 0);
+    authorized_target = 0;
+    stationary_attack = false;
+    status.action_result = unavailable;
+}
+void finish_npc() {
+    if (!pending_npc()) return;
+    const auto mode = field<uint32_t>(scene.player, 0x284);
+    const bool target = field<uint32_t>(scene.player, 0x290) == authorized_target;
+    if (mode == 9 && target) return;
+    // Native talk either advances to the NPC's service/dialog state or gives
+    // up. Issuing state 9 alone is not proof that a conversation happened.
+    // These are the service states selected by native talk. A combat/skill
+    // takeover must release the pending talk without pretending it completed.
+    const bool service = mode == 17 || mode == 19 || mode == 21 || mode == 25 ||
+        mode == 26 || mode == 27 || mode == 30 || mode == 36 || mode == 37;
+    const bool completed = target && service;
+    if (completed) status.executed = static_cast<uint32_t>(authorized_target);
+    status.action_result = completed ? accepted : unavailable;
+    if (!completed && !locked()) cancel_npc();
+    else authorized_target = 0;
+}
 void use(const Candidate& candidate, ULONGLONG now) {
     stop();
     stationary_attack = candidate.type == 4;
     authorized_target = candidate.address;
+    authorized_kind = candidate.type;
     authorized_player = scene.player; authorized_level = scene.level;
     authorized_until = now + 1500;
     status.reason = acting; status.action_result = accepted;
+    status.executed = 0;
     auto hero = reinterpret_cast<void*>(scene.player);
     original_target(hero, nullptr);
     original_item(hero, nullptr);
@@ -439,9 +472,16 @@ void use(const Candidate& candidate, ULONGLONG now) {
             status.reason = attack_unavailable;
         }
     } else if (candidate.type == 1) {
+        // Talk (state 9, virtual +0x1B8) waits for an existing path; it never
+        // starts one. Beyond its 2--2.75 unit reach, an idle hero loses the target.
+        // Start the original navigation first, then let talk own the approach.
+        stop_path(hero);
         original_target(hero, reinterpret_cast<void*>(candidate.address));
-        method<ModeFn>(scene.player, 0x174)(hero, 9); // Native approach/talk state.
-        status.executed = static_cast<uint32_t>(candidate.address);
+        move_to(hero, reinterpret_cast<void*>(scene.level), candidate.x, candidate.z);
+        method<ModeFn>(scene.player, 0x174)(hero, 9);
+        Candidate origin{};
+        npc_progress_distance = position(scene.player, origin)
+            ? std::sqrt(distance2(candidate, origin.x, origin.z)) : 0;
     } else {
         original_item(hero, reinterpret_cast<void*>(candidate.address));
         method<ModeFn>(scene.player, 0x174)(hero, 7);
@@ -479,6 +519,7 @@ void frame() {
         scene.level == command.level && (class_info(scene.player).mask & player);
     const bool focus = focused();
     const bool menus = menu_open();
+    if (live && same && focus) finish_npc();
     const bool inspect_world = live && same && focus && !menus && command.flags & direct;
     std::vector<Candidate> candidates;
     std::unordered_set<uintptr_t> objects;
@@ -505,6 +546,7 @@ void frame() {
     if (strict_world) { strict_warps = true; status.flags |= protected_world; }
     if (!inspect_world || !roster_ok) {
         if (trigger_event.needs_session) trigger_event.clear();
+        if (pending_npc() && same && !locked()) cancel_npc();
         stop();
         if (authorized_target && (!live || !same || !focus) &&
             scene.player == authorized_player && scene.level == authorized_level) {
@@ -530,6 +572,21 @@ void frame() {
         if (!may_interact && trigger_event.needs_session) trigger_event.clear();
         highlight(may_interact ? status.selected : 0, objects);
         if (highlighted_object) status.flags |= highlighted;
+        if (pending_npc()) {
+            const auto npc = std::find_if(candidates.begin(), candidates.end(), [](const Candidate& c) {
+                return c.type == 1 && c.address == authorized_target;
+            });
+            if (npc == candidates.end()) {
+                cancel_npc();
+            } else if (have_position) {
+                const auto distance = std::sqrt(distance2(*npc, hero.x, hero.z));
+                if (distance + 0.1 < npc_progress_distance) {
+                    // Keep a long/slow approach alive only while it advances.
+                    npc_progress_distance = distance;
+                    authorized_until = now + 1500;
+                }
+            }
+        }
         if (authorized_target && now > authorized_until) {
             authorized_target = 0;
             stationary_attack = false;
@@ -584,16 +641,22 @@ void cancel_before_update(void* self) {
     const auto game = field<uint32_t>(game_global), client = field<uint32_t>(game, 0x64);
     const auto p = field<uint32_t>(client, 0x2C), level = field<uint32_t>(client, 0x38);
     if (reinterpret_cast<uintptr_t>(self) != p) return;
+    const bool walk_cancels_npc = pending_npc() && !locked() &&
+        (command.flags & walking) && std::hypot(command.dx, command.dz) > 0.001f;
     const bool cancelled = !received || now-received > 200 || !focused() ||
         !(command.flags & active) || !(command.flags & direct) ||
         command.player != p || command.level != level ||
-        (authorized_target && now > authorized_until);
+        (authorized_target && now > authorized_until) || walk_cancels_npc;
     if (cancelled) {
         // Cancel before original AI can complete an old approach/talk/use.
         if (authorized_target && p == authorized_player && level == authorized_level) {
-            original_target(self, nullptr);
-            original_item(self, nullptr);
-            stop_path(self);
+            if (pending_npc()) {
+                cancel_npc();
+            } else {
+                original_target(self, nullptr);
+                original_item(self, nullptr);
+                stop_path(self);
+            }
         } else if (was_moving) {
             stop_path(self);
         }
@@ -713,7 +776,7 @@ DWORD WINAPI serve(void*) {
     getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
     endpoint.port = ntohs(address.sin_port);
     endpoint.capabilities = ready | protected_world | highlighted | typed_interactions |
-        stationary_breakables | destructible_actions;
+        stationary_breakables | destructible_actions | npc_approach;
     MemoryBarrier(); std::memcpy(endpoint.magic, magic, 8);
     initialized.store(true);
     for (;;) {
