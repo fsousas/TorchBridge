@@ -77,13 +77,21 @@ classe interativa reconhecida.
 | Pesca | UNITTYPE 122 | Interface original de pesca |
 | Fontes e santuários | 157 / 158 / 159 e props reconhecidos | Efeito original |
 | Portais e waypoints | 43 / 165 / 173 / 171 e props reconhecidos | Uso original com transição autorizada |
+| Escadas e entradas de dungeon | CTriggerUnit e suas saídas Triggered/estado | Uso original e autorização de cada saída adiada uma vez |
 | Itens, equipamentos e ouro | CItem e subclasses; ouro 34 | Coleta original |
 | Destrutíveis | CBreakable e subclasses | Dispatch original; combate continua disponível |
 | Outros objetos utilizáveis | Subclasse interativa com dispatch reconhecido | Categoria genérica e método original |
 
 A seleção não ativa objetos. Os limites de alvo/uso e a ativação direta de props
 são protegidos para impedir que uma rotina de proximidade contorne o D-pad no
-modo direto. A ação lógica CWarper exige um dispatch autorizado de interação.
+modo direto. A ação lógica CWarper exige um dispatch autorizado de interação
+ou as saídas adiadas do mesmo objeto explicitamente utilizado. Na atualização
+seguinte, CTriggerUnit emite Triggered (evento 0) antes do estado (46/47).
+Mine Entrance chama CWarper a partir do evento 0; autorizar apenas 46/47
+continua bloqueando a entrada. A autorização acompanha somente essas saídas,
+uma vez cada, por até 1,5 s, e é cancelada se o jogador,
+cenário, conexão, foco ou sessão de entrada mudarem. Isso permite que entradas e
+escadas concluam a transição após o D-pad sem autorizar outros volumes próximos.
 Volumes de spawn, dano e objetivos não são desativados globalmente: eles fazem
 parte do funcionamento do cenário, e não da escolha de um objeto para usar.
 

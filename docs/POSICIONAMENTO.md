@@ -179,6 +179,17 @@ A análise offline do Steam instalado confirmou os getters de posição em
 (componentes locais), RTTI de CPlayer/CMonster/CTriggerUnit e os getters Ogre
 `getViewMatrix`/`getProjectionMatrix`/`_getDerivedPosition`.
 
+A inspeção do fluxo de escadas/entradas confirmou que
+`CTriggerUnit::Activate` (`0x004DE6C0`) muda o estado em `+0x1EC` e agenda
+saídas em `+0x201`. `CTriggerUnit::Update` (`0x004DE0D0`) emite primeiro o evento
+0 (Triggered), seguido de 46/47 (estados 0/1), no frame seguinte.
+Na Mine Entrance, o warper está ligado ao evento 0. O rastreamento real confirmou
+`Interact → Activate → evento 29 → retorno → evento 0 → CWarper → evento 46`.
+`CPositionableObject::Signal`, virtual
+`+0x14` (`0x00453F80` no Steam), encaminha esses eventos ao grupo lógico em
+`+0x2C`. O módulo preserva uma autorização de uso apenas para essas saídas;
+encerrar a autorização junto com `Interact` bloquearia o CWarper da escada.
+
 SHA-256 dos binários inspecionados:
 
 ```text
@@ -205,6 +216,26 @@ Também passaram 38 testes de overlay com `QT_SCALE_FACTOR=1.5`, `compileall`
 e `git diff --check`. O wheel Linux foi gerado, instalado em ambiente virtual
 isolado fora do checkout e verificado quanto aos imports do motor/overlay,
 carregamento do transporte nativo e comando `torchbridge-cenario`.
+
+### Regressão de Mine Entrance e Stairs Up (10/11/2026)
+
+Uma cópia isolada do jogo e do prefixo/saves reproduziu a falha usando o mesmo
+handler de D-pad do aplicativo, com pressionamentos simulados e comandos nativos
+reais. O rastreamento confirmou que o botão era recebido e Interact/Activate
+retornavam sucesso, mas a Mine Entrance chamava CWarper pelo evento 0, fora da
+autorização. O contador de transições bloqueadas aumentava e o cenário não mudava.
+Os testes anteriores simulavam o warper em 46/47 e não reproduziam essa ligação.
+
+Com a autorização do evento 0 e das saídas de estado, o ensaio confirmou:
+
+- Mine Entrance: `TOWN → MAIN`, estado do trigger `1 → 0`, eventos `0 → 46`;
+- Stairs Up: `MAIN → TOWN`, estado do trigger `0 → 1`, eventos `0 → 47`;
+- CWarper executado com autorização nos dois casos, sem bloqueios das transições;
+- permanecer junto à escada não repetiu a ação sem um novo pressionamento.
+
+A regressão nativa agora usa a ordem real `0 → 46/47` e testa o warper ligado
+a qualquer uma dessas saídas, incluindo repetição, objeto incorreto e cancelamento.
+O ensaio não usou controle físico nem executou Windows/GOG.
 
 ### Ensaio inicial de hover no Omarchy (09/11/2026, anterior ao módulo nativo)
 

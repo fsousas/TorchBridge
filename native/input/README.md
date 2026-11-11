@@ -25,7 +25,13 @@ A interação usa os estados nativos de falar/usar item e a implementação virt
 da entidade, preservando requisitos, colisões, lojas, pesca e missões. Os
 dispatches de itens sem autorização são bloqueados no modo direto. Destrutíveis
 continuam respondendo ao combate. Warpers só executam dentro de um dispatch de
-interação autorizado; volumes de spawn/objetivo não são desativados globalmente.
+interação autorizado ou das saídas que ele agendou para o próximo frame.
+CTriggerUnit emite primeiro Triggered (evento 0), depois o estado (46/47).
+Mine Entrance liga seu warper ao evento 0, não ao evento de estado.
+Essa autorização adiada vale uma vez por saída, para a mesma instância, jogador, cenário
+e conexão, por até 1,5 s. Perda de foco, menus ou sessão vencida cancelam a ação
+do D-pad. Assim, escadas e entradas de dungeon completam seu evento nativo sem
+liberar transições por mera proximidade. Volumes de spawn/objetivo não são desativados globalmente.
 No modo cursor, um clique explícito continua sendo uma interação válida.
 
 O canal TCP é restrito a loopback. Porta e token aleatório são descobertos pelo
@@ -50,8 +56,12 @@ python scripts/build_native_input.py --compiler /caminho/i686-w64-mingw32-clang+
 ~~~
 
 O binário vai para assets/native/x86/winmm.dll. Os testes CMake incluem protocolo,
-seleção, repetição/reconexão de ações e carregamento/forwarding WinMM em um
+seleção, repetição/reconexão de ações, saídas de estado adiadas e
+carregamento/forwarding WinMM em um
 executável que não é o jogo. Os testes Python usam TCP real de loopback.
+O teste de interação executa os hooks reais com objetos simulados, incluindo
+o Interact aninhado que consome o alvo e os eventos 0 e 46/47 no frame seguinte;
+não abre janela nem envia entrada ao desktop.
 
 Dependência vendorizada: MinHook v1.3.4, commit
 c3fcafdc10146beb5919319d0683e44e3c30d537, sob BSD-2-Clause. Licença completa em

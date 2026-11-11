@@ -16,6 +16,7 @@
 #include <vector>
 #include "vendor/minhook/include/MinHook.h"
 #include "wire.h"
+#include "interaction.h"
 
 extern "C" __declspec(dllexport) tbinput::Endpoint TorchBridgeInputEndpoint{};
 extern "C" const char* TorchBridgeInputIdentity() {
@@ -40,6 +41,7 @@ uintptr_t authorized_player = 0, authorized_level = 0;
 ULONGLONG authorized_until = 0, ordered_at = 0;
 uint32_t scope = 0;
 ActionLatch actions;
+TriggerEvent trigger_event;
 float last_dx = 0, last_dz = 0;
 Reply status{};
 
@@ -135,12 +137,14 @@ using PositionFn = float*(__thiscall*)(void*, float*, int);
 using UpdateFn = void(__fastcall*)(void*, void*, uint32_t, uint32_t, float);
 using WarpFn = void(__fastcall*)(void*, void*);
 using InteractFn = uint32_t(__fastcall*)(void*, void*, void*);
+using SignalFn = void(__fastcall*)(void*, void*, uint32_t);
 VoidFn stop_path = nullptr;
 MoveFn move_to = nullptr;
 TargetFn original_target = nullptr, original_item = nullptr;
 UpdateFn original_update = nullptr;
 WarpFn original_warp = nullptr;
 InteractFn original_activate = nullptr;
+SignalFn original_signal = nullptr;
 IsaFn is_a = nullptr;
 PositionFn get_position = nullptr;
 std::array<InteractFn, 64> original_interacts{};
@@ -180,6 +184,37 @@ void __fastcall warp_hook(void* self, void* edx) {
     if (strict_warps && !scope) { ++status.blocked_warps; return; }
     original_warp(self, edx);
 }
+bool menu_open();
+bool trigger_session(uintptr_t hero, uintptr_t level) {
+    Command command{};
+    ULONGLONG received = 0;
+    uint32_t generation = 0;
+    if (!TryAcquireSRWLockShared(&channel_lock)) return false;
+    command = latest; received = received_at; generation = connection_generation;
+    ReleaseSRWLockShared(&channel_lock);
+    return received && GetTickCount64() - received <= 200 &&
+        generation == current_generation &&
+        (command.flags & (active | direct | allow_interaction)) == (active | direct | allow_interaction) &&
+        command.player == hero && command.level == level && !menu_open();
+}
+void __fastcall signal_hook(void* self, void* edx, uint32_t event) {
+    // Update emits Triggered (0) before the state output (46/47). Entrances
+    // wire their warper to Triggered; authorizing only the state output misses
+    // that call. Use (29) is synchronous and already has a dispatch scope.
+    if (trigger_event.object && (event == 0 || event == 46 || event == 47)) {
+        const auto game = field<uint32_t>(game_global), client = field<uint32_t>(game, 0x64);
+        const auto hero = field<uint32_t>(client, 0x2C), level = field<uint32_t>(client, 0x38);
+        const bool pending = trigger_event.consume(reinterpret_cast<uintptr_t>(self), hero, level,
+            event, current_generation, GetTickCount64(), focused(), trigger_session(hero, level));
+        if (pending) {
+            ++scope;
+            original_signal(self, edx, event);
+            --scope;
+            return;
+        }
+    }
+    original_signal(self, edx, event);
+}
 uint32_t __fastcall activate_hook(void* self, void* edx, void* user) {
     const auto address = reinterpret_cast<uintptr_t>(self);
     // Logic volumes can call Activate directly, bypassing Interact. Protect
@@ -191,7 +226,17 @@ uint32_t __fastcall activate_hook(void* self, void* edx, void* user) {
         ++status.blocked_interactions;
         return 0;
     }
-    return original_activate(self, edx, user);
+    // Capture before calling the original: its nested CItem::Interact consumes
+    // authorized_target before Activate returns. Never grant a proximity use.
+    const bool explicit_use = scope && (authorized(address) || !strict_world);
+    const auto result = original_activate(self, edx, user);
+    const auto state = field<uint32_t>(address, 0x1EC);
+    if (explicit_use && static_cast<uint8_t>(result) && state <= 1 &&
+        field<uint8_t>(address, 0x201)) {
+        trigger_event.arm(address, scene.player, scene.level, 46 + state,
+                          current_generation, GetTickCount64() + 1500, strict_world);
+    }
+    return result;
 }
 template<size_t N> uint32_t __fastcall interact_hook(void* self, void* edx, void* user) {
     const auto address = reinterpret_cast<uintptr_t>(self);
@@ -377,6 +422,7 @@ void frame() {
     if (generation != current_generation) {
         current_generation = generation;
         authorized_target = 0;
+        trigger_event.clear();
     }
     const bool fresh_action = actions.consume(generation, command.action);
     status.sequence = command.sequence;
@@ -416,6 +462,7 @@ void frame() {
         strict_world = (command.flags & direct) != 0 && !menus;
     if (strict_world) { strict_warps = true; status.flags |= protected_world; }
     if (!inspect_world || !roster_ok) {
+        if (trigger_event.needs_session) trigger_event.clear();
         stop();
         if (authorized_target && (!live || !same || !focus) &&
             scene.player == authorized_player && scene.level == authorized_level) {
@@ -437,6 +484,7 @@ void frame() {
                 (!selected || nearer(candidate, *selected, hero.x, hero.z))) selected = &candidate;
         status.selected = selected ? static_cast<uint32_t>(selected->address) : 0;
         const bool may_interact = (command.flags & allow_interaction) != 0;
+        if (!may_interact && trigger_event.needs_session) trigger_event.clear();
         highlight(may_interact ? status.selected : 0, objects);
         if (highlighted_object) status.flags |= highlighted;
         if (authorized_target && now > authorized_until) {
@@ -544,6 +592,12 @@ bool initialize() {
     const auto destination = at(steam ? 0x492AD0 : 0x494B30);
     const auto stopping = at(steam ? 0x484360 : 0x486150);
     const auto activation = at(steam ? 0x4DE6C0 : 0x4E1180);
+    // CPositionableObject::Signal: virtual +0x14 forwards (self, event) to
+    // its logic group (+0x2C). Resolve through RTTI for both supported builds.
+    const auto trigger_vt = find_vtable("CTriggerUnit");
+    const auto signal = field<uint32_t>(trigger_vt, 0x14);
+    const uint8_t logic_group[] = {0x8B,0x48,0x2C};
+    if (!trigger_vt || !contains(signal, 24, logic_group, sizeof logic_group)) return false;
     const uint8_t pathfinder[] = {0x0C,0x02,0,0}, holding[] = {0x0A,0x02,0,0};
     const uint8_t moving_field[] = {0x08,0x02,0,0};
     if (!contains(destination, 160, pathfinder, 4) || !contains(destination, 160, holding, 4) ||
@@ -567,6 +621,7 @@ bool initialize() {
         !hook(at(steam ? 0x492A50 : 0x494AB0), reinterpret_cast<void*>(&item_hook),
               reinterpret_cast<void**>(&original_item)) ||
         !hook(activation, reinterpret_cast<void*>(&activate_hook), reinterpret_cast<void**>(&original_activate)) ||
+        !hook(signal, reinterpret_cast<void*>(&signal_hook), reinterpret_cast<void**>(&original_signal)) ||
         !hook(warp, reinterpret_cast<void*>(&warp_hook), reinterpret_cast<void**>(&original_warp)) ||
         !register_item_dispatches()) {
         MH_Uninitialize(); return false;

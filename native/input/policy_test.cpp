@@ -2,7 +2,9 @@
 #undef NDEBUG
 #endif
 #include "wire.h"
+#include "interaction.h"
 #include <cassert>
+#include <initializer_list>
 #include <limits>
 using namespace tbinput;
 int main() {
@@ -37,4 +39,31 @@ int main() {
     assert(in_range(a, 0, 0, 0, 1) && !in_range(a, 0, 3, 0, 4.5f));
     a.x = std::numeric_limits<float>::infinity();
     assert(!in_range(a, 0, 0, 0, 4.5f));
+
+    // Stairs/entrances emit state outputs on the next frame, after the
+    // synchronous Interact scope has ended. Only that exact output may warp.
+    for (uint32_t state : {0u, 1u}) {
+        TriggerEvent event;
+        event.arm(200, 10, 20, 46 + state, 1, 1500, true);
+        assert(!event.consume(201, 10, 20, 46 + state, 1, 16, true, true));
+        assert(!event.consume(200, 10, 20, 29, 1, 16, true, true));
+        assert(!event.consume(200, 10, 20, 47 - state, 1, 16, true, true));
+        assert(event.consume(200, 10, 20, 0, 1, 16, true, true));
+        assert(!event.consume(200, 10, 20, 0, 1, 16, true, true));
+        assert(event.consume(200, 10, 20, 46 + state, 1, 16, true, true));
+        assert(!event.consume(200, 10, 20, 46 + state, 1, 17, true, true));
+    }
+    // Focus, connection, scene, menu/lease cancellation cannot leave an old
+    // press available when input resumes, even before its original deadline.
+    for (unsigned cancelled = 0; cancelled != 6; ++cancelled) {
+        TriggerEvent event;
+        event.arm(200, 10, 20, 47, 1, 1500, true);
+        assert(!event.consume(200, cancelled == 0 ? 11 : 10, cancelled == 1 ? 21 : 20,
+            47, cancelled == 2 ? 2 : 1, cancelled == 3 ? 1501 : 16,
+            cancelled != 4, cancelled != 5));
+        assert(!event.consume(200, 10, 20, 47, 1, 17, true, true));
+    }
+    TriggerEvent mouse;
+    mouse.arm(200, 10, 20, 47, 1, 1500, false);
+    assert(mouse.consume(200, 10, 20, 47, 1, 16, true, false));
 }
