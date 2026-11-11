@@ -47,8 +47,11 @@ class WorldOverlayTests(unittest.TestCase):
                                          memory_is_in_game=True, game_rect=Rect(100, 80, 1920, 1080),
                                          world=world_fixture(), interaction_target=world_fixture().entities[0])
 
-    def render(self, snapshot, scale=1., calibration=False):
+    def render(self, snapshot, scale=1., calibration=False, dpi=None):
         image = QImage(snapshot.game_rect.width, snapshot.game_rect.height, QImage.Format.Format_ARGB32)
+        if dpi is not None:
+            image.setDotsPerMeterX(round(dpi / .0254))
+            image.setDotsPerMeterY(round(dpi / .0254))
         image.fill(Qt.GlobalColor.transparent)
         painter = RecordingPainter(image)
         try:
@@ -133,6 +136,17 @@ class WorldOverlayTests(unittest.TestCase):
         self.render(replace(self.snapshot, interaction_target=target))
         self.assertIn("…", self.drawn_text[0])
         self.assertTrue(self.drawn_text[0].endswith(" · 0.5"))
+
+    def test_prompt_keeps_npc_details_and_geometry_at_different_device_dpi(self):
+        target = replace(self.snapshot.interaction_target, name="Miner", quest_status="unavailable")
+        snapshot = replace(self.snapshot, interaction_target=target)
+        for scale in (1., 1.5):
+            reference = self.render(snapshot, scale, dpi=96)
+            for dpi in (96, 144, 192):
+                with self.subTest(scale=scale, dpi=dpi):
+                    frame = self.render(snapshot, scale, dpi=dpi)
+                    self.assertEqual(self.drawn_text, ["NPC · Missão indisponível: Miner · 0.5"])
+                    self.assertEqual(frame, reference)
 
     def test_missing_image_falls_back_to_the_correct_button_label(self):
         for kind in ("loot", "breakable"):

@@ -25,9 +25,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0 libwayland-dev libwayland-bin libxkbcommon-dev pkg-config gcc
+        timeout-minutes: 5
+        run: bash scripts/install_ci_linux_deps.sh
       - run: python -m pip install -e .
       - run: python -m pip wheel --no-deps . --wheel-dir dist
       - run: python scripts/run_tests.py

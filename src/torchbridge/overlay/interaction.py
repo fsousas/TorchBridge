@@ -5,7 +5,7 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
 
 from ..models import OverlaySnapshot, Rect, controller_type_from_name
 from ..resources import resource_root
@@ -13,6 +13,14 @@ from ..world import INTERACTION_LABELS, WorldCamera, WorldEntity, WorldPosition
 
 
 class WorldInteractionOverlayMixin:
+    def _interaction_prompt_font(self, scale: float) -> QFont:
+        # These boxes/icons already use viewport pixels. Point-sized fonts grow
+        # again with the paint device's DPI (notably Windows offscreen/D3D9),
+        # truncating ordinary NPC details. 13 px matches 10 pt at 96 DPI.
+        font = self._font(10, True)
+        font.setPixelSize(max(8, round(13 * scale)))
+        return font
+
     def _interaction_icon(self, family: str, face_button: bool) -> QPixmap | None:
         filename = f"{'interact' if face_button else 'dpad-up'}-{family}.png"
         if filename not in self._interaction_icon_cache:
@@ -47,7 +55,7 @@ class WorldInteractionOverlayMixin:
             painter.drawPixmap(QRectF(left - width - gap, middle - height / 2, width, height),
                                icon, QRectF(icon.rect()))
         else:
-            painter.setFont(self._font(max(8, round(10 * scale)), True))
+            painter.setFont(self._interaction_prompt_font(scale))
             painter.setPen(QColor(255, 240, 210))
             width = painter.fontMetrics().horizontalAdvance("[D-pad ↑]")
             painter.drawText(QRectF(left - width - gap, middle - height / 2, width, height),
@@ -88,7 +96,7 @@ class WorldInteractionOverlayMixin:
                 if icon is None:
                     text = f"[{button}] {text}"
                 painter.save()
-                painter.setFont(self._font(max(8, round(10 * scale)), True))
+                painter.setFont(self._interaction_prompt_font(scale))
                 padding, gap = 12 * scale, 8 * scale if icon is not None else 0
                 icon_height = 24 * scale if icon is not None else 0
                 icon_width = icon_height * icon.width() / icon.height() if icon is not None else 0
