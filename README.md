@@ -50,7 +50,8 @@ separadas na matriz de validação.
   indicador discreto no topo central do overlay;
 - envio de comandos somente quando o jogo está em primeiro plano;
 - leitura das posições do jogador e dos elementos interativos do cenário;
-- aviso de proximidade e interação com o alvo pelo **D-pad para cima**;
+- aviso de proximidade com ícones por controle: **A/×** coleta itens no chão e ataca destrutíveis,
+  **D-pad para cima** interage com os demais elementos;
 - liberação automática de cliques e teclas ao trocar de janela;
 - calibração do ponto central do personagem dentro do jogo;
 - perfil JSON editável e recarregado automaticamente;
@@ -149,6 +150,19 @@ Em movimento direto, aproxime-se de um NPC, portal, escadas, fonte, porta,
 alavanca ou local de pesca. O overlay indica o alvo mais próximo; pressione
 **D-pad ↑** para interagir. O módulo valida a instância e o alcance no próprio jogo. Segurar não repete a ação.
 
+Barris comuns, explosivos e demais destrutíveis recebem um ataque com **A (Xbox/Nintendo)**
+ou **× (PlayStation)**, com o ícone `interact-*.png`,
+mantendo o personagem parado. O jogo verifica alcance da arma, obstáculos e
+disponibilidade do ataque. Com uma arma corpo a corpo fora de alcance, o personagem
+permanece parado; ele não caminha automaticamente até o objeto.
+
+Itens, equipamentos e ouro no chão usam **A (Xbox/Nintendo)** ou **× (PlayStation)**
+para coleta nativa. O aviso usa `interact-*.png` para coletas e destrutíveis e
+`dpad-up-*.png` para os demais elementos, seguindo a família do controle ou o
+layout escolhido na HUD. Só a indicação do botão é substituída por imagem;
+nome, informações e distância continuam visíveis. Segurar a coleta não vira
+ataque quando o item desaparece: é preciso soltar o botão antes de outra ação.
+
 Ao ativar **Modo de calibração** no ícone TB, o overlay também mostra as
 coordenadas, os marcadores dos elementos do cenário e o raio de interação.
 Mercadores e NPCs com missão recebem identificação própria, incluindo missão
@@ -172,7 +186,9 @@ de leitura, sem exigir --launch. Na calibração aparecem estado, direção, des
 e eventuais bloqueios. Instalação, tipos cobertos e detalhes:
 [Movimento seguro](docs/MOVIMENTO-SEGURO.md).
 
-O analógico direito continua movendo a mira. A/Cruz ataca com Shift no overworld;
+O analógico direito continua movendo a mira. O ataque comum com A/Cruz usa Shift
+no overworld; coleta e ataque a destrutíveis selecionados usam os comandos nativos
+descritos acima.
 X/Quadrado usa a habilidade do clique direito. Menus suspendem a caminhada.
 
 ### Cursor / menus

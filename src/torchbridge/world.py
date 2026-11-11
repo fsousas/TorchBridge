@@ -100,6 +100,18 @@ class WorldEntity:
     def is_merchant(self) -> bool:
         return self.kind == "npc" and self.npc_role in ("merchant", "gambler")
 
+    @property
+    def is_pickup(self) -> bool:
+        return self.kind in ("loot", "gold")
+
+    @property
+    def is_destructible(self) -> bool:
+        return self.kind == "breakable"
+
+    @property
+    def uses_face_button(self) -> bool:
+        return self.is_pickup or self.is_destructible
+
 
 @dataclass(frozen=True, slots=True)
 class WorldCamera:

@@ -51,10 +51,19 @@ fullscreen continua independente e opcional.
   estável. Categoria, câmera, direção e posição na tela não favorecem outro alvo.
 - O método de highlight do próprio jogo destaca esse alvo sem mover o cursor.
   O aviso do overlay acompanha o alvo reconhecido pelo módulo.
-- **D-pad ↑** envia uma ação explícita. O módulo escolhe novamente pelas posições
+- **A (Xbox/Nintendo) / × (PlayStation)** coleta itens, equipamentos e ouro no chão.
+  Esse mesmo botão ataca barris e outros destrutíveis mantendo posição.
+  **D-pad ↑** usa NPCs e outros objetos interativos. O aviso mostra a imagem do
+  botão para a família do controle, mantendo nome, informações e distância.
+  O módulo escolhe novamente pelas posições
   atuais e valida jogador, cenário, alcance e disponibilidade ao executar.
+  Se o tipo do alvo mudar entre o aviso e a execução, a ação é recusada;
+  um comando de coleta nunca conversa com um NPC ou abre uma porta.
   Segurar o botão ou reconectar o canal não repete uma ação antiga.
-- A/Cruz mantém o modificador de ataque no overworld, inclusive sobre NPCs.
+- O ataque comum com A/Cruz mantém o modificador no overworld, inclusive sobre NPCs.
+  Coleta e ataque a destrutíveis selecionados consomem o pressionamento e usam
+  comandos nativos. É preciso soltar o botão entre ações: segurá-lo não ataca
+  após a coleta nem coleta automaticamente o loot que cair de um destrutível.
   Um ataque explícito pode posicionar a mira na direção da caminhada; a
   caminhada sozinha não o faz. O analógico direito continua permitindo mira livre.
 - Menus suspendem caminhada e highlight. O modo cursor mantém seus cliques
@@ -79,7 +88,7 @@ classe interativa reconhecida.
 | Portais e waypoints | 43 / 165 / 173 / 171 e props reconhecidos | Uso original com transição autorizada |
 | Escadas e entradas de dungeon | CTriggerUnit e suas saídas Triggered/estado | Uso original e autorização de cada saída adiada uma vez |
 | Itens, equipamentos e ouro | CItem e subclasses; ouro 34 | Coleta original |
-| Destrutíveis | CBreakable e subclasses | Dispatch original; combate continua disponível |
+| Destrutíveis | CBreakable e subclasses, incluindo barris comuns/explosivos | A/× tenta ataque básico mantendo posição, conforme alcance da arma e obstáculos |
 | Outros objetos utilizáveis | Subclasse interativa com dispatch reconhecido | Categoria genérica e método original |
 
 A seleção não ativa objetos. Os limites de alvo/uso e a ativação direta de props

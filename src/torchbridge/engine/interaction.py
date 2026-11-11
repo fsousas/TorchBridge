@@ -7,7 +7,8 @@ from ..world import WorldEntity
 
 
 class WorldInteractionMixin:
-    def _world_interaction_allowed(self, state: ControllerState, cfg: dict[str, Any], now: float) -> bool:
+    def _world_interaction_allowed(self, state: ControllerState, cfg: dict[str, Any], now: float,
+                                   button: str = "") -> bool:
         memory = self._memory_state
         return bool(
             cfg["interaction"]["enabled"] and self._mode == "direct"
@@ -19,7 +20,7 @@ class WorldInteractionMixin:
             and not any(state.pressed(b) for b in ("lb", "back", "start"))
             and state.lt < self.TRIGGER_ACTIVE_THRESHOLD
             and state.rt < self.TRIGGER_ACTIVE_THRESHOLD
-            and not any(state.pressed(b) for b in ("a", "b", "x", "y", "rb", "r3"))
+            and not any(state.pressed(b) for b in ("a", "b", "x", "y", "rb", "r3") if b != button)
             and memory.world.fresh(now)
         )
 
@@ -35,25 +36,37 @@ class WorldInteractionMixin:
 
     def _handle_world_interaction(self, state: ControllerState, rect: Rect,
                                   cfg: dict[str, Any], now: float) -> bool:
-        allowed = self._world_interaction_allowed(state, cfg, now)
-        self._native_interaction_allowed = allowed
-        target = self._world_target(rect, cfg) if allowed else None
+        target = self._world_target(rect, cfg)
         native = self.native_input
-        if native.ready and allowed:
+        if native.ready:
             # The game selects from current positions on its own update thread.
             # Its acknowledgement drives the prompt and the native highlight.
             address = native.status.selected
             target = next((e for e in self._memory_state.world.nearby(cfg["interaction"]["radius"])
                            if e.address == address), None)
-        self.shared.update(interaction_target=target, interaction_button=cfg["interaction"]["button"])
-        button = cfg["interaction"]["button"]
-        if not allowed or not state.pressed(button) or self._previous.pressed(button):
+        # SDL uses physical positions: Nintendo's labelled A is logical "b".
+        # Match the same physical confirm button used by the virtual keyboard.
+        button = (self._keyboard_buttons(state)[0] if target is not None and target.uses_face_button
+                  else cfg["interaction"]["button"])
+        allowed = self._world_interaction_allowed(state, cfg, now, button)
+        self._native_interaction_allowed = allowed
+        self.shared.update(interaction_target=target if allowed else None, interaction_button=button)
+        if not allowed or target is None or not state.pressed(button) or self._previous.pressed(button):
             return False
         self._blocked_buttons.add(button)
+        # The action consumes the face button before combat/hotkey handling.
+        # Release any earlier attack; returning here must not leave it held.
+        self._set_mouse("left", False)
+        self._set_mouse("right", False)
+        if self._a_shift_held:
+            self._set_key("SHIFT", False)
+            self._ensure_modifier_released("SHIFT")
+            self._a_shift_held = False
+        self._previous_left_pressed = False
         if native.ready and native.status.flags & 16:
             # No pointer is trusted as an execution address. The module chooses
             # and validates the nearest live entity again when consuming this ID.
-            native.interact()
+            native.interact(pickup=target.is_pickup, attack=target.is_destructible)
         else:
             self.shared.toast(native.message, 2.5)
         return True

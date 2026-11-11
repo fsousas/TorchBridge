@@ -23,14 +23,18 @@ class FakeNativeInput:
         self.message = "Pronto"
         self.status = NativeInputStatus(flags=17, selected=world_fixture().entities[0].address)
         self.actions = 0
+        self.pickups = []
+        self.attacks = []
         self.commands = []
         self.closed = False
 
     def connect(self, memory, now):
         pass
 
-    def interact(self):
+    def interact(self, *, pickup=False, attack=False):
         self.actions += 1
+        self.pickups.append(pickup)
+        self.attacks.append(attack)
 
     def send(self, **command):
         self.commands.append(command)
@@ -76,6 +80,141 @@ class WorldInteractionTests(unittest.TestCase):
         self.tick(10.1, replace(self.state, buttons=frozenset()))
         self.tick(10.2)
         self.assertEqual(self.native.actions, 2)
+
+    def pickup_target(self, kind="loot"):
+        world = self.engine._memory_state.world
+        target = replace(world.entities[0], kind=kind, name="Item no chão")
+        self.engine._memory_state = replace(self.engine._memory_state,
+                                            world=replace(world, entities=(target,)))
+        self.native.status = replace(self.native.status, selected=target.address)
+        return target
+
+    def prepared_tick(self, state, now=10.):
+        self.engine._needs_rearm = False
+        self.tick(now, self.engine._prepare_active_state(state))
+
+    def test_loot_and_gold_use_the_labelled_face_button_for_each_controller(self):
+        for family, button in (("xbox", "a"), ("playstation", "a"), ("nintendo", "b")):
+            for kind in ("loot", "gold"):
+                with self.subTest(family=family, kind=kind):
+                    self.pickup_target(kind)
+                    self.engine._previous = ControllerState()
+                    self.injector.events.clear()
+                    before = self.native.actions
+                    self.tick(state=replace(self.state, controller_type=family, buttons=frozenset({button})))
+                    self.assertEqual(self.native.actions, before + 1)
+                    self.assertTrue(self.native.pickups[-1])
+                    self.assertEqual(self.shared.get().interaction_button, button)
+                    self.assertEqual(self.injector.events, [])
+
+    def test_dpad_does_not_collect_ground_items(self):
+        for kind in ("loot", "gold"):
+            self.pickup_target(kind)
+            self.engine._previous = ControllerState()
+            self.tick()
+        self.assertEqual(self.native.actions, 0)
+        self.assertEqual(self.injector.events, [])
+
+    def test_props_and_npcs_keep_the_world_button_and_non_pickup_intent(self):
+        for kind in ("npc", "chest", "door", "stairs", "portal", "lever", "fishing"):
+            self.pickup_target(kind)
+            self.engine._previous = ControllerState()
+            self.tick()
+            self.assertEqual(self.shared.get().interaction_button, "dpad_up")
+            self.assertFalse(self.native.pickups[-1])
+            self.assertFalse(self.native.attacks[-1])
+        self.assertEqual(self.native.actions, 7)
+        self.assertEqual(self.injector.events, [])
+
+    def test_destructibles_use_the_labelled_a_button_and_send_only_native_attacks(self):
+        self.pickup_target("breakable")
+        for family, button in (("xbox", "a"), ("playstation", "a"), ("nintendo", "b")):
+            with self.subTest(family=family):
+                self.engine._previous = ControllerState()
+                before = self.native.actions
+                self.tick(state=replace(self.state, controller_type=family, buttons=frozenset({button})))
+                self.assertEqual(self.native.actions, before + 1)
+                self.assertEqual(self.shared.get().interaction_button, button)
+                self.assertTrue(self.native.attacks[-1])
+                self.assertFalse(self.native.pickups[-1])
+                self.assertEqual(self.injector.events, [])
+
+    def test_dpad_and_custom_world_buttons_do_not_attack_destructibles(self):
+        self.pickup_target("breakable")
+        for button in ("dpad_up", "dpad_down", "l3"):
+            self.cfg["interaction"]["button"] = button
+            self.engine._previous = ControllerState()
+            self.tick(state=replace(self.state, buttons=frozenset({button})))
+        self.assertEqual(self.native.actions, 0)
+        self.assertEqual(self.injector.events, [])
+
+    def test_holding_attack_after_destruction_cannot_collect_the_new_loot(self):
+        self.pickup_target("breakable")
+        pressed = replace(self.state, buttons=frozenset({"a"}))
+        self.prepared_tick(pressed)
+        self.pickup_target("loot")
+        for now in (10.02, 10.08, 10.2):
+            self.prepared_tick(pressed, now)
+        self.assertEqual(self.native.attacks, [True])
+        self.assertEqual(self.native.pickups, [False])
+        self.assertEqual(self.injector.events, [])
+        self.prepared_tick(replace(pressed, buttons=frozenset()), 10.3)
+        self.prepared_tick(pressed, 10.4)
+        self.assertEqual(self.native.attacks, [True, False])
+        self.assertEqual(self.native.pickups, [False, True])
+
+    def test_holding_pickup_does_not_attack_when_the_item_disappears(self):
+        self.pickup_target()
+        pressed = replace(self.state, buttons=frozenset({"a"}))
+        self.prepared_tick(pressed)
+        world = self.engine._memory_state.world
+        self.engine._memory_state = replace(self.engine._memory_state, world=replace(world, entities=()))
+        self.native.status = replace(self.native.status, selected=0)
+        for now in (10.02, 10.08, 10.2):
+            self.prepared_tick(pressed, now)
+        self.assertEqual(self.native.actions, 1)
+        self.assertEqual(self.injector.events, [])
+        self.prepared_tick(replace(pressed, buttons=frozenset()), 10.3)
+        self.prepared_tick(pressed, 10.4)
+        self.assertEqual(self.native.actions, 1)
+        self.assertIn(("key", "SHIFT", True), self.injector.events)
+        self.assertIn(("mouse", "left", True), self.injector.events)
+
+    def test_pickup_requires_release_before_collecting_another_item(self):
+        self.pickup_target()
+        pressed = replace(self.state, buttons=frozenset({"a"}))
+        self.prepared_tick(pressed)
+        self.prepared_tick(pressed, 10.1)
+        self.assertEqual(self.native.actions, 1)
+        self.prepared_tick(replace(pressed, buttons=frozenset()), 10.2)
+        self.prepared_tick(pressed, 10.3)
+        self.assertEqual(self.native.actions, 2)
+        self.assertEqual(self.injector.events, [])
+
+    def test_pickup_releases_a_prior_attack_without_sending_a_new_click(self):
+        self.pickup_target()
+        self.engine._set_mouse("left", True)
+        self.engine._set_mouse("right", True)
+        self.engine._set_key("SHIFT", True)
+        self.engine._a_shift_held = True
+        self.injector.events.clear()
+        self.tick(state=replace(self.state, buttons=frozenset({"a"})))
+        self.assertEqual(self.native.pickups, [True])
+        self.assertNotIn(("mouse", "left", True), self.injector.events)
+        self.assertNotIn(("key", "SHIFT", True), self.injector.events)
+        self.assertFalse(self.injector.buttons["left"])
+        self.assertFalse(self.injector.buttons["right"])
+        self.assertFalse(self.injector.buttons["SHIFT"])
+
+    def test_combos_and_other_face_buttons_still_block_pickup(self):
+        self.pickup_target()
+        for changes in ({"buttons": frozenset({"a", "lb"})},
+                        {"buttons": frozenset({"a", "x"})},
+                        {"buttons": frozenset({"a"}), "lt": 1.},
+                        {"buttons": frozenset({"a"}), "rt": 1.}):
+            self.assertFalse(self.engine._handle_world_interaction(
+                replace(self.state, **changes), self.rect, self.cfg, 10.))
+        self.assertEqual(self.native.actions, 0)
 
     def test_interaction_button_is_rearmed_before_menu_navigation(self):
         self.tick()

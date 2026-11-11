@@ -12,6 +12,27 @@ bool test_focus = true;
 unsigned warps = 0;
 uint32_t next_state = 0;
 uint32_t warp_event = 0;
+uintptr_t attack_item = 0;
+bool within_reach = true, visible = true, attack_ready = true;
+unsigned attacks = 0, pickups = 0, path_stops = 0;
+int ai_mode = -1;
+void __fastcall test_target(void*, void*, void*) {}
+void __fastcall test_target_item(void*, void*, void* target) {
+    attack_item = reinterpret_cast<uintptr_t>(target);
+}
+void __fastcall test_stop(void*, void*) { ++path_stops; }
+void __fastcall test_mode(void*, void*, int mode) { ai_mode = mode; }
+void __fastcall test_pickup(void*, void*, float, void*) { ++pickups; }
+bool __fastcall test_range(void*, void*, bool) { return within_reach; }
+bool __fastcall test_sight(void*, void*, void* level, bool) {
+    assert(reinterpret_cast<uintptr_t>(level) == scene.level);
+    return visible;
+}
+bool __fastcall test_attack(void*, void*) {
+    assert(attack_item && ai_mode == 0);
+    ++attacks;
+    return attack_ready;
+}
 DWORD WINAPI window_process(HWND, LPDWORD pid) {
     *pid = test_focus ? GetCurrentProcessId() : 0;
     return 0;
@@ -119,6 +140,46 @@ int main() {
         signal_hook(prop.data(), nullptr, 47);
         assert(warps == before);
     }
+    // Both barrel variants and any CBreakable subclass take the stationary
+    // attack branch. It must never call pickup, select state 7 or grant use/warp.
+    std::array<uint8_t, 0x700> hero{};
+    std::array<uint32_t, 0x200 / 4> hero_vtable{};
+    scene.player = reinterpret_cast<uintptr_t>(hero.data());
+    put<uint32_t>(scene.player, 0, reinterpret_cast<uintptr_t>(hero_vtable.data()));
+    hero_vtable[0x174 / 4] = reinterpret_cast<uintptr_t>(&test_mode);
+    hero_vtable[0x1B4 / 4] = reinterpret_cast<uintptr_t>(&test_pickup);
+    original_target = reinterpret_cast<TargetFn>(&test_target);
+    original_item = reinterpret_cast<TargetFn>(&test_target_item);
+    stop_path = reinterpret_cast<VoidFn>(&test_stop);
+    basic_attack = reinterpret_cast<AttackFn>(&test_attack);
+    attack_in_range = reinterpret_cast<RangeFn>(&test_range);
+    attack_in_sight = reinterpret_cast<SightFn>(&test_sight);
+    Candidate barrel{object, 4, 0, 0, 4};
+    use(barrel, GetTickCount64());
+    assert(attacks == 1 && !pickups && path_stops == 1 && ai_mode == 0);
+    assert(attack_item == object && stationary_attack && !authorized(object));
+    assert(status.executed == object && status.action_result == accepted && !scope);
+    put<uint32_t>(scene.client, 0x2C, scene.player);
+    latest.player = scene.player;
+    // Losing focus cancels the combat target before the next original AI tick.
+    test_focus = false;
+    cancel_before_update(hero.data());
+    assert(!authorized_target && !stationary_attack && !attack_item);
+    test_focus = true;
+    // A melee weapon outside its reach, a wall or cooldown must not make the
+    // character approach the barrel, nor bypass the original combat checks.
+    for (unsigned refused = 0; refused != 3; ++refused) {
+        within_reach = refused != 0; visible = refused != 1; attack_ready = refused != 2;
+        const auto before = attacks;
+        use(barrel, GetTickCount64());
+        assert(attacks == before + (refused == 2 ? 1 : 0));
+        assert(!pickups && ai_mode == 0 && !attack_item && !authorized_target);
+        assert(status.action_result == unavailable && !scope);
+    }
+    // Non-destructible props retain their native approach/use behavior.
+    barrel.type = 2;
+    use(barrel, GetTickCount64());
+    assert(pickups == 1 && ai_mode == 7 && !stationary_attack);
     assert(MH_DisableHook(MH_ALL_HOOKS) == MH_OK);
     assert(MH_Uninitialize() == MH_OK);
 }

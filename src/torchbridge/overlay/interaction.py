@@ -5,13 +5,22 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
-from ..models import OverlaySnapshot, Rect
+from ..models import OverlaySnapshot, Rect, controller_type_from_name
+from ..resources import resource_root
 from ..world import INTERACTION_LABELS, WorldPosition
 
 
 class WorldInteractionOverlayMixin:
+    def _interaction_icon(self, family: str, face_button: bool) -> QPixmap | None:
+        filename = f"{'interact' if face_button else 'dpad-up'}-{family}.png"
+        if filename not in self._interaction_icon_cache:
+            image = QPixmap(str(resource_root() / "assets/hud/general" / filename))
+            self._interaction_icon_cache[filename] = image
+        image = self._interaction_icon_cache[filename]
+        return None if image.isNull() else image
+
     def _draw_world_interaction(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         config = self.config.get()
         cfg = config["interaction"]
@@ -31,17 +40,33 @@ class WorldInteractionOverlayMixin:
                                          snapshot.game_rect.height, 1.6)
             if point is not None:
                 distance = world.player_position.distance_to(target.position)
-                button = INTERACTION_LABELS.get(snapshot.interaction_button, "D-pad ↑")
+                layout = str(config["overlay"].get("controller_layout", "auto")).lower()
+                family = (layout if layout in ("xbox", "playstation", "nintendo") else
+                          snapshot.controller_type or controller_type_from_name(snapshot.controller_name))
+                if family not in ("xbox", "playstation", "nintendo"):
+                    family = controller_type_from_name(family)
+                icon = (self._interaction_icon(family, target.uses_face_button)
+                        if target.uses_face_button or snapshot.interaction_button == "dpad_up" else None)
+                button = (("×" if family == "playstation" else "A") if target.uses_face_button else
+                          INTERACTION_LABELS.get(snapshot.interaction_button, "D-pad ↑"))
                 name = target.name or target.label
                 if target.npc_role or target.quest_status:
                     name = f"{target.label}: {name}"
-                text = f"[{button}] {name} · {distance:.1f}"
+                text = name
+                if icon is None:
+                    text = f"[{button}] {text}"
                 painter.save()
                 painter.setFont(self._font(max(8, round(10 * scale)), True))
-                max_width = max(1, snapshot.game_rect.width - 16)
+                padding, gap = 12 * scale, 8 * scale if icon is not None else 0
+                icon_height = 24 * scale if icon is not None else 0
+                icon_width = icon_height * icon.width() / icon.height() if icon is not None else 0
+                leading = icon_width + gap
+                max_width = max(1, min(360 * scale, snapshot.game_rect.width - 16))
+                suffix = f" · {distance:.1f}"
                 text = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight,
-                                                        max(1, int(min(360 * scale, max_width) - 24)))
-                width = min(max_width, painter.fontMetrics().horizontalAdvance(text) + 24 * scale)
+                    max(1, int(max_width - padding * 2 - leading
+                               - painter.fontMetrics().horizontalAdvance(suffix)))) + suffix
+                width = min(max_width, painter.fontMetrics().horizontalAdvance(text) + padding * 2 + leading)
                 height = 32 * scale
                 left = max(8, min(point[0] - width / 2, snapshot.game_rect.width - width - 8))
                 top = max(8, min(point[1] - height - 12 * scale, snapshot.game_rect.height - height - 8))
@@ -49,8 +74,15 @@ class WorldInteractionOverlayMixin:
                 painter.setPen(QPen(QColor(225, 184, 104, 230), 1.2))
                 painter.setBrush(QColor(20, 17, 14, 225))
                 painter.drawRoundedRect(box, 8 * scale, 8 * scale)
+                painter.setClipRect(box, Qt.ClipOperation.IntersectClip)
+                if icon is not None:
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    painter.drawPixmap(QRectF(left + padding, top + (height - icon_height) / 2,
+                                              icon_width, icon_height), icon, QRectF(icon.rect()))
                 painter.setPen(QColor(255, 240, 210))
-                painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
+                painter.drawText(QRectF(left + padding + leading, top,
+                                        max(1, width - padding * 2 - leading), height),
+                                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
                 painter.restore()
         if cfg["show_positions"] and not config["overlay"]["show_calibration"]:
             player = world.player_position

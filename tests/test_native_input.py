@@ -10,7 +10,9 @@ from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 from torchbridge.native_input import (NativeInputClient, MAGIC, VERSION, ENDPOINT, COMMAND,
-                                      REPLY, ACTIVE, DIRECT, WALKING)
+                                      REPLY, ACTIVE, DIRECT, WALKING, PICKUP_ACTION,
+                                      WORLD_ACTION, ATTACK_ACTION, TYPED_INTERACTIONS,
+                                      STATIONARY_BREAKABLES, DESTRUCTIBLE_ACTIONS)
 from torchbridge.native_input_setup import (IDENTITY, MANIFEST, install, remove,
                                             launch_environment)
 from test_fullscreen import pe_file
@@ -63,7 +65,8 @@ class LoopbackInputTests(unittest.TestCase):
         self.thread=threading.Thread(target=self.serve,daemon=True)
         self.thread.start()
         self.client=NativeInputClient()
-        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,0x100,0x400000,7,0)
+        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,0x100,0x400000,
+                          7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS,0)
         self.memory=SimpleNamespace(pid=9876,_module_base=0x400000,_linux=SimpleNamespace(start="1"),
                                     find_export=lambda *_:0x800000,read_bytes=lambda *_:raw)
         self.addCleanup(self.cleanup)
@@ -132,6 +135,50 @@ class LoopbackInputTests(unittest.TestCase):
         self.pump(flags=ACTIVE|DIRECT|WALKING,dx=float("nan"))
         self.assertIsNone(self.client.socket)
         self.assertFalse(any(f[7]!=f[7] for f in self.frames))
+
+    def test_pickup_world_and_attack_intents_stay_attached_to_their_action_ids(self):
+        self.until(lambda:self.client.ready)
+        self.client.interact(pickup=True)
+        self.until(lambda:sum(f[-2]==1 for f in self.frames)>=3)
+        self.client.interact(pickup=False)
+        self.until(lambda:sum(f[-2]==2 for f in self.frames)>=3)
+        self.client.interact(attack=True)
+        self.until(lambda:sum(f[-2]==3 for f in self.frames)>=3)
+        for frame in self.frames:
+            kind = frame[4] & (PICKUP_ACTION | WORLD_ACTION | ATTACK_ACTION)
+            self.assertEqual(kind, {0:0, 1:PICKUP_ACTION, 2:WORLD_ACTION, 3:ATTACK_ACTION}[frame[-2]])
+
+    def test_older_module_requests_an_update_without_sending_typed_actions(self):
+        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
+                          0x100,0x400000,7,0)
+        self.memory.read_bytes=lambda *_:raw
+        self.memory._exe_path="/games/Torchlight.exe"
+        future=Future();future.set_result([Path(self.memory._exe_path)])
+        with patch("torchbridge.game_setup.prepare_async",return_value=future) as prepare:
+            self.client.connect(self.memory,10)
+            self.client.connect(self.memory,11)
+        prepare.assert_called_once_with(exe=self.memory._exe_path)
+        self.assertIsNone(self.client.socket)
+        self.assertIn("Reinicie o Torchlight",self.client.message)
+        self.assertEqual(self.frames,[])
+
+    def test_module_that_still_approaches_breakables_also_requires_restart(self):
+        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
+                          0x100,0x400000,7 | TYPED_INTERACTIONS,0)
+        self.memory.read_bytes=lambda *_:raw
+        self.client.connect(self.memory,10.)
+        self.assertIsNone(self.client.socket)
+        self.assertIn("Reinicie o Torchlight",self.client.message)
+        self.assertEqual(self.frames,[])
+
+    def test_module_with_dpad_destructibles_requires_the_face_button_update(self):
+        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
+                          0x100,0x400000,7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES,0)
+        self.memory.read_bytes=lambda *_:raw
+        self.client.connect(self.memory,10.)
+        self.assertIsNone(self.client.socket)
+        self.assertIn("Reinicie o Torchlight",self.client.message)
+        self.assertEqual(self.frames,[])
 
     def test_corrupt_protocol_disconnects_and_clears_highlight_state(self):
         self.until(lambda:self.client.ready)

@@ -14,10 +14,15 @@ ENDPOINT = struct.Struct("<8sII16sIIII")
 COMMAND = struct.Struct("<8sII16sIIIfffII")
 REPLY = struct.Struct("<8sIIIIIIIIffIIII")
 ACTIVE, DIRECT, WALKING, ALLOW_INTERACTION = 1, 2, 4, 8
+PICKUP_ACTION, WORLD_ACTION, ATTACK_ACTION = 16, 32, 64
+TYPED_INTERACTIONS = 32
+STATIONARY_BREAKABLES = 64
+DESTRUCTIBLE_ACTIONS = 128
 READY, PROTECTED, HIGHLIGHTED, MOVING, COMPLETE = 1, 2, 4, 8, 16
 REASONS = ("Parado", "Caminhando", "Aguardando controle", "Jogo sem foco",
            "Cenário mudou", "Menu aberto", "Habilidade em execução", "Nenhum alvo próximo",
-           "Interagindo", "Versão não reconhecida", "Lista incompleta", "Canal indisponível")
+           "Interagindo", "Versão não reconhecida", "Lista incompleta", "Canal indisponível",
+           "Destrutível fora de alcance, obstruído ou ataque indisponível")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +56,7 @@ class NativeInputClient:
         self._token = bytes(16)
         self._sequence = 0
         self._action = 0
+        self._action_kind = 0
         self._action_at = 0.
         self._frame_at = 0.
         self._retry_at = 0.
@@ -77,8 +83,11 @@ class NativeInputClient:
         self._reply_at = 0.
         self._frame_at = 0.
 
-    def interact(self):
+    def interact(self, *, pickup=False, attack=False):
+        if pickup and attack:
+            raise ValueError("An action cannot collect and attack at the same time")
         self._action = (self._action + 1) & 0xFFFFFFFF or 1
+        self._action_kind = ATTACK_ACTION if attack else PICKUP_ACTION if pickup else WORLD_ACTION
         self._action_at = time.monotonic()
 
     def connect(self, memory, now):
@@ -90,6 +99,7 @@ class NativeInputClient:
             self._endpoint_address = None
             self._retry_at = 0.
             self._action = 0
+            self._action_kind = 0
             self._preparation = None
         if self.socket is not None or now < self._retry_at or not memory.pid:
             return
@@ -129,6 +139,21 @@ class NativeInputClient:
                 self.message = REASONS[error] if error < len(REASONS) else "Módulo indisponível"
                 return
             if not 0 < port <= 65535 or not capabilities & READY:
+                return
+            required = TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS
+            if capabilities & required != required:
+                # Older DLLs cannot enforce the separate A/collect/attack intents.
+                # Prepare the bundled update and require a new game process.
+                self.message = "Reinicie o Torchlight para atualizar as interações"
+                exe = getattr(memory, "_exe_path", "")
+                if exe and self._preparation is None:
+                    from .game_setup import prepare_async
+                    self._preparation = prepare_async(exe=exe)
+                if self._preparation is not None and self._preparation.done():
+                    try:
+                        self._preparation.result()
+                    except Exception as error:
+                        self.message = str(error)
                 return
             # Windows PID is intentionally not compared with a Unix PID. The
             # endpoint/token above were read from the selected process itself.
@@ -194,7 +219,8 @@ class NativeInputClient:
                 raise OSError("Input module stalled")
             if not self._out and now - self._last_send >= 1 / 120:
                 self._sequence = (self._sequence + 1) & 0xFFFFFFFF
-                self._out = COMMAND.pack(MAGIC, VERSION, self._sequence, self._token, flags,
+                self._out = COMMAND.pack(MAGIC, VERSION, self._sequence, self._token,
+                                         flags | self._action_kind,
                                          player, level, dx, dz, radius, self._action,
                                          min(0xFFFFFFFF, int(max(0., now-self._action_at)*1000)))
                 self._last_send = now

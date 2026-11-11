@@ -164,6 +164,36 @@ class WorldMemoryTests(unittest.TestCase):
         space.f32(npc+0x70,math.nan)
         self.assertFalse(reader._world_reader.read(client,player,10.).roster_complete)
 
+    def test_barrel_variants_and_other_destructibles_use_their_base_class(self):
+        space, reader, client, level, player, *_ = memory_fixture()
+        destructibles = []
+        for cls, name in (("CBreakable", "Barrel"), ("CExplosiveBarrel", "Explosive Barrel"),
+                          ("CModdedUrn", "Portal")):
+            address = space.unit(cls, name, "CHEST")
+            destructibles.append(address)
+            if cls == "CBreakable":
+                continue
+            vt = space.vtables[cls]
+            col = struct.unpack("<I", space.read(vt - 4, 4))[0]
+            descriptors = []
+            for base in ("CBreakable", "CItem"):
+                space.unit(base)
+                base_col = struct.unpack("<I", space.read(space.vtables[base] - 4, 4))[0]
+                td = struct.unpack("<I", space.read(base_col + 12, 4))[0]
+                descriptor = space.allocate(28)
+                space.u32(descriptor, td)
+                descriptors.append(descriptor)
+            bases = space.allocate(8)
+            space.put(bases, struct.pack("<2I", *descriptors))
+            hierarchy = space.allocate(16)
+            space.u32(hierarchy + 8, 2)
+            space.u32(hierarchy + 12, bases)
+            space.u32(col + 16, hierarchy)
+        space.linked_list(level, 0x68, destructibles)
+        world = reader._world_reader.read(client, player, 10.)
+        self.assertEqual({e.address for e in world.entities if e.kind == "breakable"}, set(destructibles))
+        self.assertFalse(any(e.is_pickup for e in world.entities))
+
     def test_merchant_roles_use_unit_types_on_both_transports_without_name_guesses(self):
         roles = {41: "merchant", 127: "gambler", 130: "enchanter", 134: "transmuter",
                  132: "gem_recover", 133: "gem_destroy", 128: "stash",

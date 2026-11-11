@@ -7,9 +7,13 @@ namespace tbinput {
 constexpr char magic[8] = {'T','B','I','N','P','0','0','2'};
 constexpr uint32_t version = 2;
 constexpr uint32_t active = 1, direct = 2, walking = 4, allow_interaction = 8;
+constexpr uint32_t pickup_action = 16, world_action = 32, attack_action = 64;
 constexpr uint32_t ready = 1, protected_world = 2, highlighted = 4, moving = 8, complete = 16;
+constexpr uint32_t typed_interactions = 32; // Endpoint capability, not a reply flag.
+constexpr uint32_t stationary_breakables = 64; // Attack destructibles without pathing.
+constexpr uint32_t destructible_actions = 128; // Separate face-button attack intent.
 enum Reason : uint32_t { idle, walking_now, no_session, no_focus, wrong_scene, menu,
-    skill_lock, no_target, acting, unsupported, incomplete, transport_error };
+    skill_lock, no_target, acting, unsupported, incomplete, transport_error, attack_unavailable };
 enum ActionResult : uint32_t { none, accepted, unavailable, changed_target, blocked };
 #pragma pack(push, 1)
 struct Endpoint {
@@ -52,16 +56,24 @@ struct ActionLatch {
     }
 };
 inline bool valid(const Command& c, const uint8_t* token) {
+    const auto action = c.flags & (pickup_action | world_action | attack_action);
     return !std::memcmp(c.magic, magic, 8) && c.version == version &&
-        !std::memcmp(c.token, token, 16) && (c.flags & ~15u) == 0 &&
+        !std::memcmp(c.token, token, 16) && (c.flags & ~127u) == 0 &&
+        (action & (action - 1)) == 0 &&
         std::isfinite(c.dx) && std::isfinite(c.dz) && std::isfinite(c.radius) &&
         std::hypot(c.dx, c.dz) <= 1.001f && c.radius >= 0.5f && c.radius <= 8.f;
 }
 struct Candidate {
     uintptr_t address = 0;
     float x = 0, y = 0, z = 0;
-    uint32_t type = 0; // 1 character, 2 item, 3 warper
+    uint32_t type = 0; // 1 character, 2 prop, 3 ground pickup, 4 destructible
 };
+inline bool action_matches(const Candidate& c, const Command& command) {
+    if (command.flags & pickup_action) return c.type == 3;
+    if (command.flags & world_action) return c.type == 1 || c.type == 2;
+    if (command.flags & attack_action) return c.type == 4;
+    return true; // Existing v2 clients retain their original untyped action.
+}
 inline double distance2(const Candidate& c, float x, float z) {
     return (double(c.x) - x) * (double(c.x) - x) + (double(c.z) - z) * (double(c.z) - z);
 }

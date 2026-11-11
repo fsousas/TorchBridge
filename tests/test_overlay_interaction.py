@@ -15,6 +15,21 @@ from torchbridge.overlay import GameOverlay
 from test_world import world_fixture
 
 
+class RecordingPainter(QPainter):
+    def __init__(self, image):
+        super().__init__(image)
+        self.texts = []
+        self.images = []
+
+    def drawText(self, *args):
+        self.texts.append(args[-1])
+        return super().drawText(*args)
+
+    def drawPixmap(self, *args):
+        self.images.append(args[1])
+        return super().drawPixmap(*args)
+
+
 class WorldOverlayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -33,7 +48,7 @@ class WorldOverlayTests(unittest.TestCase):
     def render(self, snapshot, scale=1., calibration=False):
         image = QImage(snapshot.game_rect.width, snapshot.game_rect.height, QImage.Format.Format_ARGB32)
         image.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(image)
+        painter = RecordingPainter(image)
         try:
             with patch("torchbridge.overlay.interaction.time.monotonic", return_value=10.05):
                 if calibration:
@@ -42,7 +57,59 @@ class WorldOverlayTests(unittest.TestCase):
                     self.overlay._draw_world_interaction(painter, snapshot, scale)
         finally:
             painter.end()
+        self.drawn_text = painter.texts
+        self.drawn_images = painter.images
         return bytes(image.constBits())
+
+    def test_all_six_assets_render_for_the_correct_controller_and_action(self):
+        frames = []
+        for family in ("xbox", "playstation", "nintendo"):
+            for kind, face_button in (("npc", False), ("loot", True), ("gold", True), ("breakable", True)):
+                with self.subTest(family=family, kind=kind):
+                    target = replace(self.snapshot.interaction_target, kind=kind)
+                    snap = replace(self.snapshot, controller_type=family, interaction_target=target,
+                                   interaction_button=("b" if family == "nintendo" else "a") if face_button else "dpad_up")
+                    with patch.object(self.overlay, "_interaction_icon", wraps=self.overlay._interaction_icon) as icon:
+                        pixels = self.render(snap)
+                    icon.assert_called_once_with(family, face_button)
+                    self.assertEqual(self.drawn_text, ["Vasman · 0.5"])
+                    self.assertEqual(len(self.drawn_images), 1)
+                    self.assertFalse(self.drawn_images[0].isNull())
+                    if kind in ("npc", "loot"):
+                        frames.append(pixels)
+        self.assertEqual(len(set(frames)), 6)
+
+    def test_controller_layout_override_selects_the_same_family_as_the_hud(self):
+        self.config._data["overlay"]["controller_layout"] = "playstation"
+        with patch.object(self.overlay, "_interaction_icon", wraps=self.overlay._interaction_icon) as icon:
+            self.render(replace(self.snapshot, controller_type="xbox"))
+        icon.assert_called_once_with("playstation", False)
+
+    def test_icon_replaces_only_the_button_and_preserves_npc_details(self):
+        target = replace(self.snapshot.interaction_target, name="Miner", quest_status="unavailable")
+        self.render(replace(self.snapshot, interaction_target=target))
+        self.assertEqual(self.drawn_text, ["NPC · Missão indisponível: Miner · 0.5"])
+        self.assertEqual(len(self.drawn_images), 1)
+
+    def test_long_names_keep_the_distance_visible(self):
+        target = replace(self.snapshot.interaction_target, name="Nome muito longo " * 50)
+        self.render(replace(self.snapshot, interaction_target=target))
+        self.assertIn("…", self.drawn_text[0])
+        self.assertTrue(self.drawn_text[0].endswith(" · 0.5"))
+
+    def test_missing_image_falls_back_to_the_correct_button_label(self):
+        for kind in ("loot", "breakable"):
+            target = replace(self.snapshot.interaction_target, kind=kind)
+            with patch.object(self.overlay, "_interaction_icon", return_value=None):
+                self.render(replace(self.snapshot, controller_type="playstation", interaction_target=target,
+                                    interaction_button="a"))
+            self.assertEqual(self.drawn_text, ["[×] Vasman · 0.5"])
+            self.assertEqual(self.drawn_images, [])
+
+    def test_custom_world_button_does_not_show_an_incorrect_dpad_up_image(self):
+        self.render(replace(self.snapshot, interaction_button="dpad_down"))
+        self.assertEqual(self.drawn_text, ["[D-pad ↓] Vasman · 0.5"])
+        self.assertEqual(self.drawn_images, [])
 
     def test_prompt_renders_at_different_resolutions_and_scales(self):
         for width, height, scale in ((1920, 1080, 1.), (1280, 720, 1.5), (800, 600, 2.), (2560, 1440, .6)):

@@ -12,9 +12,27 @@ Props sem nome reconhecido permanecem como `interactive`, sem inventar categoria
 ## Uso no controle
 
 Em movimento direto, o elemento utilizável mais próximo recebe o highlight do
-próprio jogo sem deslocar o cursor. O overlay mostra seu nome, distância e
-**D-pad ↑**. O direcional envia uma ação nativa explícita: falar com o personagem
-ou usar/coletar o item pelo dispatch original. Segurar não repete.
+próprio jogo sem deslocar o cursor. O overlay mostra seu nome, distância e uma
+imagem do botão para Xbox, PlayStation ou Nintendo. Itens, equipamentos e ouro
+no chão (`loot`/`gold`) usam **A no Xbox/Nintendo** e **× no PlayStation**, com
+`interact-*.png`. NPCs, baús, portas, escadas e outros objetos usam **D-pad ↑**,
+com `dpad-up-*.png`. As seis imagens ficam em `assets/hud/general` e substituem
+somente a indicação do botão; os demais textos permanecem no aviso.
+
+A família visual segue `overlay.controller_layout` ou o controle detectado,
+como o restante da HUD. No Nintendo, o A físico é o botão lógico `b` do SDL;
+a coleta o consome antes da habilidade comum. A coleta não envia ataque,
+Shift ou clique no chão, e exige liberação do botão antes de uma nova ação.
+O módulo nativo confere também a família da ação: se o alvo mais próximo mudar
+entre item, NPC/prop e destrutível, a ordem é recusada sem usar outro tipo de
+objeto. A seleção continua estritamente por proximidade. Segurar não repete.
+
+CBreakable e subclasses (barris comuns/explosivos e outros destrutíveis) usam
+**A no Xbox/Nintendo** e **× no PlayStation**, com o ícone `interact-*.png`,
+e recebem um ataque básico mantendo posição. O D-pad não aciona destrutíveis.
+O módulo cancela o caminho e preserva o estado parado; não entra no estado de
+aproximar/coletar. Alcance da arma, obstáculos e disponibilidade do ataque são
+verificados pelo jogo. Fora de alcance, o personagem permanece parado.
 
 A caminhada é independente de cliques. O módulo confere novamente jogador,
 cenário, disponibilidade e distância ao executar; projeção, categoria ou
@@ -41,8 +59,11 @@ Perfis antigos recebem os padrões automaticamente. A seção no `perfil.json` �
 }
 ```
 
-`button` aceita `dpad_up`, `dpad_down` ou `l3`, reservados a essa ação no
-overworld. O perfil limita `radius` a 0,5–8 unidades e rejeita números não
+`button` aceita `dpad_up`, `dpad_down` ou `l3`, reservados ao uso de NPCs/props no
+overworld; a coleta usa o A/× físico. Um botão alternativo usa indicação textual
+no aviso, para não exibir um D-pad ↑ incorreto. Destrutíveis e coleta continuam
+usando A/× mesmo com um botão alternativo de uso. O perfil limita `radius` a
+0,5–8 unidades e rejeita números não
 finitos. O padrão 4,5 inclui a borda de colisão de escadas grandes, observada
 perto de 3,9 unidades no teste real. `show_positions` mostra coordenadas do jogador, contagem do cenário
 e até cinco elementos próximos. `show_prompt` controla apenas o aviso visual.
@@ -178,6 +199,13 @@ A análise offline do Steam instalado confirmou os getters de posição em
 `0x0050E3F0` (posição derivada/local), `0x00422C60`, `0x00422CB0`, `0x00422CF0`
 (componentes locais), RTTI de CPlayer/CMonster/CTriggerUnit e os getters Ogre
 `getViewMatrix`/`getProjectionMatrix`/`_getDerivedPosition`.
+
+Para destrutíveis, a desmontagem do mesmo Steam confirmou o ramo de ataque em
+`CCharacter::MoveTo` (chamada em `0x004930ED`): ataque básico `0x0048FBD0`.
+O ramo de destrutíveis em `Pickup` (virtual `+0x1B4`, `0x00498B00`) verifica
+alcance em `0x00490180` e visibilidade em `0x0048B060`, antes de atacar.
+O módulo resolve essas chamadas relativas e confere assinaturas, reutilizando
+as verificações sem executar Pickup/MoveTo nem escrever posições ou dano.
 
 A inspeção do fluxo de escadas/entradas confirmou que
 `CTriggerUnit::Activate` (`0x004DE6C0`) muda o estado em `+0x1EC` e agenda

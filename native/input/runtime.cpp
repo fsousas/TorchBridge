@@ -36,6 +36,7 @@ ULONGLONG received_at = 0;
 uint32_t connection_generation = 0, current_generation = 0;
 std::atomic<bool> initialized{false};
 bool strict_world = false, strict_warps = false, was_moving = false;
+bool stationary_attack = false;
 uintptr_t highlighted_object = 0, highlight_level = 0, authorized_target = 0;
 uintptr_t authorized_player = 0, authorized_level = 0;
 ULONGLONG authorized_until = 0, ordered_at = 0;
@@ -61,6 +62,22 @@ bool contains(uintptr_t p, size_t length, const uint8_t* pattern, size_t size) {
     std::vector<uint8_t> bytes(length);
     return read_raw(p, bytes.data(), bytes.size()) &&
         std::search(bytes.begin(), bytes.end(), pattern, pattern + size) != bytes.end();
+}
+// Resolve a verified rel32 CALL after a unique instruction prefix. This keeps
+// Steam/GOG relocation out of the attack ABI instead of guessing new RVAs.
+uintptr_t relative_call(uintptr_t p, size_t length, const uint8_t* prefix, size_t size) {
+    std::vector<uint8_t> bytes(length);
+    if (!read_raw(p, bytes.data(), length)) return 0;
+    uintptr_t result = 0;
+    for (size_t i = 0; i + size + 4 <= length; ++i) {
+        if (std::memcmp(bytes.data() + i, prefix, size)) continue;
+        if (result) return 0; // Ambiguous code is not an execution address.
+        int32_t displacement = 0;
+        std::memcpy(&displacement, bytes.data() + i + size, 4);
+        result = p + i + size + 4 + displacement;
+        if (!code(result)) return 0;
+    }
+    return result;
 }
 struct ClassInfo { uint32_t mask = 0; std::string name; };
 constexpr uint32_t character = 1, item = 2, trigger = 4, breakable = 8, player = 16;
@@ -131,6 +148,9 @@ using TargetFn = void(__thiscall*)(void*, void*);
 using MoveFn = void(__thiscall*)(void*, void*, float, float);
 using ModeFn = void(__thiscall*)(void*, int);
 using PickupFn = void(__thiscall*)(void*, float, void*);
+using AttackFn = bool(__thiscall*)(void*);
+using RangeFn = bool(__thiscall*)(void*, bool);
+using SightFn = bool(__thiscall*)(void*, void*, bool);
 using HighlightFn = void(__thiscall*)(void*, bool);
 using IsaFn = bool(__thiscall*)(void*, int);
 using PositionFn = float*(__thiscall*)(void*, float*, int);
@@ -147,6 +167,9 @@ InteractFn original_activate = nullptr;
 SignalFn original_signal = nullptr;
 IsaFn is_a = nullptr;
 PositionFn get_position = nullptr;
+AttackFn basic_attack = nullptr;
+RangeFn attack_in_range = nullptr;
+SightFn attack_in_sight = nullptr;
 std::array<InteractFn, 64> original_interacts{};
 std::unordered_map<uintptr_t, size_t> interact_hooks;
 
@@ -156,7 +179,7 @@ bool focused() {
     return pid == GetCurrentProcessId();
 }
 bool authorized(uintptr_t object) {
-    return object && object == authorized_target && scene.player == authorized_player &&
+    return !stationary_attack && object && object == authorized_target && scene.player == authorized_player &&
         scene.level == authorized_level && GetTickCount64() <= authorized_until && focused();
 }
 void __fastcall target_hook(void* self, void*, void* target) {
@@ -337,7 +360,7 @@ bool list(uint32_t offset, std::vector<Candidate>& candidates, std::unordered_se
             // Install at the actual virtual dispatch of each item family,
             // including inherited implementations and modded subclasses.
             if (!guard_interaction(p)) return false;
-            candidate.type = 2;
+            candidate.type = (mask & breakable) ? 4 : (mask & trigger) ? 2 : 3;
         }
         if (!position(p, candidate)) return false;
         candidates.push_back(candidate);
@@ -390,6 +413,7 @@ bool locked() {
 }
 void use(const Candidate& candidate, ULONGLONG now) {
     stop();
+    stationary_attack = candidate.type == 4;
     authorized_target = candidate.address;
     authorized_player = scene.player; authorized_level = scene.level;
     authorized_until = now + 1500;
@@ -397,7 +421,24 @@ void use(const Candidate& candidate, ULONGLONG now) {
     auto hero = reinterpret_cast<void*>(scene.player);
     original_target(hero, nullptr);
     original_item(hero, nullptr);
-    if (candidate.type == 1) {
+    if (stationary_attack) {
+        // State 7 is the pickup/use AI: it walks into range before attacking
+        // breakables. Keep idle state and invoke only the game's basic attack.
+        // These checks preserve weapon reach, collision/line of sight and cooldown.
+        stop_path(hero);
+        method<ModeFn>(scene.player, 0x174)(hero, 0);
+        original_item(hero, reinterpret_cast<void*>(candidate.address));
+        if (attack_in_range(hero, false) &&
+            attack_in_sight(hero, reinterpret_cast<void*>(scene.level), false) && basic_attack(hero)) {
+            status.executed = static_cast<uint32_t>(candidate.address);
+        } else {
+            original_item(hero, nullptr);
+            authorized_target = 0;
+            stationary_attack = false;
+            status.action_result = unavailable;
+            status.reason = attack_unavailable;
+        }
+    } else if (candidate.type == 1) {
         original_target(hero, reinterpret_cast<void*>(candidate.address));
         method<ModeFn>(scene.player, 0x174)(hero, 9); // Native approach/talk state.
         status.executed = static_cast<uint32_t>(candidate.address);
@@ -422,6 +463,7 @@ void frame() {
     if (generation != current_generation) {
         current_generation = generation;
         authorized_target = 0;
+        stationary_attack = false;
         trigger_event.clear();
     }
     const bool fresh_action = actions.consume(generation, command.action);
@@ -471,6 +513,7 @@ void frame() {
             stop_path(reinterpret_cast<void*>(scene.player));
         }
         authorized_target = 0;
+        stationary_attack = false;
         if (!live) strict_world = false; // Mouse play remains possible after the app closes.
         highlight(0, objects);
         status.reason = !live ? no_session : !focus ? no_focus : !same ? wrong_scene :
@@ -489,12 +532,14 @@ void frame() {
         if (highlighted_object) status.flags |= highlighted;
         if (authorized_target && now > authorized_until) {
             authorized_target = 0;
+            stationary_attack = false;
             original_target(reinterpret_cast<void*>(scene.player), nullptr);
             original_item(reinterpret_cast<void*>(scene.player), nullptr);
             stop_path(reinterpret_cast<void*>(scene.player));
         }
         if (fresh_action) {
-            if (selected && may_interact && !locked() && recent_action(command, now-received))
+            if (selected && action_matches(*selected, command) && may_interact && !locked() &&
+                recent_action(command, now-received))
                 use(*selected, now);
             else { stop(); status.reason = no_target; status.action_result = unavailable; }
         } else if (locked()) {
@@ -553,6 +598,7 @@ void cancel_before_update(void* self) {
             stop_path(self);
         }
         was_moving = false; authorized_target = 0;
+        stationary_attack = false;
     }
 }
 void __fastcall update_hook(void* self, void* edx, uint32_t a, uint32_t b, float dt) {
@@ -613,6 +659,23 @@ bool initialize() {
     is_a = reinterpret_cast<IsaFn>(at(steam ? 0x47EAF0 : 0x480760));
     get_position = reinterpret_cast<PositionFn>(at(steam ? 0x50E3F0 : 0x510EB0));
     stop_path = reinterpret_cast<VoidFn>(stopping);
+    // The holding-position branch of MoveTo calls the same basic attack as
+    // the breakable branch of Pickup. Reuse its original reach/visibility checks,
+    // but never call Pickup/MoveTo to execute a destructible interaction.
+    const uint8_t attack_call[] = {0x84,0xDB,0x74,0x07,0x8B,0xCE,0xE8};
+    const uint8_t sight_call[] = {0x6A,0x00,0x55,0x8B,0xCE,0xE8};
+    const uint8_t range_call[] = {0x6A,0x00,0x8B,0xCE,0x8A,0xD8,0xE8};
+    const auto pickup = field<uint32_t>(player_vt, 0x1B4);
+    const auto attack = relative_call(destination, 0x700, attack_call, sizeof attack_call);
+    const auto sight = relative_call(pickup, 0x100, sight_call, sizeof sight_call);
+    const auto range = relative_call(pickup, 0x100, range_call, sizeof range_call);
+    const uint8_t target_item[] = {0x98,0x02,0,0}, equipment[] = {0x04,0x04,0,0};
+    if (!attack || !sight || !range || !contains(attack, 0x70, target_item, 4) ||
+        !contains(attack, 0x70, equipment, 4) || !contains(range, 0x30, target_item, 4) ||
+        !contains(sight, 0xA0, target_item, 4)) return false;
+    basic_attack = reinterpret_cast<AttackFn>(attack);
+    attack_in_range = reinterpret_cast<RangeFn>(range);
+    attack_in_sight = reinterpret_cast<SightFn>(sight);
     if (MH_Initialize() != MH_OK) return false;
     if (!hook(field<uint32_t>(player_vt, 0xFC), reinterpret_cast<void*>(&update_hook),
               reinterpret_cast<void**>(&original_update)) ||
@@ -648,7 +711,9 @@ DWORD WINAPI serve(void*) {
     }
     int length = sizeof address;
     getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
-    endpoint.port = ntohs(address.sin_port); endpoint.capabilities = ready | protected_world | highlighted;
+    endpoint.port = ntohs(address.sin_port);
+    endpoint.capabilities = ready | protected_world | highlighted | typed_interactions |
+        stationary_breakables | destructible_actions;
     MemoryBarrier(); std::memcpy(endpoint.magic, magic, 8);
     initialized.store(true);
     for (;;) {

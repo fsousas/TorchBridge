@@ -2,7 +2,10 @@
 
 Padrão do overworld: cada botão dispara uma entrada REAL (SendInput). A/X são
 os cliques de mouse (esquerdo/direito); o resto vira teclas (1..0) ou comandos
-contextuais. No overworld, D-pad ↑ interage com o elemento próximo (TB-18),
+contextuais. No overworld, A (Xbox/Nintendo) ou Cruz (PlayStation) coleta o item
+no chão selecionado, antes de disparar ataque/habilidade, ou ataca o destrutível
+selecionado mantendo posição, conforme o alcance da arma. D-pad ↑ usa NPCs e
+outros objetos próximos (TB-18).
 D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. A caminhada não gera clique. A interação
 é validada pelo módulo nativo no próprio jogo: [POSICIONAMENTO.md](POSICIONAMENTO.md).
 
@@ -96,6 +99,13 @@ d-pad ← = botão roxo da HUD
 - D-pad ↑ usa a ação de proximidade; D-pad ↓ e L3 podem substituí-lo por
   `interaction.button`. A ação só funciona em movimento direto, sem menus,
   roda ou combo de combate. D-pad ← e → mantêm suas ações de HUD/mapa.
+- Coleta de `loot`/`gold` usa A físico (Xbox/Nintendo) ou Cruz (PlayStation),
+  consome o botão antes de ataque/habilidade e exige liberação antes de outro
+  uso. No Nintendo, A físico corresponde ao lógico `b` do SDL. D-pad ↑ não
+  coleta esses itens nem ataca destrutíveis. Barris e outros `breakable` usam
+  esse mesmo A/Cruz para ataque nativo, sem aproximação ou clique adicional.
+  O tooltip usa `interact-*.png` para coleta e destrutíveis e
+  `dpad-up-*.png` para os demais objetos.
 
 ---
 

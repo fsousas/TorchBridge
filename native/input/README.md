@@ -18,8 +18,30 @@ seu movimento; o analógico retoma quando a habilidade permite.
 O alvo mais próximo é escolhido pelas posições atuais, com limite de altura e
 desempate pelo endereço. Não há preferência por categoria, nome, direção ou
 projeção na tela. O mesmo alvo recebe highlight pelo método virtual do jogo.
-O D-pad é uma sequência de ações, não um botão mantido: reconexão e repetição de
+Cada interação usa um ID de ação, não um botão mantido: reconexão e repetição de
 pacotes não repetem interações. O módulo revalida e escolhe o alvo ao executar.
+
+O aplicativo separa coleta (A físico no Xbox/Nintendo, × no PlayStation) de
+uso de NPCs/props (D-pad ↑) e ataque a destrutíveis (A/×). Os flags
+`pickup_action`/`world_action`/`attack_action` vinculam
+a família ao ID da ação, sem alterar os pacotes v2 de 64 bytes. A seleção
+continua pela menor distância; se o tipo mudar, a ação é recusada, em vez de
+procurar outro objeto. A capability `typed_interactions` permite ao aplicativo
+detectar uma DLL antiga, preparar sua atualização e pedir reinício do jogo.
+Clientes v2 anteriores, sem esses flags, continuam compatíveis com o protocolo.
+`destructible_actions` identifica a DLL que aceita o ataque por A/× e recusa
+trocas de família entre coleta, NPC/prop e destrutível, sem consumir outro alvo.
+
+Destrutíveis são candidatos próprios (tipo 4), reconhecidos por CBreakable na
+hierarquia RTTI, incluindo barris comuns/explosivos e subclasses de mods. A/×
+mantém o jogador no estado parado (0), cancela o caminho e chama o ataque básico
+original, com checagens nativas de alcance da arma, visibilidade e cooldown.
+Nunca chama o estado de coleta/uso (7), Pickup ou MoveTo para esses objetos.
+O ataque não concede autorização de uso/warper. Cada pressionamento tenta um
+ataque; fora de alcance, com obstáculo ou indisponível, ele recusa sem aproximar.
+A capability `stationary_breakables` exige atualização/reinício se a DLL antiga
+ainda usa aproximação. As rotinas são resolvidas das chamadas relativas
+verificadas em MoveTo/Pickup, preservando relocação Steam/GOG.
 
 A interação usa os estados nativos de falar/usar item e a implementação virtual
 da entidade, preservando requisitos, colisões, lojas, pesca e missões. Os

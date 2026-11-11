@@ -19,8 +19,13 @@ int main() {
     command.dx = 2.f;
     assert(!valid(command, token));
     command.dx = 0;
-    command.flags = 16;
+    command.flags = 128;
     assert(!valid(command, token));
+    for (const auto flags : {pickup_action | world_action, pickup_action | attack_action,
+                             world_action | attack_action, pickup_action | world_action | attack_action}) {
+        command.flags = flags;
+        assert(!valid(command, token));
+    }
     command.flags = 0;
     command.token[0] = 1;
     assert(!valid(command, token));
@@ -35,6 +40,21 @@ int main() {
     command.action_age = 5000;
     assert(!recent_action(command, 0)); // Frozen game cannot revive an old press.
     Candidate a{200, 1, 0, 0, 1}, b{100, 1, 0, 0, 2}, c{300, 0.5f, 0, 0, 3};
+    Candidate destructible{400, 2, 0, 0, 4};
+    command.token[0] = 0;
+    command.flags = pickup_action;
+    assert(valid(command, token));
+    assert(action_matches(c, command) && !action_matches(a, command) && !action_matches(b, command));
+    assert(!action_matches(destructible, command));
+    command.flags = world_action;
+    assert(valid(command, token));
+    assert(!action_matches(c, command) && action_matches(a, command) && action_matches(b, command));
+    assert(!action_matches(destructible, command));
+    command.flags = attack_action;
+    assert(valid(command, token) && action_matches(destructible, command));
+    assert(!action_matches(a, command) && !action_matches(b, command) && !action_matches(c, command));
+    command.flags = 0; // Backward-compatible untyped v2 client.
+    assert(action_matches(a, command) && action_matches(b, command) && action_matches(c, command));
     assert(nearer(b, a, 0, 0) && nearer(c, b, 0, 0));
     assert(in_range(a, 0, 0, 0, 1) && !in_range(a, 0, 3, 0, 4.5f));
     a.x = std::numeric_limits<float>::infinity();
