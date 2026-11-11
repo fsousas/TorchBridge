@@ -125,7 +125,10 @@ No Nintendo, leste (A) clica no anzol e sul (B) fecha. Cada pressão faz um
 clique esquerdo simples; segurar não repete. Os outros botões, gatilhos e
 analógicos são consumidos enquanto a interface está aberta. Entrar nela solta
 Shift/Ctrl, botões de mouse e sequências de cliques anteriores, impedindo que
-o clique do anzol herde o Shift do ataque do overworld.
+o clique do anzol herde o Shift do ataque do overworld. O clique aguarda 30 ms
+após mover o cursor e mantém o esquerdo por 60 ms para o jogo amostrá-lo entre
+frames. Perda de foco, pausa e fechamento cancelam a sequência e liberam o mouse.
+O bloqueio também cobre as animações de lançar/recolher com o menu oculto.
 
 ---
 

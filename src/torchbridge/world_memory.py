@@ -159,7 +159,10 @@ class WorldMemoryReader:
         rect = self.memory.read_bytes(window + 0x360, 16)
         if len(rect) != 16:
             return None
-        left, top, right, bottom = struct.unpack("<4f", rect)
+        # This CEGUI build stores Rect as top/bottom/left/right, unlike the
+        # public L/T/R/B tuple. The root window is {0, height, 0, width}.
+        # Treating the cache as L/T/R/B rejected real labels on non-square views.
+        top, bottom, left, right = struct.unpack("<4f", rect)
         if not (all(math.isfinite(v) for v in (left, top, right, bottom))
                 and 0 <= left < right <= width and 0 <= top < bottom <= height):
             return None

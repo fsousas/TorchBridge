@@ -301,6 +301,9 @@ class BridgeEngineCore(threading.Thread):
         # Navegação na Interface de Pesca e Modal de Confirmação (Peixe/Mensagens)
         self._fishing_initialized: bool = False
         self._fishing_closing: bool = False
+        self._fishing_click_seq: tuple[int, int, float] | None = None
+        self._fishing_click_down = False
+        self._fishing_next_click: bool | None = None
         self._modal_confirm_initialized: bool = False
         # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
         self._inventory_initialized: bool = False
@@ -496,6 +499,7 @@ class BridgeEngineCore(threading.Thread):
                 self._held_mouse.discard(button)
 
     def _release_all(self) -> None:
+        self._cancel_fishing_click()
         self._skill_repeat_at.clear()
         self._skill_repeat_sources.clear()
         self.native_input.close()
@@ -944,7 +948,7 @@ class BridgeEngineCore(threading.Thread):
         world = memory.world
         live = (state.connected and memory.is_connected and memory.is_in_game
                 and world.fresh(now) and not memory.is_loading)
-        direct = (live and self._mode == "direct" and not memory.is_menu_open
+        direct = (live and self._mode == "direct" and not memory.is_menu_open and not memory.is_fishing
                   and not memory.dialog_type and not any(self._active_panels)
                   and not self._virtual_keyboard_open and not self._shortcut_config_active)
         if isinstance(self.injector, InputSession):
@@ -983,10 +987,16 @@ class BridgeEngineCore(threading.Thread):
         # Its only controller inputs are the physical confirm/cancel pair.
         menus = self._memory_state.open_menus or []
         modal = "Confirmação Sair" in menus or "confirma" in (self._memory_state.state_desc or "").lower()
-        if self._memory_state.is_connected and "Pesca" in menus and not modal:
-            self._handle_fishing_navigation(state, rect, hub)
+        if (self._memory_state.is_connected and not modal
+                and (self._memory_state.is_fishing or "Pesca" in menus)):
+            self._handle_fishing_navigation(state, rect, hub, now, visible="Pesca" in menus)
             self._previous_panels = tuple(self._active_panels)
             return
+        if self._fishing_initialized:
+            # Release before any modal, combat or world handler gets the input.
+            self._cancel_fishing_click()
+            self._fishing_initialized = False
+            self.shared.update(fishing_focus=None)
         if self._memory_state.is_connected and self._memory_state.state_id == 1:
             was_open = self._virtual_keyboard_open
             self._handle_char_create_navigation(state, rect, hub)
@@ -1125,10 +1135,6 @@ class BridgeEngineCore(threading.Thread):
             elif self._modal_confirm_initialized:
                 self._modal_confirm_initialized = False
                 self.shared.update(modal_confirm_focus=None)
-
-            if self._fishing_initialized:
-                self._fishing_initialized = False
-                self.shared.update(fishing_focus=None)
 
             # Inventário do Jogador, Menu do Pet, Baú (Stash), Mercador (Loja) e Crafting (Transmutador, Sockets, Encantador)
             is_inventory = "Inventário" in (self._memory_state.open_menus or [])
@@ -1393,9 +1399,6 @@ class BridgeEngineCore(threading.Thread):
             if self._modal_confirm_initialized:
                 self._modal_confirm_initialized = False
                 self.shared.update(modal_confirm_focus=None)
-            if self._fishing_initialized:
-                self._fishing_initialized = False
-                self.shared.update(fishing_focus=None)
             if self._inventory_initialized:
                 self._inventory_initialized = False
                 self._inventory_tab = None

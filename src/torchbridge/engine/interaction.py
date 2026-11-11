@@ -12,7 +12,7 @@ class WorldInteractionMixin:
         memory = self._memory_state
         return bool(
             cfg["interaction"]["enabled"] and self._mode == "direct"
-            and memory.is_connected and memory.is_in_game and not memory.is_loading
+            and memory.is_connected and memory.is_in_game and not memory.is_loading and not memory.is_fishing
             and not memory.is_menu_open and not memory.open_menus and not memory.dialog_type
             and not any(self._active_panels) and not self._shortcut_config_active
             and not self._virtual_keyboard_open
@@ -40,10 +40,13 @@ class WorldInteractionMixin:
         native = self.native_input
         if native.ready:
             # The game selects from current positions on its own update thread.
-            # Its acknowledgement drives the prompt and the native highlight.
+            # Prefer its acknowledged highlight. When a newly nearby object is
+            # ahead of the reply by one frame, keep the local intent: otherwise
+            # a face press falls through to an unrelated cursor attack. Only an
+            # action kind is sent; the game still selects/validates the target.
             address = native.status.selected
             target = next((e for e in self._memory_state.world.nearby(cfg["interaction"]["radius"])
-                           if e.address == address), None)
+                           if e.address == address), target)
         # SDL uses physical positions: Nintendo's labelled A is logical "b".
         # Match the same physical confirm button used by the virtual keyboard.
         button = (self._keyboard_buttons(state)[0] if target is not None and target.uses_face_button

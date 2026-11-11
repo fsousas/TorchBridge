@@ -148,6 +148,26 @@ class WorldInteractionTests(unittest.TestCase):
         self.assertEqual(self.native.actions, 0)
         self.assertEqual(self.injector.events, [])
 
+    def test_entering_range_and_pressing_action_before_native_reply_does_not_leak_combat(self):
+        for kind in ("breakable", "loot"):
+            for old_selection in (0, 0xDEADBEEF):
+                with self.subTest(kind=kind, old_selection=old_selection):
+                    target = self.pickup_target(kind)
+                    world = self.engine._memory_state.world
+                    target = replace(target, position=replace(world.player_position,
+                        x=world.player_position.x + (8.9 if kind == "breakable" else 4.4)))
+                    self.engine._memory_state = replace(self.engine._memory_state,
+                        world=replace(world, entities=(target,)))
+                    self.native.status = replace(self.native.status, selected=old_selection)
+                    self.engine._previous = ControllerState()
+                    self.injector.events.clear()
+                    before = self.native.actions
+                    self.tick(state=replace(self.state, buttons=frozenset({"a"})))
+                    self.assertEqual(self.native.actions, before + 1)
+                    self.assertEqual(self.native.attacks[-1], kind == "breakable")
+                    self.assertEqual(self.native.pickups[-1], kind == "loot")
+                    self.assertEqual(self.injector.events, [])
+
     def test_holding_attack_after_destruction_cannot_collect_the_new_loot(self):
         self.pickup_target("breakable")
         pressed = replace(self.state, buttons=frozenset({"a"}))

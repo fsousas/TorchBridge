@@ -13,7 +13,7 @@ ULONGLONG test_now = 10000;
 bool test_focus = true, navigation_available = true, advance_path = true;
 unsigned npc_updates = 0;
 bool collect_immediately = false, collect_next_update = false;
-unsigned pickup_calls = 0;
+unsigned pickup_calls = 0, fishing_calls = 0;
 std::vector<std::pair<float, float>> destinations;
 DWORD WINAPI test_window(HWND, LPDWORD pid) {
     *pid = test_focus ? GetCurrentProcessId() : 0;
@@ -58,6 +58,10 @@ void __fastcall test_pickup(void* self, void*, float, void*) {
     ++pickup_calls;
     if (collect_immediately) complete_pickup(self);
 }
+void __fastcall test_fishing(void* self, void*) {
+    ++fishing_calls;
+    test_mode(self, nullptr, 32);
+}
 bool __fastcall test_range(void*, void*, bool) { return true; }
 bool __fastcall test_sight(void*, void*, void*, bool) { return true; }
 bool __fastcall test_attack(void* self, void*) {
@@ -100,7 +104,7 @@ struct Fixture {
     Fixture(float distance = 4.49f, float radius = 4.5f) {
         test_now += 10000; test_focus = navigation_available = advance_path = true;
         npc_updates = 0; destinations.clear();
-        collect_immediately = collect_next_update = false; pickup_calls = 0;
+        collect_immediately = collect_next_update = false; pickup_calls = fishing_calls = 0;
         image = 0x10000; image_end = UINT32_MAX; classes.clear();
         const auto hvt = reinterpret_cast<uintptr_t>(hero_vt.data());
         const auto nvt = reinterpret_cast<uintptr_t>(npc_vt.data());
@@ -109,6 +113,7 @@ struct Fixture {
         put<uint32_t>(h, 0, hvt); put<uint32_t>(n, 0, nvt);
         put<uint32_t>(h, 0x2F0, UINT32_MAX); put<uint32_t>(h, 0x2F4, UINT32_MAX);
         hero_vt[0x174 / 4] = reinterpret_cast<uintptr_t>(&test_mode);
+        hero_vt[0x16C / 4] = reinterpret_cast<uintptr_t>(&test_fishing);
         npc_vt[0x100 / 4] = reinterpret_cast<uintptr_t>(&test_highlight);
         for (const auto offset : {0x6Eu, 0x161u}) put<uint8_t>(n, offset, 1);
         put<uint32_t>(n, 0x28C, 3); put<float>(n, 0x394, 100.f);
@@ -248,7 +253,17 @@ int main() {
         put<float>(f.h, 0x74, close_to_water ? 4.f : 0.f);
         f.step(16);
         assert(status.selected == f.n);
-        f.press(); assert(pickup_calls == 1 && authorized_kind == 5);
+        f.press();
+        assert(fishing_calls == 1 && pickup_calls == 0 && destinations.empty());
+        assert(status.executed == f.n && !authorized_target);
+        assert(field<uint32_t>(f.h, 0x284) == 32 && field<uint32_t>(f.h, 0x298) == f.n);
+        assert(field<float>(f.h, 0x70) == (close_to_water ? -8.85f : -7.91f));
+        for (uint32_t mode : {32u, 33u, 34u}) {
+            put<uint32_t>(f.h, 0x284, mode);
+            f.walk(); // Even an old client cannot interrupt the cast/reel gap.
+            assert(status.reason == menu && destinations.empty());
+            assert(field<uint32_t>(f.h, 0x284) == mode);
+        }
     }
     for (bool immediate : {true, false}) {
         Fixture f; f.as_item(3, 1.f);

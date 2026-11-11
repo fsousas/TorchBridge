@@ -206,6 +206,11 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertFalse(state_ingame.is_loading)
         self.assertTrue(state_ingame.is_in_game)
         self.assertEqual(state_ingame.state_desc, "Em Jogo")
+        # Casting/reeling briefly hide the menu; they still own controller input.
+        for mode in (0, 3, 32, 33, 34):
+            reader.read_u32 = MagicMock(side_effect=lambda addr, mode=mode:
+                mode if addr == p_player + 0x284 else fake_read_ingame(addr))
+            self.assertEqual(reader.update().is_fishing, mode in (32, 33, 34))
 
     def test_hover_interactive_detection(self):
         """Valida detecção de entidades interativas (NPC=2, Baú=1) vs chão vazio (0)."""

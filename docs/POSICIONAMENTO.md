@@ -33,6 +33,10 @@ Shift ou clique no chão, e exige liberação do botão antes de uma nova ação
 O módulo nativo confere também a família da ação: se o alvo mais próximo mudar
 entre item, NPC/prop e destrutível, a ordem é recusada sem usar outro tipo de
 objeto. A seleção continua estritamente por proximidade. Segurar não repete.
+Se o jogador entra no raio e pressiona a ação antes da resposta nativa seguinte,
+o leitor local preserva a intenção de coleta/ataque. Isso impede que o botão
+escape para um ataque no cursor. A DLL recebe somente a categoria da ação e
+confere novamente o alvo mais próximo; nenhum endereço externo é executado.
 
 CBreakable e subclasses (barris comuns/explosivos e outros destrutíveis) usam
 **A no Xbox/Nintendo** e **× no PlayStation**, com o ícone `interact-*.png`,
@@ -53,12 +57,21 @@ A seleção permite interação quando a distância entre os centros é menor ou
 igual à soma desse círculo com `interaction.radius`. Python e DLL usam a mesma
 geometria no plano X/Z. Pesca ignora a diferença de altura entre píer e água;
 o limite de 2,5 unidades entre andares permanece para os outros tipos de objeto.
-O caso relatado de distância 2,49 ser rejeitada e 6,18 ser aceita era compatível
-com esse filtro vertical: as duas posições agora são cobertas por regressões.
+As posições relatadas de distância 2,49 e 6,18 são cobertas por regressões.
+A execução também precisa respeitar essa geometria: passar pelo Pickup fazia
+um raycast/caminho até a água, que podia atingir o próprio píer. O módulo agora
+invoca a entrada nativa de pesca (virtual `+0x16C`), sem deslocar o jogador nem
+testar o caminho até o centro submerso. A animação e o minigame continuam nativos.
 
 Dentro da interface de pesca, o botão sul no Xbox/PlayStation clica no anzol
 sem modificador, e leste clica 50 px acima para fechar. Nintendo inverte sul e
-leste. Os demais controles não atravessam para combate, roda, R3 ou menus.
+leste. Cada clique aguarda 30 ms para o cursor/modificadores assentarem e mantém
+o botão esquerdo pressionado por 60 ms, sem bloquear o loop de entrada. Um
+down/up no mesmo instante podia desaparecer no polling do jogo, especialmente
+sob Wine. O clique é cancelado ao fechar a interface, perder foco ou suspender
+o bridge; uma ação rápida seguinte aguarda a soltura antes de mover o cursor.
+Os demais controles não atravessam para combate, roda, R3 ou menus, incluindo
+as animações de lançar/recolher (estados 32/33/34), quando o menu fica oculto.
 
 Coleta e ataque não retêm a autorização de uso por 1,5 s depois de concluídos.
 O ataque aceito passa a obedecer somente ao bloqueio nativo de habilidade;
@@ -261,7 +274,11 @@ O mesmo executável confirmou `CItem+0x198` como a janela `GuiLook/ItemText`,
 Show/Hide em `0x004CEF00`/`0x004CEF30` anexam/removem essa janela do pai.
 Em `CEGUIBase.dll`, `Window::getUnclippedPixelRect` (`0x1009EF00`) usa o cache
 `+0x360`; `isVisible(false)` (`0x1009ECF0`) lê `+0x1A1` e percorre pais em
-`+0x80`. O viewport em `CGameUI+0x13E4/+0x13E8` normaliza o retângulo para o
+`+0x80`. Essa versão de CEGUI armazena o retângulo na ordem **top/bottom/left/right**;
+a janela raiz observada em execução contém `{0, altura, 0, largura}`. O leitor
+converte para L/T/R/B antes de normalizar. A interpretação anterior descartava
+nomes nativos válidos e impedia que o ícone fosse ancorado ao tooltip.
+O viewport em `CGameUI+0x13E4/+0x13E8` normaliza o retângulo para o
 overlay, sem misturar pixels do jogo, escala Qt ou origem da janela no desktop.
 O ícone nativo usa 48 px e 2 px de separação; as seis imagens foram atualizadas
 com os PNGs de `TorchBridge.zip`, incluindo o fundo claro do D-pad.
@@ -306,7 +323,7 @@ e os ponteiros do processo corrente, incluindo ASLR/relocação do Proton.
 
 ## Validação
 
-Em 11/11/2026 passaram **662 testes Python**, **48 testes de overlay** com
+Em 11/11/2026 passaram **669 testes Python**, **48 testes de overlay** com
 `QT_SCALE_FACTOR=1.5`, `compileall` e `git diff --check`. As regressões cobrem os
 dez atalhos mantidos pressionados, soltura e nova pressão rápida, troca de LT,
 supressão pela roda/painéis, raios exclusivos, toque entre círculos de pesca,
@@ -325,14 +342,24 @@ GE-Proton11-12 em prefixo isolado: policy, NPC/itens, interaction e loader.
 O teste da thread real do módulo simula coleta imediata/adiada, cancelamento
 antes da IA, ataque bloqueado pela animação e caminhada no primeiro frame
 livre (16 ms), sem esperar 1,5 s. As verificações de NPC e transições adiadas
-também continuam passando. São testes com objetos de jogo simulados, sem
-homologação desta mudança numa sessão interativa do Torchlight.
+também continuam passando. O teste de destrutíveis confirma que a skill
+esquerda dispara fora do alcance melee e não é substituída pela skill direita.
+A entrada no raio antes da resposta nativa também tem regressão: o botão de
+ação precisa enviar a intenção tipada sem gerar Shift/clique no cursor.
+
+Uma sessão real Steam/GE-Proton11-12, com cópia isolada dos saves, confirmou
+pesca a **4,35 unidades**, com **3 unidades de desnível**, sem mudar a posição
+do jogador. O botão sul iniciou o recolhimento e o leste fechou a interface.
+A mesma sessão confirmou o retângulo CEGUI visível normalizado corretamente.
+A execução interativa no Windows permanece pendente; o binário PE32 foi
+compilado aqui e o workflow mantém os testes Windows/Linux em 3.11/3.13.
 
 DLL instalada e distribuída: SHA-256
-`e7e66cc785ac664d888dfb90593c53f3cbe8848c8f3252d000ccee416428c2fa`.
-As capacidades `ACTION_RANGES` (512) e `EQUIPPED_SKILL_ACTIONS` (1024) exigem
-essa atualização antes de conectar, evitando divergências de seleção na pesca
-ou o uso da rotina antiga que limitava destrutíveis ao ataque básico.
+`30d79e61af0bc152486b88cb945619fa5470609bb87ce746ce4b0d96bda4d78a`.
+As capacidades `ACTION_RANGES` (512), `EQUIPPED_SKILL_ACTIONS` (1024) e
+`RELIABLE_WORLD_ACTIONS` (2048) exigem essa atualização antes de conectar,
+evitando divergências de seleção na pesca, o caminho até a água ou o uso da
+rotina antiga que limitava destrutíveis ao ataque básico.
 Reiniciar TorchBridge e Torchlight carrega o novo código Python e a DLL.
 
 Comando: `python scripts/run_tests.py`. A suíte cobre o leitor, o controlador

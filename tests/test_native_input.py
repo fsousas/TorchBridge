@@ -13,7 +13,7 @@ from torchbridge.native_input import (NativeInputClient, MAGIC, VERSION, ENDPOIN
                                       REPLY, ACTIVE, DIRECT, WALKING, PICKUP_ACTION,
                                       WORLD_ACTION, ATTACK_ACTION, TYPED_INTERACTIONS,
                                       STATIONARY_BREAKABLES, DESTRUCTIBLE_ACTIONS, NPC_APPROACH, ACTION_RANGES,
-                                      EQUIPPED_SKILL_ACTIONS)
+                                      EQUIPPED_SKILL_ACTIONS, RELIABLE_WORLD_ACTIONS)
 from torchbridge.native_input_setup import (IDENTITY, MANIFEST, install, remove,
                                             launch_environment)
 from test_fullscreen import pe_file
@@ -67,7 +67,7 @@ class LoopbackInputTests(unittest.TestCase):
         self.thread.start()
         self.client=NativeInputClient()
         raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,0x100,0x400000,
-                          7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS | NPC_APPROACH | ACTION_RANGES | EQUIPPED_SKILL_ACTIONS,0)
+                          7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS | NPC_APPROACH | ACTION_RANGES | EQUIPPED_SKILL_ACTIONS | RELIABLE_WORLD_ACTIONS,0)
         self.memory=SimpleNamespace(pid=9876,_module_base=0x400000,_linux=SimpleNamespace(start="1"),
                                     find_export=lambda *_:0x800000,read_bytes=lambda *_:raw)
         self.addCleanup(self.cleanup)
@@ -202,6 +202,16 @@ class LoopbackInputTests(unittest.TestCase):
     def test_module_without_left_slot_casts_and_water_plane_requires_restart(self):
         raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
                           0x100,0x400000,7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS | NPC_APPROACH | ACTION_RANGES,0)
+        self.memory.read_bytes=lambda *_:raw
+        self.client.connect(self.memory,10.)
+        self.assertIsNone(self.client.socket)
+        self.assertIn("Reinicie o Torchlight",self.client.message)
+        self.assertEqual(self.frames,[])
+
+    def test_module_with_underwater_pickup_path_requires_the_fishing_update(self):
+        raw=ENDPOINT.pack(MAGIC,VERSION,self.listener.getsockname()[1],self.secret,
+                          0x100,0x400000,7 | TYPED_INTERACTIONS | STATIONARY_BREAKABLES |
+                          DESTRUCTIBLE_ACTIONS | NPC_APPROACH | ACTION_RANGES | EQUIPPED_SKILL_ACTIONS,0)
         self.memory.read_bytes=lambda *_:raw
         self.client.connect(self.memory,10.)
         self.assertIsNone(self.client.socket)

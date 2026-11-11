@@ -1,5 +1,6 @@
 """Testes unitários para interface de pesca e modal de confirmação (resultado da pesca / mensagens)."""
 import unittest
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 from unittest.mock import MagicMock
@@ -106,6 +107,11 @@ class FishingAndModalTests(unittest.TestCase):
         engine._previous = empty
         injector.events.clear()
         engine._process_active(hub, btn_a, rect, cfg, 0.1, 0.05)
+        self.assertNotIn(("mouse", "left", True), injector.events)
+        engine._previous = btn_a
+        engine._process_active(hub, btn_a, rect, cfg, 0.14, 0.04)
+        self.assertTrue(injector.buttons["left"])
+        engine._process_active(hub, btn_a, rect, cfg, 0.21, 0.07)
 
         self.assertIn(("mouse", "left", True), injector.events)
         self.assertIn(("mouse", "left", False), injector.events)
@@ -134,6 +140,10 @@ class FishingAndModalTests(unittest.TestCase):
                     engine.injector.events.clear()
                     state = ControllerState(controller_type=family, buttons=frozenset({button}))
                     engine._process_active(MagicMock(), state, rect, cfg, 1.1, .05)
+                    engine._previous = state
+                    engine._process_active(MagicMock(), state, rect, cfg, 1.14, .04)
+                    self.assertTrue(engine.injector.buttons["left"])
+                    engine._process_active(MagicMock(), state, rect, cfg, 1.21, .07)
                     point = fishing_close_point(rect) if focus == "close" else fishing_hook_point(rect)
                     self.assertEqual(engine.injector.events[-3:],
                                      [("move", *point), ("mouse", "left", True), ("mouse", "left", False)])
@@ -170,14 +180,94 @@ class FishingAndModalTests(unittest.TestCase):
         engine._modifier_left_down = True
         engine.injector.buttons = {"SHIFT": True, "CTRL": True, "left": True, "right": True}
         engine._process_active(MagicMock(), ControllerState(buttons=frozenset({"a"})), rect, cfg, 1., .05)
+        engine._previous = ControllerState(buttons=frozenset({"a"}))
+        engine._process_active(MagicMock(), engine._previous, rect, cfg, 1.04, .04)
         events = engine.injector.events
         click = events.index(("mouse", "left", True))
         for modifier in ("SHIFT", "CTRL"):
             self.assertIn(("key", modifier, False), events[:click])
             self.assertFalse(engine.injector.buttons[modifier])
+        self.assertEqual(events[click:], [("mouse", "left", True)])
+        engine._process_active(MagicMock(), engine._previous, rect, cfg, 1.11, .07)
         self.assertEqual(events[click:], [("mouse", "left", True), ("mouse", "left", False)])
         self.assertIsNone(engine._modifier_seq)
         self.assertFalse(engine._a_shift_held)
+
+    def test_fishing_click_is_cancelled_on_menu_close_focus_loss_or_stop(self):
+        for down in (False, True):
+            for cancel in ("menu", "modal", "suspend"):
+                with self.subTest(down=down, cancel=cancel):
+                    engine, cfg, rect = self._fishing_engine()
+                    state = ControllerState(buttons=frozenset({"a"}))
+                    engine._process_active(MagicMock(), state, rect, cfg, 1., .01)
+                    engine._previous = state
+                    if down:
+                        engine._process_active(MagicMock(), state, rect, cfg, 1.04, .04)
+                    engine.injector.events.clear()
+                    if cancel == "suspend":
+                        engine._release_all()
+                    else:
+                        engine._memory_state = replace(engine._memory_state,
+                            open_menus=["Confirmação Sair"] if cancel == "modal" else [])
+                        engine._process_active(MagicMock(), ControllerState(), rect, cfg, 1.05, .01)
+                    self.assertIsNone(engine._fishing_click_seq)
+                    self.assertFalse(engine._fishing_click_down)
+                    self.assertNotIn(("mouse", "left", True), engine.injector.events)
+                    if down:
+                        self.assertIn(("mouse", "left", False), engine.injector.events)
+
+    def test_real_tick_filter_does_not_repeat_or_leak_held_fishing_buttons(self):
+        engine, cfg, rect = self._fishing_engine()
+        engine._needs_rearm = False
+        raw = ControllerState(buttons=frozenset({"a", "x", "lb", "back"}), lt=1., rt=1.)
+        for i in range(30):
+            state = engine._prepare_active_state(raw)
+            engine._process_active(MagicMock(), state, rect, cfg, 1. + i * .01, .01)
+            engine._previous = state
+            if i == 15:
+                engine._memory_state = replace(engine._memory_state, open_menus=[])
+        self.assertEqual(engine.injector.events.count(("mouse", "left", True)), 1)
+        self.assertNotIn(("mouse", "right", True), engine.injector.events)
+        self.assertFalse(any(e[0] in ("tap", "key") and e[-1] is not False for e in engine.injector.events))
+
+    def test_fishing_refuses_click_if_modifier_release_is_not_confirmed(self):
+        engine, cfg, rect = self._fishing_engine()
+        engine._process_active(MagicMock(), ControllerState(), rect, cfg, 1., .01)
+        engine.injector.key_pressed = lambda key: key == "SHIFT"
+        state = ControllerState(buttons=frozenset({"a"}))
+        engine._process_active(MagicMock(), state, rect, cfg, 1.1, .01)
+        engine._previous = state
+        engine._process_active(MagicMock(), state, rect, cfg, 1.14, .04)
+        self.assertNotIn(("mouse", "left", True), engine.injector.events)
+
+    def test_fishing_animation_consumes_inputs_until_the_hook_is_visible(self):
+        engine, cfg, rect = self._fishing_engine()
+        engine._memory_state = replace(engine._memory_state, open_menus=[], is_fishing=True)
+        state = ControllerState(buttons=frozenset({"a", "x", "lb", "start"}), lx=1., lt=1., rt=1.)
+        engine._process_active(MagicMock(), state, rect, cfg, 1., .01)
+        engine.injector.events.clear()
+        engine._previous = state
+        engine._process_active(MagicMock(), state, rect, cfg, 1.2, .01)
+        self.assertEqual(engine.injector.events, [])
+        self.assertFalse(engine._native_interaction_allowed)
+        self.assertEqual(engine._native_direction, (0., 0.))
+        self.assertIsNone(engine.shared.get().fishing_focus)
+
+    def test_fast_confirm_then_close_finishes_each_click_before_moving_the_cursor(self):
+        engine, cfg, rect = self._fishing_engine()
+        for now, buttons in ((1., {"a"}), (1.04, {"a"}), (1.05, {"b"}),
+                             (1.11, {"b"}), (1.12, set()), (1.16, set()), (1.23, set())):
+            state = ControllerState(buttons=frozenset(buttons))
+            engine._process_active(MagicMock(), state, rect, cfg, now, .01)
+            engine._previous = state
+        self.assertEqual(engine.injector.events.count(("mouse", "left", True)), 2)
+        left_down = False
+        for event in engine.injector.events:
+            if event[0] == "move":
+                self.assertFalse(left_down, "A simple fishing click must never drag to the close button")
+            elif event[:2] == ("mouse", "left"):
+                left_down = event[2]
+        self.assertEqual(engine.injector.cursor, fishing_close_point(rect))
 
     def test_fishing_close_offset_is_fifty_pixels_at_any_resolution(self):
         for rect in (Rect(0, 0, 1024, 768), Rect(-1280, 80, 1280, 720), Rect(100, 80, 1920, 1080)):

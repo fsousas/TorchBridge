@@ -15,6 +15,7 @@ constexpr uint32_t destructible_actions = 128; // Separate face-button attack in
 constexpr uint32_t npc_approach = 256; // Native path and interruptible pending talk.
 constexpr uint32_t action_ranges = 512; // Per-kind range and completion releases movement.
 constexpr uint32_t equipped_skill_actions = 1024; // Left-slot casts and water-plane fishing selection.
+constexpr uint32_t reliable_world_actions = 2048; // Fishing without underwater path/raycast.
 enum Reason : uint32_t { idle, walking_now, no_session, no_focus, wrong_scene, menu,
     skill_lock, no_target, acting, unsupported, incomplete, transport_error, attack_unavailable };
 enum ActionResult : uint32_t { none, accepted, unavailable, changed_target, blocked };

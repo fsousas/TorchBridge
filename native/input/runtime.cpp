@@ -395,6 +395,10 @@ void stop() {
     was_moving = false;
 }
 bool menu_open() {
+    // The menu hides while casting/reeling. Walking or an attack during those
+    // frames can cancel fishing before its visible UI has appeared.
+    const auto mode = field<uint32_t>(scene.player, 0x284);
+    if (mode == 32 || mode == 33 || mode == 34) return true;
     if (!scene.ui || field<uint32_t>(scene.ui, 0x169C) != 6) return true;
     const auto manager = field<uint32_t>(scene.ui, 0x324);
     if (!manager || field<uint32_t>(manager, 0xD84) != 6) return true;
@@ -504,6 +508,21 @@ void use(const Candidate& candidate, ULONGLONG now) {
             status.action_result = unavailable;
             status.reason = attack_unavailable;
         }
+    } else if (candidate.type == 5) {
+        // Pickup performs a navigation/raycast to the underwater object. A pier
+        // can occlude that ray even with the hero standing directly beside it.
+        // Selection already checked the horizontal fishing circles. Enter the
+        // same native fishing action Pickup dispatches at virtual +16C, keeping
+        // the hole as target for the game's animation/minigame, with no path.
+        stop_path(hero);
+        original_item(hero, reinterpret_cast<void*>(candidate.address));
+        method<VoidFn>(scene.player, 0x16C)(hero);
+        const auto mode = field<uint32_t>(scene.player, 0x284);
+        const bool started = mode == 32 || mode == 33 || mode == 34;
+        status.executed = started ? static_cast<uint32_t>(candidate.address) : 0;
+        status.action_result = started ? accepted : unavailable;
+        authorized_target = 0;
+        if (!started) original_item(hero, nullptr);
     } else if (candidate.type == 1) {
         // Talk (state 9, virtual +0x1B8) waits for an existing path; it never
         // starts one. Beyond its 2--2.75 unit reach, an idle hero loses the target.
@@ -796,6 +815,13 @@ bool initialize() {
     use_skill = reinterpret_cast<SkillFn>(spell);
     skill_in_range = reinterpret_cast<SkillRangeFn>(spell_range);
     aim_at = reinterpret_cast<AimFn>(aim);
+    const auto fishing = field<uint32_t>(player_vt, 0x16C);
+    const uint8_t fishing_base_call[] = {0x56,0x8B,0xF1,0xE8};
+    const auto fishing_base = relative_call(fishing, 16, fishing_base_call, sizeof fishing_base_call);
+    const uint8_t fishing_state[] = {0x83,0xF8,0x21};
+    const uint8_t start_fishing[] = {0x6A,0x20};
+    if (!fishing_base || !contains(fishing_base, 80, fishing_state, sizeof fishing_state) ||
+        !contains(fishing_base, 80, start_fishing, sizeof start_fishing)) return false;
     if (MH_Initialize() != MH_OK) return false;
     if (!hook(field<uint32_t>(player_vt, 0xFC), reinterpret_cast<void*>(&update_hook),
               reinterpret_cast<void**>(&original_update)) ||
@@ -833,7 +859,8 @@ DWORD WINAPI serve(void*) {
     getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
     endpoint.port = ntohs(address.sin_port);
     endpoint.capabilities = ready | protected_world | highlighted | typed_interactions |
-        stationary_breakables | destructible_actions | npc_approach | action_ranges | equipped_skill_actions;
+        stationary_breakables | destructible_actions | npc_approach | action_ranges | equipped_skill_actions |
+        reliable_world_actions;
     MemoryBarrier(); std::memcpy(endpoint.magic, magic, 8);
     initialized.store(true);
     for (;;) {

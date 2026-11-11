@@ -154,7 +154,7 @@ class WorldMemoryTests(unittest.TestCase):
                 space.u8(window + 0x1A1, 1)
                 space.u8(parent + 0x1A1, 1)
                 space.u32(props[0] + 0x198, window)
-                space.put(window + 0x360, struct.pack("<4f", 600., 300., 800., 330.))
+                space.put(window + 0x360, struct.pack("<4f", 300., 330., 600., 800.))
 
                 def label():
                     return next(e for e in reader._world_reader.read(client, player, 10.).entities
@@ -164,7 +164,7 @@ class WorldMemoryTests(unittest.TestCase):
                 space.u8(props[0] + 0x1A4, 1)  # Alt/HUD made this native label visible.
                 self.assertEqual(label(), (600/1920, 300/1080, 800/1920, 330/1080))
                 # Read native overlap avoidance/camera changes, never a projected guess.
-                space.put(window + 0x360, struct.pack("<4f", 700., 350., 900., 380.))
+                space.put(window + 0x360, struct.pack("<4f", 350., 380., 700., 900.))
                 self.assertEqual(label(), (700/1920, 350/1080, 900/1920, 380/1080))
                 space.u8(parent + 0x1A1, 0)
                 self.assertIsNone(label())
@@ -182,11 +182,11 @@ class WorldMemoryTests(unittest.TestCase):
         space.u8(window + 0x1A1, 1)
         for rect in ((0., 0., 0., 0.), (300., 20., 200., 40.), (math.nan, 20., 200., 40.),
                      (20., 20., 1400., 40.)):
-            space.put(window + 0x360, struct.pack("<4f", *rect))
+            space.put(window + 0x360, struct.pack("<4f", rect[1], rect[3], rect[0], rect[2]))
             world = reader._world_reader.read(client, player, 10.)
             self.assertTrue(world.roster_complete)
             self.assertIsNone(next(e for e in world.entities if e.address == props[0]).native_label_rect)
-        space.put(window + 0x360, struct.pack("<4f", 20., 20., 200., 40.))
+        space.put(window + 0x360, struct.pack("<4f", 20., 40., 20., 200.))
         space.u32(window + 0x80, window)
         world = reader._world_reader.read(client, player, 10.)
         self.assertIsNone(next(e for e in world.entities if e.address == props[0]).native_label_rect)

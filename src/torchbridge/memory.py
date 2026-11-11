@@ -224,6 +224,7 @@ class GameMemoryState:
     state_desc: str = "Aguardando jogo..."
     is_loading: bool = False
     is_in_game: bool = False
+    is_fishing: bool = False
     is_menu_open: bool = False
     open_menus: list[str] = field(default_factory=list)
     recommended_mode: str = "direct"  # "direct", "cursor", "blocked"
@@ -1219,5 +1220,6 @@ class TorchlightMemoryReader:
             is_hover_interactive=is_hover_interactive,
             hover_flag=hover_flag,
             hover_entity=hover_ptr or hover_item,
+            is_fishing=self.read_u32(p_player + 0x284) in (32, 33, 34),
             world=self._world_reader.read(p_client, p_player, time.monotonic()),
         )
