@@ -109,10 +109,23 @@ d-pad ← = botão roxo da HUD
   uso. No Nintendo, A físico corresponde ao lógico `b` do SDL. D-pad ↑ não
   coleta esses itens nem ataca destrutíveis. Barris e outros `breakable` usam
   esse mesmo A/Cruz para ataque nativo, sem aproximação ou clique adicional.
+  O ataque usa a habilidade do slot esquerdo e seu alcance, ou o ataque básico
+  quando o slot está configurado para a arma.
   O tooltip usa `interact-*.png` para coleta e destrutíveis e
   `dpad-up-*.png` para os demais objetos. Para props com nome nativo visível
   pelo Alt/D-pad ←, o overlay desenha apenas o ícone à esquerda desse nome.
   Sem o nome nativo, mostra ícone, nome e distância; NPCs mantêm o aviso completo.
+
+## Interface de pesca
+
+O minigame recebe input antes dos handlers gerais de navegação e combate.
+No Xbox e PlayStation, somente sul (A/Cruz) e leste (B/Círculo) executam ações:
+sul clica no anzol e leste clica exatamente 50 pixels de tela acima para fechar.
+No Nintendo, leste (A) clica no anzol e sul (B) fecha. Cada pressão faz um
+clique esquerdo simples; segurar não repete. Os outros botões, gatilhos e
+analógicos são consumidos enquanto a interface está aberta. Entrar nela solta
+Shift/Ctrl, botões de mouse e sequências de cliques anteriores, impedindo que
+o clique do anzol herde o Shift do ataque do overworld.
 
 ---
 

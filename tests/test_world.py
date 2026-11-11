@@ -81,7 +81,18 @@ class WorldTests(unittest.TestCase):
                 self.assertEqual(replace(world, entities=(hole,)).nearby(4.5), (hole,))
                 self.assertFalse(replace(world, entities=(replace(hole, position=WorldPosition(4.51 + circle, 0)),)).nearby(4.5))
                 self.assertFalse(replace(world, entities=(replace(hole, kind="door"),)).nearby(4.5))
-                self.assertFalse(replace(world, entities=(replace(hole, position=WorldPosition(0, 0, 3)),)).nearby(4.5))
+                self.assertTrue(replace(world, entities=(replace(hole, position=WorldPosition(0, 0, 3)),)).nearby(4.5))
+
+    def test_fishing_on_a_pier_uses_horizontal_distance_even_when_water_is_lower(self):
+        hole = WorldEntity(0x200000, "fishing", "Fishing Hole", WorldPosition(-9.37, 14.20, 0))
+        # The two positions reported by the user; a pier above the water must
+        # not lose the closer target through the generic different-floor filter.
+        for position in (WorldPosition(-8.85, 16.64, 4), WorldPosition(-7.91, 20.21, 0)):
+            world = replace(world_fixture(), player_position=position, entities=(hole,))
+            self.assertEqual(world.nearby(4.5), (hole,))
+        world = replace(world, player_position=WorldPosition(-8.85, 16.64, 4),
+                        entities=(replace(hole, kind="door"),))
+        self.assertFalse(world.nearby(4.5))
 
     def test_projection_rejects_behind_offscreen_invalid_or_clipped_points(self):
         for position in (WorldPosition(0, 1), WorldPosition(30, -4), WorldPosition(0, -.01),

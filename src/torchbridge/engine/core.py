@@ -300,6 +300,7 @@ class BridgeEngineCore(threading.Thread):
         self._settings_music_vol: float = 1.0
         # Navegação na Interface de Pesca e Modal de Confirmação (Peixe/Mensagens)
         self._fishing_initialized: bool = False
+        self._fishing_closing: bool = False
         self._modal_confirm_initialized: bool = False
         # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
         self._inventory_initialized: bool = False
@@ -978,6 +979,14 @@ class BridgeEngineCore(threading.Thread):
         dt: float,
     ) -> None:
         self._update_trigger_edges(state)
+        # Handle fishing before center buttons, discrete bindings and combat.
+        # Its only controller inputs are the physical confirm/cancel pair.
+        menus = self._memory_state.open_menus or []
+        modal = "Confirmação Sair" in menus or "confirma" in (self._memory_state.state_desc or "").lower()
+        if self._memory_state.is_connected and "Pesca" in menus and not modal:
+            self._handle_fishing_navigation(state, rect, hub)
+            self._previous_panels = tuple(self._active_panels)
+            return
         if self._memory_state.is_connected and self._memory_state.state_id == 1:
             was_open = self._virtual_keyboard_open
             self._handle_char_create_navigation(state, rect, hub)
@@ -1117,13 +1126,7 @@ class BridgeEngineCore(threading.Thread):
                 self._modal_confirm_initialized = False
                 self.shared.update(modal_confirm_focus=None)
 
-            # Interface de Pesca (minigame do anzol)
-            is_fishing = "Pesca" in (self._memory_state.open_menus or [])
-            if is_fishing:
-                self._handle_fishing_navigation(state, rect, hub)
-                self._previous_panels = (self._active_panels[0], self._active_panels[1])
-                return
-            elif self._fishing_initialized:
+            if self._fishing_initialized:
                 self._fishing_initialized = False
                 self.shared.update(fishing_focus=None)
 

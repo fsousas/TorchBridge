@@ -15,6 +15,10 @@ uint32_t warp_event = 0;
 uintptr_t attack_item = 0;
 bool within_reach = true, visible = true, attack_ready = true;
 unsigned attacks = 0, pickups = 0, path_stops = 0;
+unsigned spells = 0, skill_checks = 0;
+uint32_t skill_range_result = 0;
+constexpr uint32_t left_lo = 0x11223344, left_hi = 0xaabbccdd;
+float aimed_x = 0, aimed_z = 0;
 int ai_mode = -1;
 void __fastcall test_target(void*, void*, void*) {}
 void __fastcall test_target_item(void*, void*, void* target) {
@@ -31,6 +35,17 @@ bool __fastcall test_sight(void*, void*, void* level, bool) {
 bool __fastcall test_attack(void*, void*) {
     assert(attack_item && ai_mode == 0);
     ++attacks;
+    return attack_ready;
+}
+void __fastcall test_aim(void*, void*, float x, float z) { aimed_x = x; aimed_z = z; }
+uint32_t __fastcall test_skill_range(void*, void*, uint32_t lo, uint32_t hi, bool) {
+    assert(lo == left_lo && hi == left_hi && attack_item);
+    ++skill_checks;
+    return skill_range_result;
+}
+bool __fastcall test_spell(void*, void*, uint32_t lo, uint32_t hi) {
+    assert(lo == left_lo && hi == left_hi && attack_item && ai_mode == 0);
+    ++spells;
     return attack_ready;
 }
 DWORD WINAPI window_process(HWND, LPDWORD pid) {
@@ -154,6 +169,8 @@ int main() {
     basic_attack = reinterpret_cast<AttackFn>(&test_attack);
     attack_in_range = reinterpret_cast<RangeFn>(&test_range);
     attack_in_sight = reinterpret_cast<SightFn>(&test_sight);
+    put<uint32_t>(scene.player, 0x2F0, UINT32_MAX);
+    put<uint32_t>(scene.player, 0x2F4, UINT32_MAX);
     Candidate barrel{object, 4, 0, 0, 4};
     use(barrel, GetTickCount64());
     assert(attacks == 1 && !pickups && path_stops == 1 && ai_mode == 0);
@@ -175,6 +192,31 @@ int main() {
         assert(attacks == before + (refused == 2 ? 1 : 0));
         assert(!pickups && ai_mode == 0 && !attack_item && !authorized_target);
         assert(status.action_result == unavailable && !scope);
+    }
+    // A ranged spell in the LEFT slot must be used even with a melee weapon
+    // equipped and outside its reach. Neither right/hotkey skill nor default
+    // weapon range may replace/gate this explicit left-slot attack.
+    use_skill = reinterpret_cast<SkillFn>(&test_spell);
+    skill_in_range = reinterpret_cast<SkillRangeFn>(&test_skill_range);
+    aim_at = reinterpret_cast<AimFn>(&test_aim);
+    put<uint32_t>(scene.player, 0x2F0, left_lo);
+    put<uint32_t>(scene.player, 0x2F4, left_hi);
+    put<uint32_t>(scene.player, 0x2E0, 42);
+    put<uint32_t>(scene.player, 0x2E4, 99);
+    barrel.x = 8.99f; barrel.z = -2.f;
+    within_reach = false; visible = attack_ready = true;
+    const auto previous_attacks = attacks;
+    use(barrel, GetTickCount64());
+    assert(spells == 1 && skill_checks == 1 && attacks == previous_attacks && !pickups);
+    assert(aimed_x == barrel.x && aimed_z == barrel.z && status.executed == object && !authorized_target);
+    for (unsigned refused = 0; refused != 3; ++refused) {
+        skill_range_result = refused == 0 ? 2 : 0;
+        visible = refused != 1; attack_ready = refused != 2;
+        const auto before = spells;
+        use(barrel, GetTickCount64());
+        assert(spells == before + (refused == 2 ? 1 : 0));
+        assert(attacks == previous_attacks && !pickups && !attack_item && !authorized_target);
+        assert(status.action_result == unavailable); // Never silently falls back to melee.
     }
     // Non-destructible props retain their native approach/use behavior.
     barrel.type = 2;

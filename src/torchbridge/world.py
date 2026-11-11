@@ -191,7 +191,7 @@ class WorldSnapshot:
             return ()
         return tuple(sorted((entity for entity in self.entities
                              if entity.position.valid
-                             and abs(entity.position.height - player.height) <= max_height
+                             and (entity.kind == "fishing" or abs(entity.position.height - player.height) <= max_height)
                              and player.distance_to(entity.position) <= entity.action_radius(radius)),
                             key=lambda entity: (player.distance_to(entity.position), entity.address)))
 

@@ -1,5 +1,7 @@
 """Testes unitários para interface de pesca e modal de confirmação (resultado da pesca / mensagens)."""
 import unittest
+from pathlib import Path
+import tempfile
 from unittest.mock import MagicMock
 
 from PySide6.QtGui import QPainter, QPixmap
@@ -14,6 +16,7 @@ from torchbridge.models import (
     Rect,
     SharedOverlayState,
     fishing_hook_point,
+    fishing_close_point,
     modal_ok_point,
 )
 from torchbridge.overlay import GameOverlay
@@ -42,6 +45,7 @@ class FakeInjector:
 
     def key(self, name: str, down: bool) -> bool:
         self.buttons[name] = down
+        self.events.append(("key", name, down))
         return True
 
     def key_pressed(self, name: str) -> bool:
@@ -63,12 +67,13 @@ class FishingAndModalTests(unittest.TestCase):
 
         # Anzol de pesca (centro do quadrado vermelho no print 3)
         self.assertEqual(fishing_hook_point(rect), (512, 498))
+        self.assertEqual(fishing_close_point(rect), (512, 448))
 
         # Botão Ok da confirmação (prints 1 e 2)
         self.assertEqual(modal_ok_point(rect), (509, 467))
 
     def test_fishing_navigation_locks_cursor_and_clicks(self):
-        """Valida que na interface de pesca o cursor vai para o anzol, fica fixo, e A/X clicam."""
+        """O botão sul executa um clique simples no anzol."""
         config = ConfigManager()
         shared = SharedOverlayState()
         hub = MagicMock()
@@ -106,6 +111,79 @@ class FishingAndModalTests(unittest.TestCase):
         self.assertIn(("mouse", "left", False), injector.events)
         # NUNCA deve vazar clique direito!
         self.assertNotIn(("mouse", "right", True), injector.events)
+
+    def _fishing_engine(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = ConfigManager(Path(directory.name) / "perfil.json")
+        engine = BridgeEngine(config, SharedOverlayState())
+        engine.injector = FakeInjector()
+        engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True,
+                                               state_desc="Em Jogo", open_menus=["Pesca"])
+        return engine, config.get(), Rect(100, 80, 1024, 768)
+
+    def test_fishing_physical_south_east_mapping_and_nintendo_inversion(self):
+        for family, confirm, cancel in (("xbox", "a", "b"), ("playstation", "a", "b"),
+                                        ("nintendo", "b", "a")):
+            for button, focus in ((confirm, "hook"), (cancel, "close")):
+                with self.subTest(family=family, button=button):
+                    engine, cfg, rect = self._fishing_engine()
+                    empty = ControllerState(controller_type=family)
+                    engine._process_active(MagicMock(), empty, rect, cfg, 1., .05)
+                    engine._previous = empty
+                    engine.injector.events.clear()
+                    state = ControllerState(controller_type=family, buttons=frozenset({button}))
+                    engine._process_active(MagicMock(), state, rect, cfg, 1.1, .05)
+                    point = fishing_close_point(rect) if focus == "close" else fishing_hook_point(rect)
+                    self.assertEqual(engine.injector.events[-3:],
+                                     [("move", *point), ("mouse", "left", True), ("mouse", "left", False)])
+                    self.assertEqual(engine.shared.get().fishing_focus, focus)
+                    self.assertFalse(any(e[0] == "key" and e[2] for e in engine.injector.events))
+                    # Holding cannot repeat, reposition to the hook or cast a spell.
+                    engine._previous = state
+                    engine.injector.events.clear()
+                    engine._process_active(MagicMock(), state, rect, cfg, 1.3, .05)
+                    self.assertEqual(engine.injector.events, [])
+                    self.assertEqual(engine.injector.cursor, point)
+
+    def test_fishing_ignores_every_other_controller_input_before_general_handlers(self):
+        ignored = ("x", "y", "r3", "l3", "lb", "rb", "back", "start",
+                   "dpad_up", "dpad_down", "dpad_left", "dpad_right")
+        for button in ignored:
+            with self.subTest(button=button):
+                engine, cfg, rect = self._fishing_engine()
+                engine._process_active(MagicMock(), ControllerState(), rect, cfg, 1., .05)
+                engine.injector.events.clear()
+                state = ControllerState(buttons=frozenset({button}), lt=1., rt=1., lx=1., ly=1., rx=1., ry=1.)
+                engine._process_active(MagicMock(), state, rect, cfg, 1.2, .05)
+                self.assertEqual(engine.injector.events, [])
+                self.assertEqual(engine.injector.cursor, fishing_hook_point(rect))
+                self.assertEqual(engine._native_direction, (0., 0.))
+                self.assertFalse(engine.shared.get().radial_active)
+
+    def test_fishing_entry_releases_attack_and_modified_click_before_plain_hook_click(self):
+        engine, cfg, rect = self._fishing_engine()
+        engine._held_keys = {"SHIFT", "CTRL"}
+        engine._held_mouse = {"left", "right"}
+        engine._a_shift_held = True
+        engine._modifier_seq = ("SHIFT", .9)
+        engine._modifier_left_down = True
+        engine.injector.buttons = {"SHIFT": True, "CTRL": True, "left": True, "right": True}
+        engine._process_active(MagicMock(), ControllerState(buttons=frozenset({"a"})), rect, cfg, 1., .05)
+        events = engine.injector.events
+        click = events.index(("mouse", "left", True))
+        for modifier in ("SHIFT", "CTRL"):
+            self.assertIn(("key", modifier, False), events[:click])
+            self.assertFalse(engine.injector.buttons[modifier])
+        self.assertEqual(events[click:], [("mouse", "left", True), ("mouse", "left", False)])
+        self.assertIsNone(engine._modifier_seq)
+        self.assertFalse(engine._a_shift_held)
+
+    def test_fishing_close_offset_is_fifty_pixels_at_any_resolution(self):
+        for rect in (Rect(0, 0, 1024, 768), Rect(-1280, 80, 1280, 720), Rect(100, 80, 1920, 1080)):
+            hook, close = fishing_hook_point(rect), fishing_close_point(rect)
+            self.assertEqual(hook[0], close[0])
+            self.assertEqual(hook[1] - close[1], 50)
 
     def test_modal_confirmation_navigation_and_ok_click(self):
         """Valida que no popup modal (peixe pego / nenhum peixe) o cursor vai pro Ok e A/X/B clicam."""

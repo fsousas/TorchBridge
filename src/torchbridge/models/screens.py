@@ -288,6 +288,14 @@ def fishing_hook_point(rect: Rect) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+def fishing_close_point(rect: Rect) -> tuple[int, int]:
+    """Close fishing with a plain click exactly 50 screen pixels above the hook."""
+    if not rect.valid:
+        return (0, 0)
+    x, y = fishing_hook_point(rect)
+    return x, max(rect.top + 2, y - 50)
+
+
 def modal_ok_point(rect: Rect) -> tuple[int, int]:
     """Calcula a coordenada (x, y) do botão Ok no modal de confirmação / mensagem de pesca."""
     if not rect.valid:

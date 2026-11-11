@@ -100,7 +100,8 @@ class WorldOverlayTests(unittest.TestCase):
                     self.assertEqual(self.drawn_text, [])
                     self.assertEqual(len(self.drawn_images), 1)
                     rect = self.drawn_image_rects[0]
-                    self.assertAlmostEqual(rect.right(), width * .4 - 6 * scale)
+                    self.assertAlmostEqual(rect.right(), width * .4 - 2 * scale)
+                    self.assertAlmostEqual(rect.height(), 48 * scale)
                     self.assertAlmostEqual(rect.center().y(), height * .325)
                     # No duplicate box/text is painted over the game's own name.
                     self.assertLess(rect.right(), width * .4)

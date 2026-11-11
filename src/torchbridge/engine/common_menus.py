@@ -8,6 +8,7 @@ from ..models import (
     dialog_button_point,
     difficulty_menu_button_point,
     fishing_hook_point,
+    fishing_close_point,
     modal_ok_point,
     pause_menu_button_point,
     title_menu_button_point,
@@ -320,21 +321,46 @@ class CommonMenuNavigationMixin:
         rect: Rect,
         hub: ControllerHub,
     ) -> None:
-        """Gerencia o posicionamento e interação na interface de pesca."""
-        target_x, target_y = fishing_hook_point(rect)
+        """Fishing owns controller input: confirm hooks, cancel clicks 50 px up."""
         if not self._fishing_initialized:
             self._fishing_initialized = True
-            self.injector.move(target_x, target_y)
-            self.shared.update(fishing_focus="hook")
+            self._fishing_closing = False
+            # Entry can follow an A attack or a modified inventory click. Release
+            # those inputs before the game's fishing click is allowed to happen.
+            for button in ("left", "right"):
+                self.injector.mouse_button(button, False)
+                self._held_mouse.discard(button)
+            self._modifier_seq = self._pet_click_seq = self._hud_click_seq = None
+            self._modifier_left_down = self._modifier_left_up = False
+            self._previous_left_pressed = self._a_shift_held = False
+            for modifier in ("SHIFT", "CTRL"):
+                self._held_keys.discard(modifier)
+                self._ensure_modifier_released(modifier)
+            self._skill_repeat_at.clear()
+            self._skill_repeat_sources.clear()
+            self.shared.update(fishing_focus="hook", radial_active=False, pet_submenu_open=False)
 
-        # Mantém o cursor fixo no anzol como única opção
+        confirm, cancel = self._keyboard_buttons(state)
+        hook_pressed = state.pressed(confirm) and not self._previous.pressed(confirm)
+        close_pressed = state.pressed(cancel) and not self._previous.pressed(cancel)
+        if close_pressed:
+            self._fishing_closing = True
+        elif hook_pressed:
+            self._fishing_closing = False
+        target_x, target_y = fishing_close_point(rect) if self._fishing_closing else fishing_hook_point(rect)
+        self.shared.update(fishing_focus="close" if self._fishing_closing else "hook")
         cur_x, cur_y = self.injector.cursor_position()
         if abs(cur_x - target_x) > 4 or abs(cur_y - target_y) > 4:
             self.injector.move(target_x, target_y)
 
-        btn_a_pressed = state.pressed("a") and not self._previous.pressed("a")
-        btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
-        if btn_a_pressed or btn_x_pressed:
+        # Ignore and consume every other input, including deferred Back/Start
+        # releases. A held fishing button must not turn into combat after close.
+        self._blocked_buttons.update(state.buttons)
+        self._blocked_lt = self._blocked_lt or state.lt >= self.TRIGGER_ACTIVE_THRESHOLD
+        self._blocked_rt = self._blocked_rt or state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
+        if state.pressed("back") or state.pressed("start"):
+            self._center_combo_seen = self._center_combo_triggered = True
+        if hook_pressed or close_pressed:
             self.injector.move(target_x, target_y)
             self.injector.mouse_button("left", True)
             self.injector.mouse_button("left", False)

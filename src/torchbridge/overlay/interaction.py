@@ -39,7 +39,7 @@ class WorldInteractionOverlayMixin:
         left *= snapshot.game_rect.width
         middle = (top + bottom) * snapshot.game_rect.height / 2
         icon = self._interaction_icon(self._interaction_family(config, snapshot), False)
-        height, gap = 24 * scale, 6 * scale
+        height, gap = 48 * scale, 2 * scale
         painter.save()
         if icon is not None:
             width = height * icon.width() / icon.height()

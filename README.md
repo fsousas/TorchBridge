@@ -160,12 +160,18 @@ essa aproximação cancela a conversa pendente e retoma a caminhada imediatament
 
 Barris comuns, explosivos e demais destrutíveis recebem um ataque com **A (Xbox/Nintendo)**
 ou **× (PlayStation)**, com o ícone `interact-*.png`,
-mantendo o personagem parado. O jogo verifica alcance da arma, obstáculos e
-disponibilidade do ataque. Com uma arma corpo a corpo fora de alcance, o personagem
-permanece parado; ele não caminha automaticamente até o objeto.
+mantendo o personagem parado. O ataque usa a habilidade configurada no clique
+esquerdo, com o alcance, mana e cooldown dela; quando esse slot usa ataque comum,
+vale o alcance da arma. O jogo verifica obstáculos e disponibilidade da ação.
+Fora de alcance, o personagem permanece parado, sem caminhar até o objeto.
 O raio de seleção dos destrutíveis é o dobro do raio comum: 9 unidades no padrão
 de 4,5. Fishing holes têm um círculo próprio de pelo menos 2,5 unidades;
 a interação fica disponível quando esse círculo toca o raio do personagem.
+Para pesca, a altura do píer em relação à água não bloqueia essa seleção.
+Na interface de pesca, somente os botões sul e leste funcionam: no Xbox e
+PlayStation, sul faz um clique esquerdo simples no anzol e leste clica 50 px
+acima para fechar. No Nintendo, essas duas ações são invertidas. Os cliques
+liberam os modificadores anteriores e não usam Shift ou Ctrl.
 
 Itens, equipamentos e ouro no chão usam **A (Xbox/Nintendo)** ou **× (PlayStation)**
 para coleta nativa. O aviso usa `interact-*.png` para coletas e destrutíveis e
@@ -173,7 +179,8 @@ para coleta nativa. O aviso usa `interact-*.png` para coletas e destrutíveis e
 layout escolhido na HUD. Só a indicação do botão é substituída por imagem;
 nome, informações e distância continuam visíveis. Quando Alt/D-pad ← mostra
 o nome nativo de um objeto usado pelo D-pad ↑, aparece somente o ícone à
-esquerda desse tooltip. NPCs mantêm suas informações completas.
+esquerda desse tooltip, usando o novo ícone com fundo claro em 48 px.
+NPCs mantêm suas informações completas.
 Segurar a coleta não vira
 ataque quando o item desaparece: é preciso soltar o botão antes de outra ação.
 Concluir uma coleta ou um ataque a destrutível libera a caminhada sem a espera

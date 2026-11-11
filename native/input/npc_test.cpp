@@ -107,6 +107,7 @@ struct Fixture {
         classes[hvt] = {player | character, "CPlayer"};
         classes[nvt] = {character, "CMonster"};
         put<uint32_t>(h, 0, hvt); put<uint32_t>(n, 0, nvt);
+        put<uint32_t>(h, 0x2F0, UINT32_MAX); put<uint32_t>(h, 0x2F4, UINT32_MAX);
         hero_vt[0x174 / 4] = reinterpret_cast<uintptr_t>(&test_mode);
         npc_vt[0x100 / 4] = reinterpret_cast<uintptr_t>(&test_highlight);
         for (const auto offset : {0x6Eu, 0x161u}) put<uint8_t>(n, offset, 1);
@@ -238,6 +239,16 @@ int main() {
         assert(status.selected == f.n);
         put<float>(f.n, 0x70, limit + .01f); f.step(16);
         assert(!status.selected && (status.flags & complete));
+    }
+    for (const auto close_to_water : {true, false}) {
+        Fixture f; f.as_item(5, 0);
+        put<float>(f.n, 0x70, -9.37f); put<float>(f.n, 0x78, 14.2f);
+        put<float>(f.h, 0x70, close_to_water ? -8.85f : -7.91f);
+        put<float>(f.h, 0x78, close_to_water ? 16.64f : 20.21f);
+        put<float>(f.h, 0x74, close_to_water ? 4.f : 0.f);
+        f.step(16);
+        assert(status.selected == f.n);
+        f.press(); assert(pickup_calls == 1 && authorized_kind == 5);
     }
     for (bool immediate : {true, false}) {
         Fixture f; f.as_item(3, 1.f);

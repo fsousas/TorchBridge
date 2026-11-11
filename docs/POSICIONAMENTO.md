@@ -36,19 +36,29 @@ objeto. A seleção continua estritamente por proximidade. Segurar não repete.
 
 CBreakable e subclasses (barris comuns/explosivos e outros destrutíveis) usam
 **A no Xbox/Nintendo** e **× no PlayStation**, com o ícone `interact-*.png`,
-e recebem um ataque básico mantendo posição. O D-pad não aciona destrutíveis.
+e recebem o ataque do slot de clique esquerdo mantendo posição. O D-pad não aciona destrutíveis.
 O módulo cancela o caminho e preserva o estado parado; não entra no estado de
-aproximar/coletar. Alcance da arma, obstáculos e disponibilidade do ataque são
-verificados pelo jogo. Fora de alcance, o personagem permanece parado.
+aproximar/coletar. Se há uma habilidade configurada no slot esquerdo, usa seu
+GUID, alcance e rotina nativa de cast; a arma corpo a corpo não limita a spell
+ranged. O ataque básico continua valendo quando o slot está sem skill.
+Obstáculos, mana, cooldown e requisitos são verificados pelo jogo. Uma spell
+indisponível não é substituída silenciosamente por ataque melee.
 O raio de seleção é **2 × `interaction.radius`**, exclusivamente para destrutíveis:
 4,5 no perfil produz 9 unidades para esses objetos, mantendo 4,5 para itens,
-NPCs e props comuns. Isso amplia a seleção sem aumentar o alcance da arma.
+NPCs e props comuns. Isso amplia a seleção sem aumentar o alcance da ação.
 
 Fishing holes têm um círculo próprio: usa-se o raio físico do objeto, com
 mínimo de 2,5 e máximo de 8 unidades (inclusive para holes sem colisão).
 A seleção permite interação quando a distância entre os centros é menor ou
 igual à soma desse círculo com `interaction.radius`. Python e DLL usam a mesma
-geometria e conservam o limite de altura de 2,5 unidades entre andares.
+geometria no plano X/Z. Pesca ignora a diferença de altura entre píer e água;
+o limite de 2,5 unidades entre andares permanece para os outros tipos de objeto.
+O caso relatado de distância 2,49 ser rejeitada e 6,18 ser aceita era compatível
+com esse filtro vertical: as duas posições agora são cobertas por regressões.
+
+Dentro da interface de pesca, o botão sul no Xbox/PlayStation clica no anzol
+sem modificador, e leste clica 50 px acima para fechar. Nintendo inverte sul e
+leste. Os demais controles não atravessam para combate, roda, R3 ou menus.
 
 Coleta e ataque não retêm a autorização de uso por 1,5 s depois de concluídos.
 O ataque aceito passa a obedecer somente ao bloqueio nativo de habilidade;
@@ -253,6 +263,17 @@ Em `CEGUIBase.dll`, `Window::getUnclippedPixelRect` (`0x1009EF00`) usa o cache
 `+0x360`; `isVisible(false)` (`0x1009ECF0`) lê `+0x1A1` e percorre pais em
 `+0x80`. O viewport em `CGameUI+0x13E4/+0x13E8` normaliza o retângulo para o
 overlay, sem misturar pixels do jogo, escala Qt ou origem da janela no desktop.
+O ícone nativo usa 48 px e 2 px de separação; as seis imagens foram atualizadas
+com os PNGs de `TorchBridge.zip`, incluindo o fundo claro do D-pad.
+
+O processamento nativo do mouse esquerdo em `0x0041549E` lê o GUID em
+`CCharacter+0x2F0/+0x2F4`. `+0x2E0/+0x2E4` pertence ao skill atual/direito;
+usar o ataque básico `0x0048FBD0` para todo destrutível ignorava aquele slot.
+A rotina `0x0048CDB0` valida o alcance da skill, sem iniciar navegação;
+`0x00484390` ajusta a mira X/Z e `0x00494E50` executa o cast com suas regras.
+O módulo resolve o primeiro método pela chamada no AI virtual `+0x1C0`,
+confere as assinaturas de campos e usa os perfis Steam/GOG para mira/cast.
+O resolver e as assinaturas foram conferidos contra o Steam instalado.
 
 A rotina de conversa do mesmo Steam, virtual `+0x1B8` (`0x00496DF0`), não chama
 MoveTo. Ela espera um caminho já ativo e só avança para diálogo/serviço ao
@@ -285,11 +306,17 @@ e os ponteiros do processo corrente, incluindo ASLR/relocação do Proton.
 
 ## Validação
 
-Em 11/11/2026 passaram **656 testes Python**, **48 testes de overlay** com
+Em 11/11/2026 passaram **662 testes Python**, **48 testes de overlay** com
 `QT_SCALE_FACTOR=1.5`, `compileall` e `git diff --check`. As regressões cobrem os
 dez atalhos mantidos pressionados, soltura e nova pressão rápida, troca de LT,
 supressão pela roda/painéis, raios exclusivos, toque entre círculos de pesca,
 leitura de labels nos dois transportes e ícone à esquerda do tooltip nativo.
+As regressões da pesca cobrem a liberação de Shift/Ctrl antes do clique,
+o fechamento 50 px acima, a inversão Nintendo e a rejeição dos demais inputs.
+As duas posições relatadas do fishing hole foram reproduzidas em fixtures,
+incluindo o caso próximo com o píer acima da água. O teste nativo de destrutíveis
+usa arma fora de alcance e GUIDs distintos para o slot esquerdo e direito,
+verificando o cast da skill esquerda e recusas por alcance/obstáculo/cooldown.
 Os pontos de hit-test da HUD foram atualizados para o SVG já versionado no
 commit `c6fb046`; o desenho do usuário não foi alterado.
 
@@ -302,9 +329,10 @@ também continuam passando. São testes com objetos de jogo simulados, sem
 homologação desta mudança numa sessão interativa do Torchlight.
 
 DLL instalada e distribuída: SHA-256
-`a75099b9d08cd57d3b7215d3b35121b6c4d91d922b42d5f34fdf1f86a4a04d98`.
-A capacidade `ACTION_RANGES` (512) exige essa atualização antes de conectar,
-evitando que o overlay com os novos alcances converse com a seleção antiga.
+`e7e66cc785ac664d888dfb90593c53f3cbe8848c8f3252d000ccee416428c2fa`.
+As capacidades `ACTION_RANGES` (512) e `EQUIPPED_SKILL_ACTIONS` (1024) exigem
+essa atualização antes de conectar, evitando divergências de seleção na pesca
+ou o uso da rotina antiga que limitava destrutíveis ao ataque básico.
 Reiniciar TorchBridge e Torchlight carrega o novo código Python e a DLL.
 
 Comando: `python scripts/run_tests.py`. A suíte cobre o leitor, o controlador

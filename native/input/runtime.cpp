@@ -153,6 +153,9 @@ using PickupFn = void(__thiscall*)(void*, float, void*);
 using AttackFn = bool(__thiscall*)(void*);
 using RangeFn = bool(__thiscall*)(void*, bool);
 using SightFn = bool(__thiscall*)(void*, void*, bool);
+using SkillFn = bool(__thiscall*)(void*, uint32_t, uint32_t);
+using SkillRangeFn = uint32_t(__thiscall*)(void*, uint32_t, uint32_t, bool);
+using AimFn = void(__thiscall*)(void*, float, float);
 using HighlightFn = void(__thiscall*)(void*, bool);
 using IsaFn = bool(__thiscall*)(void*, int);
 using PositionFn = float*(__thiscall*)(void*, float*, int);
@@ -172,6 +175,9 @@ PositionFn get_position = nullptr;
 AttackFn basic_attack = nullptr;
 RangeFn attack_in_range = nullptr;
 SightFn attack_in_sight = nullptr;
+SkillFn use_skill = nullptr;
+SkillRangeFn skill_in_range = nullptr;
+AimFn aim_at = nullptr;
 std::array<InteractFn, 64> original_interacts{};
 std::unordered_map<uintptr_t, size_t> interact_hooks;
 
@@ -467,14 +473,26 @@ void use(const Candidate& candidate, ULONGLONG now) {
     original_target(hero, nullptr);
     original_item(hero, nullptr);
     if (stationary_attack) {
-        // State 7 is the pickup/use AI: it walks into range before attacking
-        // breakables. Keep idle state and invoke only the game's basic attack.
-        // These checks preserve weapon reach, collision/line of sight and cooldown.
+        // The native left mouse slot is +2F0/+2F4, separate from the current
+        // right/hotkey skill and the equipped weapon's basic attack. Use its
+        // actual cast range instead of rejecting ranged spells by melee reach.
+        // State 7/MoveTo would approach the object, so neither is used here.
         stop_path(hero);
         method<ModeFn>(scene.player, 0x174)(hero, 0);
         original_item(hero, reinterpret_cast<void*>(candidate.address));
-        if (attack_in_range(hero, false) &&
-            attack_in_sight(hero, reinterpret_cast<void*>(scene.level), false) && basic_attack(hero)) {
+        const auto lo = field<uint32_t>(scene.player, 0x2F0);
+        const auto hi = field<uint32_t>(scene.player, 0x2F4);
+        const bool has_skill = (lo & hi) != UINT32_MAX;
+        bool fired = false;
+        if (has_skill) {
+            aim_at(hero, candidate.x, candidate.z);
+            fired = skill_in_range(hero, lo, hi, false) == 0 &&
+                attack_in_sight(hero, reinterpret_cast<void*>(scene.level), true) && use_skill(hero, lo, hi);
+        } else {
+            fired = attack_in_range(hero, false) &&
+                attack_in_sight(hero, reinterpret_cast<void*>(scene.level), false) && basic_attack(hero);
+        }
+        if (fired) {
             status.executed = static_cast<uint32_t>(candidate.address);
             // The native attack now owns its animation/cooldown. It needs no
             // interaction authorization and must not impose a second lockout.
@@ -762,6 +780,22 @@ bool initialize() {
     basic_attack = reinterpret_cast<AttackFn>(attack);
     attack_in_range = reinterpret_cast<RangeFn>(range);
     attack_in_sight = reinterpret_cast<SightFn>(sight);
+    // CCharacter's skill AI (+1C0) calls the original cast-range check. Resolve
+    // that call by its arguments and verify the same field layout in both builds.
+    const auto skill_ai = field<uint32_t>(player_vt, 0x1C0);
+    const uint8_t skill_range_call[] = {0x6A,0x00,0x6A,0xFF,0x6A,0xFF,0x8B,0xCE,0xE8};
+    const auto spell_range = relative_call(skill_ai, 0x430, skill_range_call, sizeof skill_range_call);
+    const auto spell = at(steam ? 0x494E50 : 0x496EB0);
+    const auto aim = at(steam ? 0x484390 : 0x486180);
+    const uint8_t skill_field[] = {0xD0,0x02,0,0}, manager_field[] = {0x84,0x01,0,0};
+    const uint8_t aim_field[] = {0xCC,0x01,0,0}, direction_field[] = {0xD8,0x01,0,0};
+    if (!spell_range || !contains(spell_range, 0x100, manager_field, 4) ||
+        !contains(spell_range, 0x100, target_item, 4) || !contains(spell, 0x100, skill_field, 4) ||
+        !contains(spell, 0x100, manager_field, 4) || !contains(aim, 0x90, aim_field, 4) ||
+        !contains(aim, 0x90, direction_field, 4)) return false;
+    use_skill = reinterpret_cast<SkillFn>(spell);
+    skill_in_range = reinterpret_cast<SkillRangeFn>(spell_range);
+    aim_at = reinterpret_cast<AimFn>(aim);
     if (MH_Initialize() != MH_OK) return false;
     if (!hook(field<uint32_t>(player_vt, 0xFC), reinterpret_cast<void*>(&update_hook),
               reinterpret_cast<void**>(&original_update)) ||
@@ -799,7 +833,7 @@ DWORD WINAPI serve(void*) {
     getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
     endpoint.port = ntohs(address.sin_port);
     endpoint.capabilities = ready | protected_world | highlighted | typed_interactions |
-        stationary_breakables | destructible_actions | npc_approach | action_ranges;
+        stationary_breakables | destructible_actions | npc_approach | action_ranges | equipped_skill_actions;
     MemoryBarrier(); std::memcpy(endpoint.magic, magic, 8);
     initialized.store(true);
     for (;;) {

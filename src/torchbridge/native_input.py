@@ -20,11 +20,12 @@ STATIONARY_BREAKABLES = 64
 DESTRUCTIBLE_ACTIONS = 128
 NPC_APPROACH = 256
 ACTION_RANGES = 512
+EQUIPPED_SKILL_ACTIONS = 1024
 READY, PROTECTED, HIGHLIGHTED, MOVING, COMPLETE = 1, 2, 4, 8, 16
 REASONS = ("Parado", "Caminhando", "Aguardando controle", "Jogo sem foco",
            "Cenário mudou", "Menu aberto", "Habilidade em execução", "Nenhum alvo próximo",
            "Interagindo", "Versão não reconhecida", "Lista incompleta", "Canal indisponível",
-           "Destrutível fora de alcance, obstruído ou ataque indisponível")
+           "Destrutível fora de alcance, obstruído ou habilidade/ataque indisponível")
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +143,8 @@ class NativeInputClient:
                 return
             if not 0 < port <= 65535 or not capabilities & READY:
                 return
-            required = TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS | NPC_APPROACH | ACTION_RANGES
+            required = (TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS |
+                        NPC_APPROACH | ACTION_RANGES | EQUIPPED_SKILL_ACTIONS)
             if capabilities & required != required:
                 # Require matching ranges and movement released on completion.
                 # Prepare the bundled update and require a new game process.

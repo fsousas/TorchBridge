@@ -80,7 +80,7 @@ int main() {
         hole.x += .01f;
         assert(!in_range(hole, 0, 0, 0, 4.5f));
         hole.x = 0; hole.y = 3;
-        assert(!in_range(hole, 0, 0, 0, 4.5f));
+        assert(in_range(hole, 0, 0, 0, 4.5f)); // Water below a pier is still fishable.
     }
 
     // Stairs/entrances emit state outputs on the next frame, after the

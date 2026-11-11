@@ -48,8 +48,11 @@ fullscreen continua independente e opcional.
 ## Controle e alvo
 
 - O analógico esquerdo anda; voltar ao centro pede parada.
-- O alvo é o elemento utilizável mais próximo dentro do raio configurado,
-  respeitando a diferença de altura de até 2,5 unidades. Empates usam endereço
+- O alvo é o elemento utilizável mais próximo no alcance do seu tipo: raio
+  configurado para itens/NPCs/props, dobro para destrutíveis e soma com o
+  círculo do fishing hole para pesca. A diferença de altura de até 2,5 unidades
+  separa andares nos outros tipos; pesca usa X/Z para permitir píer sobre água.
+  Empates usam endereço
   estável. Categoria, câmera, direção e posição na tela não favorecem outro alvo.
 - O método de highlight do próprio jogo destaca esse alvo sem mover o cursor.
   O aviso do overlay acompanha o alvo reconhecido pelo módulo.
@@ -99,7 +102,7 @@ classe interativa reconhecida.
 | Portais e waypoints | 43 / 165 / 173 / 171 e props reconhecidos | Uso original com transição autorizada |
 | Escadas e entradas de dungeon | CTriggerUnit e suas saídas Triggered/estado | Uso original e autorização de cada saída adiada uma vez |
 | Itens, equipamentos e ouro | CItem e subclasses; ouro 34 | Coleta original |
-| Destrutíveis | CBreakable e subclasses, incluindo barris comuns/explosivos | A/× tenta ataque básico mantendo posição, conforme alcance da arma e obstáculos |
+| Destrutíveis | CBreakable e subclasses, incluindo barris comuns/explosivos | A/× usa a habilidade do slot esquerdo ou ataque básico da arma, mantendo posição e verificando alcance da ação/obstáculos |
 | Outros objetos utilizáveis | Subclasse interativa com dispatch reconhecido | Categoria genérica e método original |
 
 A seleção não ativa objetos. Os limites de alvo/uso e a ativação direta de props

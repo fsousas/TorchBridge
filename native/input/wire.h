@@ -14,6 +14,7 @@ constexpr uint32_t stationary_breakables = 64; // Attack destructibles without p
 constexpr uint32_t destructible_actions = 128; // Separate face-button attack intent.
 constexpr uint32_t npc_approach = 256; // Native path and interruptible pending talk.
 constexpr uint32_t action_ranges = 512; // Per-kind range and completion releases movement.
+constexpr uint32_t equipped_skill_actions = 1024; // Left-slot casts and water-plane fishing selection.
 enum Reason : uint32_t { idle, walking_now, no_session, no_focus, wrong_scene, menu,
     skill_lock, no_target, acting, unsupported, incomplete, transport_error, attack_unavailable };
 enum ActionResult : uint32_t { none, accepted, unavailable, changed_target, blocked };
@@ -88,6 +89,6 @@ inline bool in_range(const Candidate& c, float x, float y, float z, float radius
     if (c.type == 4) radius *= 2;
     if (c.type == 5) radius += std::fmax(2.5f, std::isfinite(c.radius) ? std::fmin(c.radius, 8.f) : 0.f);
     return std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z) &&
-        std::fabs(c.y - y) <= 2.5f && distance2(c, x, z) <= double(radius) * radius;
+        (c.type == 5 || std::fabs(c.y - y) <= 2.5f) && distance2(c, x, z) <= double(radius) * radius;
 }
 }

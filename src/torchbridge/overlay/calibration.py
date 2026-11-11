@@ -36,6 +36,7 @@ from ..models import (
     dialog_button_point,
     difficulty_menu_button_point,
     fishing_hook_point,
+    fishing_close_point,
     hud_asset_path,
     hud_purple_button_point,
     hud_target_rect,
@@ -1155,7 +1156,7 @@ class CalibrationOverlayMixin:
         # 12. Interface de Pesca (Anzol de Pescaria)
         if snapshot.fishing_focus:
             hook_size = 40.0 * scale * (rect.height / 768.0)
-            hx, hy = fishing_hook_point(rect)
+            hx, hy = fishing_close_point(rect) if snapshot.fishing_focus == "close" else fishing_hook_point(rect)
             lx = hx - rect.left - hook_size / 2.0
             ly = hy - rect.top - hook_size / 2.0
             painter.setPen(QPen(QColor(255, 30, 30, 240), 2.5 * scale))
