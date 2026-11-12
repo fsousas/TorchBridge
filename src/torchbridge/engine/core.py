@@ -305,6 +305,7 @@ class BridgeEngineCore(threading.Thread):
         self._fishing_click_down = False
         self._fishing_next_click: bool | None = None
         self._modal_confirm_initialized: bool = False
+        self._modal_confirm_focus: str = "ok"
         # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
         self._inventory_initialized: bool = False
         self._inventory_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
@@ -454,6 +455,7 @@ class BridgeEngineCore(threading.Thread):
         self._quest_b_consumed = False
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
+        self._modal_confirm_focus = "ok"
         self._a_shift_held = False
 
     def stop(self) -> None:
@@ -645,6 +647,7 @@ class BridgeEngineCore(threading.Thread):
         self._settings_dropdown = None
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
+        self._modal_confirm_focus = "ok"
         self._previous_left_pressed = False
         self.shared.take_keyboard_events()
         self.shared.update(virtual_keyboard_open=False, virtual_keyboard_target="",

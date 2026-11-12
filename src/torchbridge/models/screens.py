@@ -312,6 +312,22 @@ def modal_ok_point(rect: Rect, *, tutorial: bool = False) -> tuple[int, int]:
     return (clamped_x, clamped_y)
 
 
+def modal_tips_checkbox_point(rect: Rect) -> tuple[int, int]:
+    """'Show Tips' checkbox in the first-use tutorial tip popup."""
+    if not rect.valid:
+        return (0, 0)
+    scale = rect.height / 768.0
+    center_x = rect.left + rect.width * 0.5
+    # tipmenu.layout: Frameb at (0.5H - 240), height 350; ShowTips at (0.5W + 100, bottom - 70),
+    # size 50x40. Its center is (0.5W + 125, 0.5H + 60), or (637, 444) in the 768p UI space.
+    base_x, base_y = 637.0, 444.0
+    x = center_x + (base_x - 512.0) * scale
+    y = rect.top + base_y * scale
+    clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))
+    clamped_y = int(clamp(round(y), rect.top + 2, rect.bottom - 2))
+    return (clamped_x, clamped_y)
+
+
 
 # Coordenadas base dos botões e slots de interfaces de crafting (painel esquerdo, base 1024x768)
 # Calibradas e validadas pixel a pixel a partir dos elementos visuais reais in-game

@@ -19,6 +19,7 @@ from torchbridge.models import (
     fishing_hook_point,
     fishing_close_point,
     modal_ok_point,
+    modal_tips_checkbox_point,
 )
 from torchbridge.overlay import GameOverlay
 
@@ -72,6 +73,9 @@ class FishingAndModalTests(unittest.TestCase):
 
         # Botão Ok da confirmação (prints 1 e 2)
         self.assertEqual(modal_ok_point(rect), (509, 467))
+
+        # Checkbox Show Tips do tutorial
+        self.assertEqual(modal_tips_checkbox_point(rect), (637, 444))
 
     def test_fishing_navigation_locks_cursor_and_clicks(self):
         """O botão sul executa um clique simples no anzol."""
@@ -351,6 +355,85 @@ class FishingAndModalTests(unittest.TestCase):
                     Rect(0, 0, 1024, 768), MagicMock())
         self.assertFalse(injector.buttons["left"])
 
+    def test_tutorial_show_tips_checkbox_navigation_and_toggle(self):
+        """Valida a navegação entre OK e Show Tips no tutorial e o clique no checkbox."""
+        config = ConfigManager()
+        shared = SharedOverlayState()
+        hub = MagicMock()
+        injector = FakeInjector()
+        engine = BridgeEngine(config, shared)
+        engine.injector = injector
+
+        rect = Rect(left=0, top=0, width=1024, height=768)
+        cfg = config.get()
+        empty = ControllerState()
+
+        # 1. Abre a tela de Tutorial
+        engine._memory_state = GameMemoryState(
+            is_connected=True,
+            is_in_game=True,
+            is_menu_open=True,
+            state_desc="Dica (Tutorial)",
+            open_menus=["Dica (Tutorial)"],
+        )
+        engine._process_active(hub, empty, rect, cfg, 0.0, 0.05)
+
+        # Foco inicial deve ser "ok"
+        self.assertTrue(engine._modal_confirm_initialized)
+        self.assertEqual(engine._modal_confirm_focus, "ok")
+        self.assertEqual(shared.get().modal_confirm_focus, "ok")
+        self.assertEqual(injector.cursor, modal_ok_point(rect, tutorial=True))
+
+        # 2. D-pad Right navega para o checkbox "show_tips"
+        dpad_right = ControllerState(buttons={"dpad_right"})
+        engine._previous = empty
+        engine._process_active(hub, dpad_right, rect, cfg, 0.1, 0.05)
+
+        self.assertEqual(engine._modal_confirm_focus, "show_tips")
+        self.assertEqual(shared.get().modal_confirm_focus, "show_tips")
+        self.assertEqual(injector.cursor, modal_tips_checkbox_point(rect))
+
+        # 3. Pressiona A sobre o checkbox -> Clica no checkbox
+        btn_a = ControllerState(buttons={"a"})
+        engine._previous = dpad_right
+        injector.events.clear()
+        with patch.object(engine, "_wait_for_input"):
+            engine._process_active(hub, btn_a, rect, cfg, 0.2, 0.05)
+
+        self.assertIn(("mouse", "left", True), injector.events)
+        self.assertIn(("mouse", "left", False), injector.events)
+        self.assertEqual(injector.cursor, modal_tips_checkbox_point(rect))
+        # O modal deve permanecer inicializado e focado em "show_tips"
+        self.assertTrue(engine._modal_confirm_initialized)
+        self.assertEqual(engine._modal_confirm_focus, "show_tips")
+
+        # 4. D-pad Left volta para "ok"
+        dpad_left = ControllerState(buttons={"dpad_left"})
+        engine._previous = btn_a
+        engine._process_active(hub, dpad_left, rect, cfg, 0.3, 0.05)
+
+        self.assertEqual(engine._modal_confirm_focus, "ok")
+        self.assertEqual(shared.get().modal_confirm_focus, "ok")
+        self.assertEqual(injector.cursor, modal_ok_point(rect, tutorial=True))
+
+        # 5. Navega novamente para "show_tips" com o analógico esquerdo
+        stick_right = ControllerState(lx=0.8)
+        engine._previous = dpad_left
+        engine._process_active(hub, stick_right, rect, cfg, 0.4, 0.05)
+        self.assertEqual(engine._modal_confirm_focus, "show_tips")
+        self.assertEqual(injector.cursor, modal_tips_checkbox_point(rect))
+
+        # 6. Pressionar B a partir do checkbox move para o OK e fecha o modal
+        btn_b = ControllerState(buttons={"b"})
+        engine._previous = stick_right
+        injector.events.clear()
+        with patch.object(engine, "_wait_for_input"):
+            engine._process_active(hub, btn_b, rect, cfg, 0.5, 0.05)
+
+        self.assertEqual(injector.cursor, modal_ok_point(rect, tutorial=True))
+        self.assertIn(("mouse", "left", True), injector.events)
+        self.assertIn(("mouse", "left", False), injector.events)
+
     def test_overlay_renders_fishing_and_modal(self):
         """Valida que o overlay desenha sem erros quando pesca ou modal estão focados."""
         config = ConfigManager()
@@ -369,6 +452,13 @@ class FishingAndModalTests(unittest.TestCase):
         pixmap = QPixmap(1024, 768)
         painter = QPainter(pixmap)
         scale = 1.0
+        overlay._draw_calibration(painter, shared.get(), scale)
+
+        # Testa também modo tutorial com checkbox Show Tips
+        shared.update(
+            modal_confirm_focus="show_tips",
+            memory_open_menus=["Dica (Tutorial)"],
+        )
         overlay._draw_calibration(painter, shared.get(), scale)
         painter.end()
 

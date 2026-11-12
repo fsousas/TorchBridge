@@ -10,6 +10,7 @@ from ..models import (
     fishing_hook_point,
     fishing_close_point,
     modal_ok_point,
+    modal_tips_checkbox_point,
     pause_menu_button_point,
     title_menu_button_point,
 )
@@ -412,15 +413,42 @@ class CommonMenuNavigationMixin:
         rect: Rect,
         hub: ControllerHub,
     ) -> None:
-        """Gerencia o posicionamento e confirmação no popup modal (Ok do peixe/mensagem)."""
+        """Gerencia o posicionamento e confirmação no popup modal (Ok do peixe/mensagem/tutorial)."""
         tutorial = "Dica (Tutorial)" in (self._memory_state.open_menus or [])
-        target_x, target_y = modal_ok_point(rect, tutorial=tutorial)
         if not self._modal_confirm_initialized:
             self._modal_confirm_initialized = True
+            self._modal_confirm_focus = "ok"
+            target_x, target_y = modal_ok_point(rect, tutorial=tutorial)
             self.injector.move(target_x, target_y)
-            self.shared.update(modal_confirm_focus="ok")
+            self.shared.update(modal_confirm_focus=self._modal_confirm_focus)
 
-        # Garante o cursor sobre o botão Ok
+        if tutorial:
+            dpad_right = state.pressed("dpad_right") and not self._previous.pressed("dpad_right")
+            dpad_left = state.pressed("dpad_left") and not self._previous.pressed("dpad_left")
+            dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+            dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+            stick_right = state.lx > 0.5 and self._previous.lx <= 0.5
+            stick_left = state.lx < -0.5 and self._previous.lx >= -0.5
+
+            current = getattr(self, "_modal_confirm_focus", "ok")
+            new_focus = current
+            if (dpad_right or stick_right or dpad_up) and current == "ok":
+                new_focus = "show_tips"
+            elif (dpad_left or stick_left or dpad_down) and current == "show_tips":
+                new_focus = "ok"
+
+            if new_focus != current:
+                self._modal_confirm_focus = new_focus
+                self.shared.update(modal_confirm_focus=new_focus)
+                hub.rumble(0.03, 0.08, 30)
+
+        focus = getattr(self, "_modal_confirm_focus", "ok")
+        if tutorial and focus == "show_tips":
+            target_x, target_y = modal_tips_checkbox_point(rect)
+        else:
+            target_x, target_y = modal_ok_point(rect, tutorial=tutorial)
+
+        # Garante o cursor sobre o elemento focado
         cur_x, cur_y = self.injector.cursor_position()
         if abs(cur_x - target_x) > 4 or abs(cur_y - target_y) > 4:
             self.injector.move(target_x, target_y)
@@ -429,7 +457,19 @@ class CommonMenuNavigationMixin:
         btn_x_pressed = state.pressed("x") and not self._previous.pressed("x")
         btn_b_pressed = state.pressed("b") and not self._previous.pressed("b")
 
-        if btn_a_pressed or btn_x_pressed or btn_b_pressed:
+        if btn_b_pressed:
+            ok_x, ok_y = modal_ok_point(rect, tutorial=tutorial)
+            self.injector.move(ok_x, ok_y)
+            if tutorial:
+                self._wait_for_input(0.03)  # Let Wine/OIS receive the cursor first.
+            try:
+                self.injector.mouse_button("left", True)
+                if tutorial:
+                    self._wait_for_input(0.06)  # A same-frame down/up can be lost.
+            finally:
+                self.injector.mouse_button("left", False)
+            hub.rumble(0.04, 0.10, 35)
+        elif btn_a_pressed or btn_x_pressed:
             self.injector.move(target_x, target_y)
             if tutorial:
                 self._wait_for_input(0.03)  # Let Wine/OIS receive the cursor first.
