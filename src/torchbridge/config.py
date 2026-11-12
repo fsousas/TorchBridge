@@ -348,7 +348,7 @@ class ConfigManager:
             if not force and mtime_ns == self._mtime_ns:
                 return False
             # Falha aqui (JSON inválido ou erro de I/O) cai no except e mantém o perfil atual em memória.
-            incoming = json.loads(self.path.read_text(encoding="utf-8"))
+            incoming = json.loads(self.path.read_text(encoding="utf-8-sig"))
             # Raiz precisa ser objeto JSON (dict).
             if not isinstance(incoming, dict):
                 raise ValueError("A raiz do perfil precisa ser um objeto JSON.")

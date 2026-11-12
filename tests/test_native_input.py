@@ -356,6 +356,13 @@ class NativeInputInstallationTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(),before)
         self.assertEqual((self.root/MANIFEST).read_bytes(),record)
 
+    def test_manifest_with_utf8_bom_is_accepted(self):
+        target=install(self.game,self.source)
+        manifest_path = self.root / MANIFEST
+        manifest_bytes = b"\xef\xbb\xbf" + manifest_path.read_bytes()
+        manifest_path.write_bytes(manifest_bytes)
+        self.assertEqual(install(self.game,self.source), target)
+
     def test_unknown_game_build_is_rejected(self):
         self.game.write_bytes(pe_file())
         with self.assertRaises(ValueError):install(self.game,self.source)

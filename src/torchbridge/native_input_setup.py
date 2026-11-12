@@ -47,7 +47,7 @@ def installed_record(folder, target):
         raise ValueError("A integração contém links; nenhum arquivo foi substituído")
     data = target.read_bytes()
     validate_module(data)
-    record = json.loads(manifest.read_text(encoding="utf-8"))
+    record = json.loads(manifest.read_text(encoding="utf-8-sig"))
     if (not isinstance(record, dict) or record.get("owner") != "TorchBridge"
             or record.get("version") != 2
             or record.get("sha256") != hashlib.sha256(data).hexdigest()):
