@@ -162,8 +162,20 @@ class CalibrationOverlayMixin:
                 for m in (snapshot.memory_open_menus or [])
             )
         )
+        is_cutscene = (
+            snapshot.memory_is_cutscene
+            or any(
+                "cutscene" in m.lower()
+                or "cinematica" in m.lower()
+                or "cinemática" in m.lower()
+                or "história" in m.lower()
+                or "historia" in m.lower()
+                for m in (snapshot.memory_open_menus or [])
+            )
+            or (bool(state_desc) and any(k in state_desc.lower() for k in ("cutscene", "cinematica", "cinemática", "história", "historia")))
+        )
 
-        is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading
+        is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading and not is_cutscene
 
         if is_in_game:
             regions = panel_regions(rect)

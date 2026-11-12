@@ -69,6 +69,7 @@ class WorldInteractionOverlayMixin:
         if (not snapshot.enabled or not snapshot.game_active or not snapshot.controller_connected
                 or not snapshot.memory_is_in_game or snapshot.memory_is_loading
                 or snapshot.memory_is_menu_open or snapshot.memory_open_menus
+                or snapshot.memory_is_cutscene
                 or snapshot.radial_active or any(snapshot.active_panels)
                 or snapshot.shortcut_config_active or snapshot.virtual_keyboard_open
                 or snapshot.mode != "direct" or not cfg["enabled"]):
@@ -151,7 +152,9 @@ class WorldInteractionOverlayMixin:
         rect = snapshot.game_rect
         if (not config["overlay"]["show_calibration"] or not snapshot.enabled
                 or not snapshot.game_found or not snapshot.game_active or not rect.valid
-                or not (snapshot.memory_is_in_game or snapshot.memory_is_loading)):
+                or not (snapshot.memory_is_in_game or snapshot.memory_is_loading)
+                or snapshot.memory_is_cutscene
+                or (snapshot.memory_state_desc and any(k in snapshot.memory_state_desc.lower() for k in ("cutscene", "cinematica", "cinemática")))):
             return
         world = snapshot.world
         fresh = not snapshot.memory_is_loading and world.fresh(time.monotonic())

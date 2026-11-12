@@ -224,6 +224,7 @@ class GameMemoryState:
     state_desc: str = "Aguardando jogo..."
     is_loading: bool = False
     is_in_game: bool = False
+    is_cutscene: bool = False
     is_fishing: bool = False
     is_menu_open: bool = False
     open_menus: list[str] = field(default_factory=list)
@@ -987,12 +988,26 @@ class TorchlightMemoryReader:
         dialog_quest_title = ""
         dialog_has_item_reward = False
 
-        # 1. Tela de História / Cinemática (CCinematicMenu em +0x0300)
+        # 1. Tela de História / Cinemática / Cutscene (CCinematicMenu em +0x0300)
+        # O motor do Torchlight (CGameUI::IsCinematicActive) verifica:
+        # byte(+0x18) != 0 OU byte(+0x19) == 0.
+        # Quando ativo com botão Continue visível (+0x70), é uma Tela de História (vignette);
+        # caso contrário (ex: cenas automáticas com barras pretas letterbox no jogo), é uma Cutscene.
+        is_cutscene = False
         p_cine = self.read_u32(p_ui + 0x0300)
-        if p_cine and self.read_u8(p_cine + 0x18) == 1:
-            dialog_type = "historia"
-            dialog_buttons = ["continue"]
-            open_menus.append("Tela de História")
+        if p_cine:
+            cine_open = self.read_u8(p_cine + 0x18) or 0
+            cine_flag = self.read_u8(p_cine + 0x19)
+            if cine_open != 0 or (cine_flag is not None and cine_flag == 0):
+                is_cutscene = True
+                p_skip = self.read_u32(p_cine + 0x70)
+                skip_vis = (self.read_u8(p_skip + 0x1A0) == 1) if p_skip else False
+                if skip_vis:
+                    dialog_type = "historia"
+                    dialog_buttons = ["continue"]
+                    open_menus.append("Tela de História")
+                else:
+                    open_menus.append("Cutscene")
 
         # 2. Diálogos de Missões e NPCs (CQuestDialogMenu em +0x02FC ou CDialogMenu em +0x02F8)
         p_qdialog = self.read_u32(p_ui + 0x02FC)
@@ -1189,16 +1204,22 @@ class TorchlightMemoryReader:
                                    or hover_item > 0x00400000)
 
         is_menu_open = len(open_menus) > 0
+        if is_cutscene:
+            state_desc_game = "Cutscene" if "Cutscene" in open_menus else "Tela de História"
+        else:
+            state_desc_game = "Em Jogo"
+
         return GameMemoryState(
             is_connected=True,
             pid=self.pid,
             game_version=self.game_version,
             state_id=6,
-            state_desc="Em Jogo",
+            state_desc=state_desc_game,
             is_in_game=True,
+            is_cutscene=is_cutscene,
             is_menu_open=is_menu_open,
             open_menus=open_menus,
-            recommended_mode="cursor" if is_menu_open else "direct",
+            recommended_mode="blocked" if (is_cutscene and not dialog_buttons) else ("cursor" if is_menu_open else "direct"),
             save_count=self._cached_save_count,
             sound_volume=sound_vol,
             music_volume=music_vol,

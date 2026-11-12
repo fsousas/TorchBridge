@@ -232,6 +232,44 @@ class OverlayCalibrationTests(unittest.TestCase):
             finally:
                 painter.end()
 
+    def test_draw_calibration_cutscene_hides_gameplay_and_shows_badge(self):
+        """Valida que durante Cutscene a calibração de gameplay fica oculta e o status mostra Cutscene."""
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(100, 100, 1024, 768)
+            snap = OverlaySnapshot(
+                enabled=True,
+                game_found=True,
+                game_active=True,
+                game_rect=rect,
+                memory_is_in_game=True,
+                memory_is_cutscene=True,
+                memory_state_desc="Cutscene",
+                memory_open_menus=["Cutscene"],
+                mode="blocked",
+            )
+            pix = QPixmap(1024, 768)
+            painter = QPainter(pix)
+            painter.drawPixmap = MagicMock()
+            painter.drawText = MagicMock()
+            try:
+                overlay._draw_calibration(painter, snap, 1.0)
+                # Não deve desenhar a HUD pixmap nem Pet Actions pixmap
+                painter.drawPixmap.assert_not_called()
+                # O badge de status de memória deve ser desenhado exibindo Cutscene
+                drawn_texts = [call.args[-1] for call in painter.drawText.call_args_list if call.args]
+                self.assertIn("ESTADO: CUTSCENE", drawn_texts)
+                self.assertIn("MENUS : Cutscene", drawn_texts)
+
+                # World calibration também não deve desenhar linhas nem círculos
+                painter.drawRect = MagicMock()
+                painter.drawEllipse = MagicMock()
+                overlay._draw_world_calibration(painter, snap, 1.0)
+                painter.drawRect.assert_not_called()
+                painter.drawEllipse.assert_not_called()
+            finally:
+                painter.end()
+
 
     def test_draw_calibration_character_menu(self):
         with tempfile.TemporaryDirectory() as directory:

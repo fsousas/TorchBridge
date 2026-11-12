@@ -841,12 +841,16 @@ class BridgeEngineCore(threading.Thread):
         # Se qualquer menu estiver aberto (exceto quando apenas o inventário estiver aberto)
         # ou estiver fora do jogo, o modo vira cursor e a caminhada fica suspensa.
         effective_mode = (
-            "cursor"
-            if (
-                self._memory_state.is_connected
-                and (self._memory_state.is_menu_open or not self._memory_state.is_in_game)
+            "blocked"
+            if (self._memory_state.is_loading or getattr(self._memory_state, "is_cutscene", False))
+            else (
+                "cursor"
+                if (
+                    self._memory_state.is_connected
+                    and (self._memory_state.is_menu_open or not self._memory_state.is_in_game)
+                )
+                else self._mode
             )
-            else self._mode
         )
 
         # Movimento direto: exige analógico esquerdo inclinado, direito parado, roda fechada
@@ -950,7 +954,7 @@ class BridgeEngineCore(threading.Thread):
         memory = self._memory_state
         world = memory.world
         live = (state.connected and memory.is_connected and memory.is_in_game
-                and world.fresh(now) and not memory.is_loading)
+                and world.fresh(now) and not memory.is_loading and not getattr(memory, "is_cutscene", False))
         direct = (live and self._mode == "direct" and not memory.is_menu_open and not memory.is_fishing
                   and not memory.dialog_type and not any(self._active_panels)
                   and not self._virtual_keyboard_open and not self._shortcut_config_active)
@@ -2031,7 +2035,7 @@ class BridgeEngineCore(threading.Thread):
                 now = time.monotonic()
                 effective_mode = (
                     "blocked"
-                    if self._memory_state.is_loading
+                    if (self._memory_state.is_loading or getattr(self._memory_state, "is_cutscene", False))
                     else (
                         "cursor"
                         if (
@@ -2060,6 +2064,7 @@ class BridgeEngineCore(threading.Thread):
                     memory_state_desc=self._memory_state.state_desc,
                     memory_is_in_game=self._memory_state.is_in_game,
                     memory_is_loading=self._memory_state.is_loading,
+                    memory_is_cutscene=getattr(self._memory_state, "is_cutscene", False),
                     memory_is_menu_open=self._memory_state.is_menu_open,
                     memory_open_menus=list(self._memory_state.open_menus),
                     world=self._memory_state.world,
@@ -2101,7 +2106,7 @@ class BridgeEngineCore(threading.Thread):
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
                 if enabled and not self.memory.last_error and game_active and state.connected:
-                    if self._memory_state.is_loading:
+                    if self._memory_state.is_loading or (getattr(self._memory_state, "is_cutscene", False) and not self._memory_state.dialog_buttons):
                         self._release_all()
                     else:
                         state = self._prepare_active_state(state)

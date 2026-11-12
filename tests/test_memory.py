@@ -337,6 +337,92 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertEqual(counts, (7, 2, 4))
         self.assertEqual(reader.read_shortcut_grid_dims(), (7, 3))
 
+    def test_cutscene_memory_detection(self):
+        """Valida a detecção de Cutscenes in-game e Telas de História em ambas as versões (Steam e GOG)."""
+        from torchbridge.memory import (
+            OFFSET_GAMECLIENT,
+            OFFSET_PLAYER,
+            OFFSET_GAMEUI,
+            OFFSET_MENU_MGR,
+            OFFSET_MAIN_STATE,
+            OFFSET_UI_STATE,
+            RVA_CGAME_STEAM,
+            RVA_CGAME_GOG,
+        )
+
+        for version, rva_cgame in (("Steam", RVA_CGAME_STEAM), ("GOG", RVA_CGAME_GOG)):
+            with self.subTest(version=version):
+                reader = TorchlightMemoryReader()
+                reader.pid = 9999
+                reader._handle = 12345
+                reader._exe_path = "Torchlight.exe"
+                reader._module_base = 0x400000
+                reader._ensure_handle = MagicMock(return_value=True)
+
+                p_cgame_addr = reader._module_base + rva_cgame
+                p_game = 0x2000
+                p_client = 0x3000
+                p_ui = 0x4000
+                p_player = 0x5000
+                p_menu_mgr = 0x6000
+                p_cine = 0x7000
+                p_skip = 0x8000
+
+                def fake_read_u32(addr):
+                    if addr == p_cgame_addr:
+                        return p_game
+                    if addr == p_game + OFFSET_GAMECLIENT:
+                        return p_client
+                    if addr == p_client + OFFSET_GAMEUI:
+                        return p_ui
+                    if addr == p_client + OFFSET_PLAYER:
+                        return p_player
+                    if addr == p_ui + OFFSET_MENU_MGR:
+                        return p_menu_mgr
+                    if addr == p_menu_mgr + OFFSET_MAIN_STATE:
+                        return 6
+                    if addr == p_ui + OFFSET_UI_STATE:
+                        return 6
+                    if addr == p_ui + 0x0300:
+                        return p_cine
+                    if addr == p_cine + 0x70:
+                        return p_skip
+                    return 0
+
+                reader.read_u32 = MagicMock(side_effect=fake_read_u32)
+
+                # 1. Gameplay normal: cine_open=0, cine_flag=1 (padrão quando nenhuma cena está ativa)
+                reader.read_u8 = MagicMock(side_effect=lambda a: 1 if a == p_cine + 0x19 else 0)
+                st = reader.update()
+                self.assertEqual(reader.game_version, version)
+                self.assertFalse(st.is_cutscene)
+                self.assertEqual(st.state_desc, "Em Jogo")
+                self.assertEqual(st.recommended_mode, "direct")
+                self.assertNotIn("Cutscene", st.open_menus)
+
+                # 2. Cutscene automática com barras pretas (letterbox): cine_open=0, cine_flag=0, skip invisível
+                reader.read_u8 = MagicMock(return_value=0)
+                st = reader.update()
+                self.assertTrue(st.is_cutscene)
+                self.assertEqual(st.state_desc, "Cutscene")
+                self.assertIn("Cutscene", st.open_menus)
+                self.assertEqual(st.recommended_mode, "blocked")
+
+                # 3. Tela de História (vignette): cine_open=1, cine_flag=1, botão Continue/Skip visível (+0x1A0 = 1)
+                def read_story(addr):
+                    if addr in (p_cine + 0x18, p_cine + 0x19, p_skip + 0x1A0):
+                        return 1
+                    return 0
+
+                reader.read_u8 = MagicMock(side_effect=read_story)
+                st = reader.update()
+                self.assertTrue(st.is_cutscene)
+                self.assertEqual(st.state_desc, "Tela de História")
+                self.assertIn("Tela de História", st.open_menus)
+                self.assertEqual(st.dialog_type, "historia")
+                self.assertEqual(st.dialog_buttons, ["continue"])
+                self.assertEqual(st.recommended_mode, "cursor")
+
 
 if __name__ == "__main__":
     unittest.main()

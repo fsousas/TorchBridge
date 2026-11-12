@@ -116,6 +116,7 @@ class OverlaySnapshot:
     memory_state_desc: str = ""
     memory_is_in_game: bool = False
     memory_is_loading: bool = False
+    memory_is_cutscene: bool = False
     memory_is_menu_open: bool = False
     memory_open_menus: list[str] = field(default_factory=list)
     world: WorldSnapshot = field(default_factory=WorldSnapshot)

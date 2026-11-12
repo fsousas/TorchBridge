@@ -86,8 +86,8 @@ class BottomHudOverlayMixin:
         # 3. TITLE MENU, CHARACTER SELECT, CHARACTER CREATE, CUTSCENES
         if any(
             k in state_desc
-            for k in ("inicial", "criar", "dificuldade", "carregar", "cutscene", "cinematica")
-        ):
+            for k in ("inicial", "criar", "dificuldade", "carregar", "cutscene", "cinematica", "cinemática")
+        ) or snapshot.memory_is_cutscene:
             return False
 
         # 4. TELA DE MORTE / RESPAWN (não deve exibir o HUD inferior de controle)
@@ -144,7 +144,12 @@ class BottomHudOverlayMixin:
 
     def _draw_aim(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         # Sem alvo ou com a roda aberta: não desenha a mira.
-        if snapshot.aim_x is None or snapshot.aim_y is None or snapshot.radial_active:
+        if (
+            snapshot.aim_x is None
+            or snapshot.aim_y is None
+            or snapshot.radial_active
+            or snapshot.memory_is_cutscene
+        ):
             return
         center = QPointF(snapshot.aim_x, snapshot.aim_y)
         radius = 11 * scale
@@ -161,8 +166,18 @@ class BottomHudOverlayMixin:
         # Pode ser desligado pelo perfil.
         if not cfg["overlay"].get("show_mode_badge", True):
             return
-        label = "DIRETO" if snapshot.mode == "direct" else "CURSOR"
-        color = QColor(69, 211, 239, 210) if snapshot.mode == "direct" else QColor(255, 191, 69, 220)
+        if snapshot.memory_is_cutscene:
+            label = "CUTSCENE"
+            color = QColor(255, 140, 0, 220)
+        elif snapshot.mode == "blocked":
+            label = "BLOQUEADO"
+            color = QColor(255, 75, 75, 220)
+        elif snapshot.mode == "direct":
+            label = "DIRETO"
+            color = QColor(69, 211, 239, 210)
+        else:
+            label = "CURSOR"
+            color = QColor(255, 191, 69, 220)
         width = 104 * scale
         height = 28 * scale
         box = QRectF(snapshot.game_rect.width - width - 16 * scale, 16 * scale, width, height)
