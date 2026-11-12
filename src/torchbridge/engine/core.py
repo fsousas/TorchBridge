@@ -1126,6 +1126,7 @@ class BridgeEngineCore(threading.Thread):
             # Modal de Confirmação (Resultado de Pesca, Avisos e Sair)
             is_modal = (
                 "Confirmação Sair" in (self._memory_state.open_menus or [])
+                or "Dica (Tutorial)" in (self._memory_state.open_menus or [])
                 or "confirma" in (self._memory_state.state_desc or "").lower()
             )
             if is_modal:

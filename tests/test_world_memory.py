@@ -79,7 +79,10 @@ class AddressSpace:
         self.u8(address + 0x161, 1)
         self.u8(address + 0x19C, 1)
         self.f32(address + 0x394, 100.)
-        self.u32(address + 0x28C, 3)
+        # Steam town services are NEUTRAL (0), not alignment 3 (ANY).
+        self.u32(address + 0x28C, 0)
+        if cls in ("CMonster", "CCharacter"):
+            self.u32(address + 0x174, 104)  # NPC -> INTERACTIVECHARACTER.
         self.put(address + 0x70, struct.pack("<3f", *position))
         self.string(address + 0x30, identifier)
         self.string(address + (0x420 if cls in ("CPlayer", "CCharacter", "CMonster") else 0x1B0), name)
@@ -339,6 +342,88 @@ class WorldMemoryTests(unittest.TestCase):
         world = reader._world_reader.read(client, player, 10.)
         self.assertFalse(any(e.kind == "npc" for e in world.entities))
 
+    def test_neutral_and_friendly_animals_are_not_talk_targets(self):
+        for transport in ("Windows", "Proton"):
+            with self.subTest(transport=transport), patch("torchbridge.memory.kernel32") as kernel:
+                space, reader, client, level, player, pet, npc, *_ = memory_fixture()
+                if transport == "Windows":
+                    reader._linux = None
+                    kernel.ReadProcessMemory.side_effect = space.windows_read
+                animals = [space.unit("CMonster", "Rat"), space.unit("CMonster", "Ally")]
+                for alignment, address in enumerate(animals):
+                    space.u32(address + 0x174, 27)  # MONSTER, not INTERACTIVECHARACTER.
+                    space.u32(address + 0x28C, alignment)
+                space.u32(npc + 0x174, 41)
+                space.linked_list(level, 0x5C, [player, pet, *animals, npc])
+                world = reader._world_reader.read(client, player, 10.)
+                self.assertEqual([e.address for e in world.entities if e.kind == "npc"], [npc])
+
+    def test_only_neutral_and_good_alignments_can_offer_npc_services(self):
+        space, reader, client, _, player, _, npc, *_ = memory_fixture()
+        space.u32(npc + 0x174, 127)
+        for alignment in (0, 1, 2, 3, 4, 5, 6, 0xFFFFFFFF):
+            with self.subTest(alignment=alignment):
+                space.u32(npc + 0x28C, alignment)
+                world = reader._world_reader.read(client, player, 10.)
+                self.assertEqual(any(e.address == npc for e in world.entities), alignment in (0, 1))
+
+    def type_hierarchy(self, space, npc, unit_type=9001, ancestors=(131, 25, 0)):
+        resource, hierarchy, head = space.allocate(0x20), space.allocate(0x40), space.allocate(0x2C)
+        space.u32(npc + 0x60, resource)
+        space.u32(resource + 0x10, hierarchy)
+        space.u32(hierarchy + 0x20, head)
+        space.u8(head + 0x29, 1)
+        # Make the lookup follow a real tree edge before reaching the custom ID.
+        root, entry = space.allocate(0x2C), space.allocate(0x2C)
+        space.u32(head + 4, root)
+        space.u32(root + 0xC, 41)
+        space.u32(root, head)
+        space.u32(root + 8, entry)
+        space.u32(entry, head)
+        space.u32(entry + 8, head)
+        space.u32(entry + 0xC, unit_type)
+        data = space.allocate(len(ancestors) * 4)
+        space.put(data, struct.pack("<" + "I" * len(ancestors), *ancestors))
+        space.put(entry + 0x1C, struct.pack("<III", data, data + len(ancestors) * 4,
+                                         data + len(ancestors) * 4))
+        return hierarchy, head, root, entry, data
+
+    def test_custom_neutral_npc_uses_game_type_ancestry_on_both_transports(self):
+        for transport in ("Windows", "Proton"):
+            with self.subTest(transport=transport), patch("torchbridge.memory.kernel32") as kernel:
+                space, reader, client, _, player, _, npc, *_ = memory_fixture()
+                if transport == "Windows":
+                    reader._linux = None
+                    kernel.ReadProcessMemory.side_effect = space.windows_read
+                space.u32(npc + 0x174, 9001)
+                self.type_hierarchy(space, npc)
+                world = reader._world_reader.read(client, player, 10.)
+                entity = next(e for e in world.entities if e.address == npc)
+                self.assertEqual((entity.kind, entity.npc_role, entity.interaction_method), ("npc", "", "talk"))
+                space.u32(npc + 0x28C, 2)  # Dynamic hostility is never cached with the type.
+                self.assertFalse(any(e.address == npc for e in reader._world_reader.read(client, player, 10.).entities))
+
+    def test_custom_noninteractive_and_invalid_type_trees_are_bounded(self):
+        for corruption in ("not_npc", "cycle", "short_read", "bad_vector", "missing_type", "unreadable"):
+            with self.subTest(corruption=corruption):
+                space, reader, client, _, player, _, npc, *_ = memory_fixture()
+                space.u32(npc + 0x174, 9001)
+                hierarchy, head, root, entry, data = self.type_hierarchy(space, npc)
+                if corruption == "not_npc":
+                    space.u32(data, 27)
+                elif corruption == "cycle":
+                    space.u32(root + 8, root)
+                elif corruption == "short_read":
+                    del space.bytes[entry + 0x2B]
+                elif corruption == "bad_vector":
+                    space.u32(entry + 0x20, data + 0x1000)
+                elif corruption == "missing_type":
+                    space.u32(root + 8, head)
+                else:
+                    space.u32(hierarchy + 0x20, 0x12345678)
+                self.assertFalse(any(e.address == npc for e in reader._world_reader.read(client, player, 10.).entities))
+                self.assertLess(space.read_count, 150)
+
     def test_both_transports_and_relocated_addresses_read_all_requested_types(self):
         for transport in ("Windows", "Proton"):
             for base in (0x400000, 0x900000):
@@ -510,3 +595,34 @@ class WorldMemoryTests(unittest.TestCase):
         space.u32(ui + 0x2EC, menu)
         space.u8(menu + 0x18, 1)
         self.assertIsNone(reader.update().world.player_position)
+
+    def test_first_shop_tip_takes_priority_over_gameplay_on_both_transports(self):
+        for transport in ("Windows", "Proton"):
+            with self.subTest(transport=transport), patch("torchbridge.memory.kernel32") as kernel:
+                space, reader, client, _, _, *_ = memory_fixture()
+                if transport == "Windows":
+                    reader._linux = None
+                    kernel.ReadProcessMemory.side_effect = space.windows_read
+                root, global_ptr = space.allocate(0x100), space.allocate(4)
+                ui, manager, tip, shop = (space.allocate(size) for size in (0x1800, 0xE00, 0x20, 0x40))
+                space.u32(global_ptr, root)
+                space.u32(root + 0x64, client)
+                space.u32(client + 0x3C, ui)
+                space.u32(ui + 0x324, manager)
+                space.u32(manager + 0xD84, 6)
+                space.u32(ui + 0x169C, 6)
+                space.u32(ui + 0x308, tip)
+                space.u8(tip + 0x18, 1)
+                space.u32(ui + 0x2D8, shop)
+                space.u8(shop + 0x30, 1)
+                reader._ensure_handle = lambda target_pid=None: True
+                reader._resolve_cgame_address = lambda: global_ptr
+                reader._exe_path, reader._module_base = "Torchlight.exe", 0x400000
+                reader._last_disk_check = time.monotonic()
+                state = reader.update()
+                self.assertTrue(state.is_in_game and state.is_menu_open)
+                self.assertEqual(state.open_menus, ["Dica (Tutorial)"])
+                self.assertEqual(state.recommended_mode, "cursor")
+                self.assertIsNone(state.world.player_position)
+                space.u8(tip + 0x18, 0)
+                self.assertIn("Vendedor (Loja)", reader.update().open_menus)

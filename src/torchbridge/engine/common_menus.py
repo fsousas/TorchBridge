@@ -413,7 +413,8 @@ class CommonMenuNavigationMixin:
         hub: ControllerHub,
     ) -> None:
         """Gerencia o posicionamento e confirmação no popup modal (Ok do peixe/mensagem)."""
-        target_x, target_y = modal_ok_point(rect)
+        tutorial = "Dica (Tutorial)" in (self._memory_state.open_menus or [])
+        target_x, target_y = modal_ok_point(rect, tutorial=tutorial)
         if not self._modal_confirm_initialized:
             self._modal_confirm_initialized = True
             self.injector.move(target_x, target_y)
@@ -430,6 +431,12 @@ class CommonMenuNavigationMixin:
 
         if btn_a_pressed or btn_x_pressed or btn_b_pressed:
             self.injector.move(target_x, target_y)
-            self.injector.mouse_button("left", True)
-            self.injector.mouse_button("left", False)
+            if tutorial:
+                self._wait_for_input(0.03)  # Let Wine/OIS receive the cursor first.
+            try:
+                self.injector.mouse_button("left", True)
+                if tutorial:
+                    self._wait_for_input(0.06)  # A same-frame down/up can be lost.
+            finally:
+                self.injector.mouse_button("left", False)
             hub.rumble(0.04, 0.10, 35)

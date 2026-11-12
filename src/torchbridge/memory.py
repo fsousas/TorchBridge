@@ -854,6 +854,8 @@ class TorchlightMemoryReader:
 
         p_modal = self.read_u32(p_ui + 0x0304)
         is_modal_open = (self.read_u8(p_modal + 0x18) == 1) if p_modal else False
+        p_tip = self.read_u32(p_ui + 0x0308)
+        is_tip_open = (self.read_u8(p_tip + 0x18) == 1) if p_tip else False
 
         # Loading screen
         p_loading = self.read_u32(p_ui + 0x0298)
@@ -893,16 +895,16 @@ class TorchlightMemoryReader:
                 music_volume=music_vol,
             )
 
-        if is_modal_open:
+        if is_modal_open or is_tip_open:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
                 game_version=self.game_version,
                 state_id=main_state_id,
-                state_desc="Confirmação / Sair",
+                state_desc="Confirmação / Sair" if is_modal_open else "Dica (Tutorial)",
                 is_in_game=(main_state_id == 6),
                 is_menu_open=True,
-                open_menus=["Confirmação Sair"],
+                open_menus=["Confirmação Sair" if is_modal_open else "Dica (Tutorial)"],
                 recommended_mode="cursor",
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,

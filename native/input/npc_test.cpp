@@ -14,6 +14,7 @@ bool test_focus = true, navigation_available = true, advance_path = true;
 unsigned npc_updates = 0;
 bool collect_immediately = false, collect_next_update = false;
 unsigned pickup_calls = 0, fishing_calls = 0;
+uint32_t service_mode = 30;
 std::vector<std::pair<float, float>> destinations;
 DWORD WINAPI test_window(HWND, LPDWORD pid) {
     *pid = test_focus ? GetCurrentProcessId() : 0;
@@ -43,7 +44,11 @@ float* __fastcall test_position(void* self, void*, float* out, int) {
     read_raw(reinterpret_cast<uintptr_t>(self) + 0x70, out, 12);
     return out;
 }
-bool __fastcall test_is_a(void*, void*, int type) { return type == 131; }
+bool __fastcall test_is_a(void* self, void*, int type) {
+    const auto unit = field<uint32_t>(reinterpret_cast<uintptr_t>(self), 0x174);
+    return type == 131 && (unit == 104 || unit == 131 || unit == 41 || unit == 127 ||
+        unit == 130 || unit == 134 || unit == 132 || unit == 133 || unit == 128 || unit == 170 || unit == 175);
+}
 void __fastcall test_highlight(void*, void*, bool) {}
 uint32_t __fastcall test_interact(void*, void*, void*) { return 1; }
 void complete_pickup(void* self) {
@@ -82,7 +87,7 @@ void __fastcall test_update(void* self, void*, uint32_t, uint32_t, float) {
     // or advances to the dialog/service state once the path brings it close.
     if (distance <= 2.f) {
         test_stop(self, nullptr);
-        test_mode(self, nullptr, 30);
+        test_mode(self, nullptr, service_mode);
     } else if (!field<uint8_t>(hero, 0x208)) {
         test_target(self, nullptr, nullptr);
         test_mode(self, nullptr, 2);
@@ -104,6 +109,7 @@ struct Fixture {
     Fixture(float distance = 4.49f, float radius = 4.5f) {
         test_now += 10000; test_focus = navigation_available = advance_path = true;
         npc_updates = 0; destinations.clear();
+        service_mode = 30;
         collect_immediately = collect_next_update = false; pickup_calls = fishing_calls = 0;
         image = 0x10000; image_end = UINT32_MAX; classes.clear();
         const auto hvt = reinterpret_cast<uintptr_t>(hero_vt.data());
@@ -116,7 +122,8 @@ struct Fixture {
         hero_vt[0x16C / 4] = reinterpret_cast<uintptr_t>(&test_fishing);
         npc_vt[0x100 / 4] = reinterpret_cast<uintptr_t>(&test_highlight);
         for (const auto offset : {0x6Eu, 0x161u}) put<uint8_t>(n, offset, 1);
-        put<uint32_t>(n, 0x28C, 3); put<float>(n, 0x394, 100.f);
+        put<uint32_t>(n, 0x174, 104);
+        put<uint32_t>(n, 0x28C, 0); put<float>(n, 0x394, 30.f);
         put<float>(n, 0x70, distance);
         node = {static_cast<uint32_t>(n), 0};
         characters = reinterpret_cast<uintptr_t>(node.data());
@@ -182,6 +189,56 @@ int main() {
     assert(MH_CreateHook(reinterpret_cast<void*>(&GetTickCount64),
         reinterpret_cast<void*>(&test_clock), nullptr) == MH_OK);
     assert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
+    // Actual Steam town types/alignments, rather than a generic friendly NPC.
+    for (const auto type : {41u, 127u, 130u, 134u, 132u, 133u, 128u, 170u, 175u, 104u, 131u}) {
+        Fixture f;
+        put<uint32_t>(f.n, 0x174, type);
+        service_mode = type == 41 || type == 127 ? 19 : type == 130 ? 21 :
+            type == 134 ? 17 : type == 132 ? 25 : type == 133 ? 26 :
+            type == 128 ? 36 : type == 170 ? 37 : type == 175 ? 27 : 30;
+        f.step(16);
+        assert(status.selected == f.n);
+        // Highlight/proximity does not authorize an implicit talk.
+        const auto blocked_before = status.blocked_interactions;
+        target_hook(f.hero.data(), nullptr, f.npc.data());
+        assert(!field<uint32_t>(f.h, 0x290));
+        assert(status.blocked_interactions == blocked_before + 1);
+        f.press();
+        for (unsigned i = 0; i < 24 && authorized_target; ++i) f.step();
+        assert(status.executed == f.n && status.action_result == accepted);
+        assert(field<uint32_t>(f.h, 0x284) == service_mode);
+        f.step(16);
+        assert(!authorized_target); // A held/old action does not start a second talk.
+    }
+    for (const auto alignment : {0u, 1u, 2u, 3u, 4u, 5u, 6u, UINT32_MAX}) {
+        Fixture f; put<uint32_t>(f.n, 0x174, 127);
+        put<uint32_t>(f.n, 0x28C, alignment); f.step(16);
+        assert(status.selected == (alignment <= 1 ? f.n : 0));
+    }
+    for (const auto alignment : {0u, 1u, 2u}) {
+        Fixture f; put<uint32_t>(f.n, 0x174, 27);
+        put<uint32_t>(f.n, 0x28C, alignment); f.step(16);
+        assert(!status.selected);
+        // Ordinary combat targets must still reach the game's target setter.
+        const auto blocked_before = status.blocked_interactions;
+        target_hook(f.hero.data(), nullptr, f.npc.data());
+        assert(field<uint32_t>(f.h, 0x290) == f.n);
+        assert(status.blocked_interactions == blocked_before);
+    }
+    for (const auto health : {0.f, -1.f, std::numeric_limits<float>::quiet_NaN(),
+                              std::numeric_limits<float>::infinity(), 1e12f}) {
+        Fixture f; put<float>(f.n, 0x394, health); f.step(16);
+        assert(!status.selected);
+    }
+    {
+        Fixture f;
+        std::array<uint8_t, 0x20> tip{};
+        put<uint32_t>(scene.ui, 0x308, reinterpret_cast<uintptr_t>(tip.data()));
+        tip[0x18] = 1; f.walk();
+        assert(status.reason == menu && !status.selected && destinations.empty());
+        tip[0x18] = 0; f.walk();
+        assert(status.flags & moving);
+    }
     for (const auto radius : {4.5f, 8.f}) {
         Fixture f(radius - .01f, radius);
         const auto start = test_now;

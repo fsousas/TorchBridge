@@ -22,6 +22,7 @@ NPC_APPROACH = 256
 ACTION_RANGES = 512
 EQUIPPED_SKILL_ACTIONS = 1024
 RELIABLE_WORLD_ACTIONS = 2048
+NEUTRAL_NPC_SERVICES = 4096
 READY, PROTECTED, HIGHLIGHTED, MOVING, COMPLETE = 1, 2, 4, 8, 16
 REASONS = ("Parado", "Caminhando", "Aguardando controle", "Jogo sem foco",
            "Cenário mudou", "Menu aberto", "Habilidade em execução", "Nenhum alvo próximo",
@@ -145,9 +146,10 @@ class NativeInputClient:
             if not 0 < port <= 65535 or not capabilities & READY:
                 return
             required = (TYPED_INTERACTIONS | STATIONARY_BREAKABLES | DESTRUCTIBLE_ACTIONS |
-                        NPC_APPROACH | ACTION_RANGES | EQUIPPED_SKILL_ACTIONS | RELIABLE_WORLD_ACTIONS)
+                        NPC_APPROACH | ACTION_RANGES | EQUIPPED_SKILL_ACTIONS | RELIABLE_WORLD_ACTIONS |
+                        NEUTRAL_NPC_SERVICES)
             if capabilities & required != required:
-                # Require matching ranges and movement released on completion.
+                # Require matching selection, action ranges and completion rules.
                 # Prepare the bundled update and require a new game process.
                 self.message = "Reinicie o Torchlight para atualizar as interações"
                 exe = getattr(memory, "_exe_path", "")

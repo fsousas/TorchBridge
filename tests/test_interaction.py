@@ -75,6 +75,27 @@ class WorldInteractionTests(unittest.TestCase):
         self.assertEqual(self.native.commands[-1]["flags"], ACTIVE | DIRECT | ALLOW_INTERACTION)
         self.assertEqual(self.shared.get().interaction_target, self.engine._memory_state.world.entities[0])
 
+    def test_neutral_shop_npcs_reach_the_prompt_and_dpad_dispatch_from_memory(self):
+        from test_world_memory import memory_fixture
+        for unit_type in (41, 127, 130, 134, 132, 133, 128, 170, 175, 104):
+            with self.subTest(unit_type=unit_type):
+                space, reader, client, _, player, _, npc, *_ = memory_fixture()
+                space.u32(npc + 0x174, unit_type)
+                space.f32(npc + 0x394, 30.)
+                world = reader._world_reader.read(client, player, 10.)
+                target = next(e for e in world.entities if e.address == npc)
+                self.engine._memory_state = replace(self.engine._memory_state, world=world)
+                self.native.status = replace(self.native.status, selected=npc)
+                self.tick(state=replace(self.state, buttons=frozenset()))
+                self.assertEqual(self.shared.get().interaction_target, target)
+                actions = self.native.actions
+                self.tick(10.02)
+                self.tick(10.04)
+                self.assertEqual(self.native.actions, actions + 1)
+                self.assertFalse(self.native.pickups[-1])
+                self.assertFalse(self.native.attacks[-1])
+                self.assertEqual(self.injector.events, [])
+
     def test_release_then_repress_is_required_for_another_action(self):
         self.tick()
         self.tick(10.1, replace(self.state, buttons=frozenset()))

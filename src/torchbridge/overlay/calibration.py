@@ -1143,7 +1143,7 @@ class CalibrationOverlayMixin:
         if snapshot.modal_confirm_focus:
             btn_w = 125 * scale * (rect.height / 768.0)
             btn_h = 24 * scale * (rect.height / 768.0)
-            bx, by = modal_ok_point(rect)
+            bx, by = modal_ok_point(rect, tutorial="Dica (Tutorial)" in (snapshot.memory_open_menus or []))
             lx = bx - rect.left - btn_w / 2.0
             ly = by - rect.top - btn_h / 2.0
             painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))

@@ -228,7 +228,17 @@ Trocas de processo/cenário/jogador invalidam o cache. Dados com mais de 200 ms
 não autorizam interação.
 
 NPCs são personagens neutros/amigáveis vivos, excluindo jogador, pet, summons
-e inimigos. A lista também inclui CItem e subclasses: props CTriggerUnit,
+e inimigos. O alinhamento em `CCharacter+0x28C` usa **NEUTRAL=0, GOOD=1,
+EVIL=2, ANY=3**; não é suficiente testar se uma unidade é amigável.
+O UNITTYPE também precisa pertencer a `INTERACTIVECHARACTER` (131), incluindo
+NPC (104) e os serviços. Isso evita selecionar animais neutros ou aliados de
+combate como se fossem personagens com diálogo. Para tipos customizados, o
+leitor percorre a hierarquia usada por `CBaseUnit::IsA`: `+0x60 → +0x10`, mapa
+em `+0x08`, sentinela em `+0x20` da hierarquia, chave em `nó+0x0C` e vetor de
+ancestrais em `nó+0x1C/+0x20/+0x24`. A busca tem limites de profundidade e tamanho;
+somente a classificação imutável por hierarquia/tipo fica em cache.
+
+A lista também inclui CItem e subclasses: props CTriggerUnit,
 equipamentos, ouro e destrutíveis. RTTI inclui as classes base, permitindo
 reconhecer subclasses sem depender de nomes fixos. UNITTYPE classifica serviços
 e tipos de props; nomes refinam categorias como porta e alavanca. Posições
@@ -322,6 +332,54 @@ Endereços absolutos acima documentam a inspeção offline; o leitor usa as base
 e os ponteiros do processo corrente, incluindo ASLR/relocação do Proton.
 
 ## Validação
+
+### Regressão dos serviços neutros (12/11/2026)
+
+A inspeção de uma cópia isolada do Steam/GE-Proton11-12 confirmou alinhamento 0
+em Tarn, Kolos, Triya, Duros, Goren, Duran, Furl, Gorn, baús, Vasman e Trill-Bot.
+O filtro anterior aceitava apenas 1/3 e excluía esses NPCs tanto do overlay
+quanto do catálogo nativo. Os testes antigos atribuíam 3 a todos os serviços,
+por isso não reproduziam os atributos do jogo. As fixtures agora usam tipo
+interativo, alinhamento 0 e, nos casos de loja, vida 30 observados na sessão.
+
+Python e DLL aceitam 0/1 apenas para personagens interativos. O guard de alvo
+também usa `IsA(131)`, preservando a proteção contra conversa por proximidade e
+permitindo que alvos comuns de combate cheguem ao setter original. Vida não
+finita ou inválida é recusada nos dois catálogos. A capability
+`NEUTRAL_NPC_SERVICES` (4096) exige atualizar/reiniciar uma DLL anterior antes
+de conectar, para não exibir um vendedor que o módulo antigo ainda recusaria.
+
+O ensaio de primeira abertura também revelou `CTipMenu` em `CGameUI+0x308`,
+com visibilidade em `+0x18`. A dica de tutorial podia continuar pausando o jogo
+mesmo após Esc fechar a loja por baixo, sem ser reconhecida pelo bridge.
+Ela agora tem prioridade como modal no leitor, bloqueia caminhada/seleção
+também na DLL e usa a confirmação pelo controle. O botão OK segue
+`tipmenu.layout`: centro `(512, 458)` na referência 1024×768, distinto do
+modal de pesca. O clique aguarda o cursor e mantém down/up por frames separados,
+com liberação garantida se a sessão for cancelada.
+
+Passaram 681 testes Python, 50 testes de overlay com `QT_SCALE_FACTOR=1.5`,
+`compileall`, `git diff --check` e os quatro testes PE32 sob GE-Proton11-12:
+policy, NPC, interaction e loader. A nova fixture nativa falha na seleção com
+o runtime anterior e passa com a correção. Os testes percorrem leitura → aviso
+→ D-pad, renderização dos serviços neutros, todos os estados de serviço,
+alinhamentos hostis/inválidos, animais, hierarquias customizadas e conversa
+sem autorização, além das regressões existentes de movimento, pesca, coleta,
+destrutíveis e transições.
+
+Na cópia isolada do Steam/GE-Proton11-12, o handler real do D-pad selecionou
+Kolos a 1,77 unidades e Duros a 2,51 unidades, com confirmação de execução pelo
+módulo. As duas lojas foram reconhecidas na memória com inventário e títulos
+`Kolos the Smith` e `Duros the Gambler`. O novo handler de tutorial confirmou
+as dicas pelo botão A simulado; após fechá-las, a caminhada nativa voltou a
+alterar a posição do jogador.
+O painter do overlay também renderizou o aviso do apostador usando a câmera
+e as posições reais dessa sessão.
+Esses ensaios usaram entradas de controle simuladas, sem controle físico.
+Windows/GOG não foram executados nesta sessão.
+
+DLL distribuída nesta correção: SHA-256
+`52234dd45042f24e53a778080c2f4d37b811136d6f242ab96eda42361743a7ba`.
 
 Em 11/11/2026 passaram **669 testes Python**, **48 testes de overlay** com
 `QT_SCALE_FACTOR=1.5`, `compileall` e `git diff --check`. As regressões cobrem os

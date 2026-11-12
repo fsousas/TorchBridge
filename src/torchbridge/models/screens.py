@@ -296,13 +296,15 @@ def fishing_close_point(rect: Rect) -> tuple[int, int]:
     return x, max(rect.top + 2, y - 50)
 
 
-def modal_ok_point(rect: Rect) -> tuple[int, int]:
-    """Calcula a coordenada (x, y) do botão Ok no modal de confirmação / mensagem de pesca."""
+def modal_ok_point(rect: Rect, *, tutorial: bool = False) -> tuple[int, int]:
+    """OK in confirmation/fishing messages or the first-use tutorial tip."""
     if not rect.valid:
         return (0, 0)
     scale = rect.height / 768.0
     center_x = rect.left + rect.width * 0.5
-    base_x, base_y = MODAL_OK_COORD
+    # tipmenu.layout: Frameb at (0.5H - 240), height 350; OK at bottom-50,
+    # height 28. Its center is (0.5W, 0.5H + 74), in the 768p UI space.
+    base_x, base_y = (512.0, 458.0) if tutorial else MODAL_OK_COORD
     x = center_x + (base_x - 512.0) * scale
     y = rect.top + base_y * scale
     clamped_x = int(clamp(round(x), rect.left + 2, rect.right - 2))

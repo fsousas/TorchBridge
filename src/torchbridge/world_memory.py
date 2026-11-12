@@ -26,6 +26,10 @@ MAX_TAG_NAMES = 512
 NPC_ROLES = {41: "merchant", 127: "gambler", 130: "enchanter", 134: "transmuter",
              132: "gem_recover", 133: "gem_destroy", 128: "stash", 170: "shared_stash",
              175: "retirement"}
+INTERACTIVE_CHARACTER = 131
+NPC_TYPES = frozenset((*NPC_ROLES, 104, INTERACTIVE_CHARACTER))
+# CCharacter's alignment table: NEUTRAL=0, GOOD=1, EVIL=2, ANY=3, …
+NPC_ALIGNMENTS = (0, 1)
 QUEST_TAGS = {"QUEST COMPLETE": "ready_to_turn_in", "QUEST GIVING": "available",
               "QUEST INCOMPLETE": "in_progress", "QUEST PASSIVE": "unavailable"}
 
@@ -50,6 +54,7 @@ class WorldMemoryReader:
         self._classes: dict[int, str] = {}
         self._class_bases: dict[int, frozenset[str]] = {}
         self._tag_names: dict[int, str] = {}
+        self._npc_types: dict[tuple[int, int], bool] = {}
         self._context = None
         self._entities_complete = True
 
@@ -127,6 +132,45 @@ class WorldMemoryReader:
         position = WorldPosition(x, y, height)
         return position if position.valid else None
 
+    def _interactive_character(self, raw: bytes) -> bool:
+        unit_type = struct.unpack_from("<I", raw, 0x174)[0]
+        if unit_type in NPC_TYPES:
+            return True
+        # Unknown/modded UNITTYPE: follow the same hierarchy as CBaseUnit::IsA.
+        # resource(+60)->hierarchy(+10)->MSVC map(+8), sentinel at map+18.
+        # Each node has a key at +C and a vector of ancestor IDs at +1C/+20/+24.
+        resource = struct.unpack_from("<I", raw, 0x60)[0]
+        hierarchy = self.memory.read_u32(resource + 0x10) if pointer(resource) else None
+        if not pointer(hierarchy):
+            return False
+        key = (hierarchy, unit_type)
+        if key in self._npc_types:
+            return self._npc_types[key]
+        head = self.memory.read_u32(hierarchy + 0x20)
+        node = self.memory.read_u32(head + 4) if pointer(head) else None
+        seen = set()
+        while pointer(node) and node != head and node not in seen and len(seen) < 64:
+            seen.add(node)
+            entry = self.memory.read_bytes(node, 0x2C)
+            if len(entry) != 0x2C or entry[0x29]:
+                return False
+            current = struct.unpack_from("<I", entry, 0xC)[0]
+            if current == unit_type:
+                begin, end, capacity = struct.unpack_from("<III", entry, 0x1C)
+                if (not pointer(begin) or not begin <= end <= capacity
+                        or (end - begin) % 4 or capacity - begin > 256):
+                    return False
+                data = self.memory.read_bytes(begin, end - begin)
+                if len(data) != end - begin:
+                    return False
+                result = INTERACTIVE_CHARACTER in struct.unpack("<" + "I" * (len(data) // 4), data)
+                if len(self._npc_types) >= MAX_CLASSES:
+                    self._npc_types.clear()
+                self._npc_types[key] = result
+                return result
+            node = struct.unpack_from("<I", entry, 0 if unit_type < current else 8)[0]
+        return False
+
     def _list(self, level: int, offset: int, budget: list[int]) -> tuple[list[int], bool]:
         container = self.memory.read_u32(level + offset)
         if not pointer(container):
@@ -198,12 +242,14 @@ class WorldMemoryReader:
         npc_role = quest_status = ""
         if characters:
             # NPCs share CMonster with enemies. Exclude pets, summons, dead and hostile units.
-            if struct.unpack_from("<I", raw, 0x28C)[0] not in (1, 3):
+            if struct.unpack_from("<I", raw, 0x28C)[0] not in NPC_ALIGNMENTS:
                 return None
             health = struct.unpack_from("<f", raw, 0x394)[0]
             if not 0 < health < 1e12 or struct.unpack_from("<I", raw, 0x284)[0] in (5, 6):
                 return None
             if struct.unpack_from("<I", raw, 0x5B4)[0] != 0:
+                return None
+            if not self._interactive_character(raw):
                 return None
             kind = "npc"
             npc_role = NPC_ROLES.get(struct.unpack_from("<I", raw, 0x174)[0], "")

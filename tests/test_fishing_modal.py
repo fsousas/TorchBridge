@@ -3,7 +3,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 import tempfile
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
@@ -313,6 +313,43 @@ class FishingAndModalTests(unittest.TestCase):
         self.assertIn(("mouse", "left", True), injector.events)
         self.assertIn(("mouse", "left", False), injector.events)
         self.assertNotIn(("mouse", "right", True), injector.events)
+
+    def test_first_shop_tip_confirms_at_its_own_button_without_repeating(self):
+        for width, height, button in ((1024, 768, "a"), (1920, 1080, "x"), (1280, 720, "b")):
+            with self.subTest(size=(width, height), button=button):
+                engine = BridgeEngine(ConfigManager(), SharedOverlayState())
+                engine.injector = injector = FakeInjector()
+                engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True,
+                    is_menu_open=True, state_desc="Dica (Tutorial)", open_menus=["Dica (Tutorial)"])
+                rect, cfg, hub = Rect(100, 80, width, height), engine.config.get(), MagicMock()
+                empty, confirm = ControllerState(), ControllerState(buttons={button})
+                engine._process_active(hub, empty, rect, cfg, 1., .05)
+                self.assertEqual(injector.cursor, modal_ok_point(rect, tutorial=True))
+                self.assertNotEqual(injector.cursor, modal_ok_point(rect))
+                self.assertTrue(engine._modal_confirm_initialized)
+                self.assertFalse(engine._is_radial_allowed())
+                with patch.object(engine, "_wait_for_input") as wait:
+                    engine._process_active(hub, confirm, rect, cfg, 1.1, .05)
+                    engine._previous = confirm
+                    engine._process_active(hub, confirm, rect, cfg, 1.2, .05)
+                self.assertEqual([call.args[0] for call in wait.call_args_list], [.03, .06])
+                self.assertEqual(injector.events.count(("mouse", "left", True)), 1)
+                self.assertEqual(injector.events.count(("mouse", "left", False)), 1)
+                self.assertFalse(injector.buttons["left"])
+                self.assertNotIn(("mouse", "right", True), injector.events)
+        self.assertEqual(modal_ok_point(Rect(0, 0, 1024, 768), tutorial=True), (512, 458))
+
+    def test_tutorial_click_releases_the_button_when_input_is_cancelled(self):
+        from torchbridge.input_session import InputCancelled
+        engine = BridgeEngine(ConfigManager(), SharedOverlayState())
+        engine.injector = injector = FakeInjector()
+        engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True,
+            is_menu_open=True, open_menus=["Dica (Tutorial)"])
+        with patch.object(engine, "_wait_for_input", side_effect=[None, InputCancelled()]):
+            with self.assertRaises(InputCancelled):
+                engine._handle_modal_confirm_navigation(ControllerState(buttons={"a"}),
+                    Rect(0, 0, 1024, 768), MagicMock())
+        self.assertFalse(injector.buttons["left"])
 
     def test_overlay_renders_fishing_and_modal(self):
         """Valida que o overlay desenha sem erros quando pesca ou modal estão focados."""

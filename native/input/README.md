@@ -44,6 +44,15 @@ habilidades que controlam o caminho. Só a entrada no estado de diálogo/serviç
 confirma a execução. `npc_approach` identifica a DLL com essa correção e exige
 reinício quando o jogo ainda carrega a versão anterior.
 
+O catálogo aceita os alinhamentos NEUTRAL (0) e GOOD (1), com `IsA(131)`
+(`INTERACTIVECHARACTER`) para separar serviços/NPCs de animais e monstros.
+ANY (3) não é um alinhamento amigável. Os serviços de cidade usam 0; aceitar
+somente 1/3 os excluía da seleção e do overlay. A proteção do setter de alvo
+também usa o tipo interativo, sem bloquear alvos comuns de combate. A capability
+`neutral_npc_services` exige atualização/reinício de módulos com o filtro antigo.
+Essa versão também verifica `CTipMenu` (`CGameUI+0x308`, aberto em `+0x18`),
+para não selecionar ou caminhar durante as dicas de primeira utilização de lojas.
+
 Destrutíveis são candidatos próprios (tipo 4), reconhecidos por CBreakable na
 hierarquia RTTI, incluindo barris comuns/explosivos e subclasses de mods. A/×
 mantém o jogador no estado parado (0), cancela o caminho e chama o ataque básico

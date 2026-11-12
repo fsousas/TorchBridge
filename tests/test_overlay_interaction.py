@@ -91,6 +91,30 @@ class WorldOverlayTests(unittest.TestCase):
             self.render(replace(self.snapshot, controller_type="xbox"))
         icon.assert_called_once_with("playstation", False)
 
+    def test_realistic_neutral_shops_from_memory_render_their_role_and_dpad(self):
+        from test_world_memory import memory_fixture
+        for unit_type, name, label in ((41, "Tarn", "Mercador"),
+                                       (127, "Duros", "Mercador (Apostador)"),
+                                       (128, "Stash", "Baú pessoal")):
+            with self.subTest(unit_type=unit_type):
+                space, reader, client, _, player, _, npc, *_ = memory_fixture()
+                space.u32(npc + 0x174, unit_type)
+                space.f32(npc + 0x394, 30.)
+                space.string(npc + 0x420, name)
+                for address, x in ((player, 0.), (npc, .5)):
+                    space.f32(address + 0x70, x)
+                    space.f32(address + 0x74, 0.)
+                    space.f32(address + 0x78, -4.)
+                world = reader._world_reader.read(client, player, 10.)
+                target = next(e for e in world.entities if e.address == npc)
+                with patch.object(self.overlay, "_interaction_icon", wraps=self.overlay._interaction_icon) as icon:
+                    self.render(replace(self.snapshot, world=world, interaction_target=target,
+                                        interaction_button="dpad_up", controller_type="xbox"))
+                icon.assert_called_once_with("xbox", False)
+                self.assertIn(label, self.drawn_text[0])
+                self.assertIn(name, self.drawn_text[0])
+                self.assertEqual(len(self.drawn_images), 1)
+
     def test_visible_native_prop_label_gets_only_an_icon_on_its_left(self):
         for kind in ("door", "portal", "stairs", "lever", "chest", "interactive", "fishing"):
             for width, height, scale in ((1920, 1080, 1.), (1280, 720, 1.5)):

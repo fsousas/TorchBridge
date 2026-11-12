@@ -193,8 +193,8 @@ bool authorized(uintptr_t object) {
 void __fastcall target_hook(void* self, void*, void* target) {
     const auto address = reinterpret_cast<uintptr_t>(target);
     if (strict_world && reinterpret_cast<uintptr_t>(self) == scene.player && address &&
-        (class_info(address).mask & character) && field<uint32_t>(address, 0x28C) != 2 &&
-        field<uint32_t>(address, 0x28C) != 4 && !authorized(address)) {
+        (class_info(address).mask & character) && is_a(reinterpret_cast<void*>(address), 131) &&
+        !authorized(address)) {
         ++status.blocked_interactions;
         return;
     }
@@ -357,9 +357,12 @@ bool list(uint32_t offset, std::vector<Candidate>& candidates, std::unordered_se
         Candidate candidate{}; candidate.address = p;
         if (offset == 0x5C) {
             const auto alignment = field<uint32_t>(p, 0x28C);
+            const auto health = field<float>(p, 0x394);
+            // NEUTRAL=0 (town services), GOOD=1; ANY=3 is not friendly.
+            // IsA keeps ambient animals/monsters out even if they are neutral.
             if (!(mask & character) || !is_a(reinterpret_cast<void*>(p), 131) ||
-                (alignment != 1 && alignment != 3) ||
-                field<float>(p, 0x394) <= 0 || field<uint32_t>(p, 0x284) == 5 ||
+                (alignment != 0 && alignment != 1) ||
+                !(health > 0 && health < 1e12f) || field<uint32_t>(p, 0x284) == 5 ||
                 field<uint32_t>(p, 0x284) == 6 || field<uint32_t>(p, 0x5B4)) continue;
             candidate.type = 1;
         } else {
@@ -408,7 +411,7 @@ bool menu_open() {
         {0x2CC,0x30}, {0x2D0,0x44}, {0x2D4,0x34}, {0x2D8,0x30},
         {0x2DC,0x38}, {0x2E0,0x54}, {0x2E4,0x30}, {0x2E8,0x18},
         {0x2EC,0x18}, {0x2F0,0x18}, {0x2F4,0x18}, {0x2F8,0x18},
-        {0x2FC,0x18}, {0x300,0x18}, {0x304,0x18}, {0x30C,0x1C},
+        {0x2FC,0x18}, {0x300,0x18}, {0x304,0x18}, {0x308,0x18}, {0x30C,0x1C},
         {0x310,0x1C}, {0x314,0xC8}, {0x31C,0x18}
     };
     for (const auto& entry : panels) {
@@ -860,7 +863,7 @@ DWORD WINAPI serve(void*) {
     endpoint.port = ntohs(address.sin_port);
     endpoint.capabilities = ready | protected_world | highlighted | typed_interactions |
         stationary_breakables | destructible_actions | npc_approach | action_ranges | equipped_skill_actions |
-        reliable_world_actions;
+        reliable_world_actions | neutral_npc_services;
     MemoryBarrier(); std::memcpy(endpoint.magic, magic, 8);
     initialized.store(true);
     for (;;) {

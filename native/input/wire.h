@@ -16,6 +16,7 @@ constexpr uint32_t npc_approach = 256; // Native path and interruptible pending 
 constexpr uint32_t action_ranges = 512; // Per-kind range and completion releases movement.
 constexpr uint32_t equipped_skill_actions = 1024; // Left-slot casts and water-plane fishing selection.
 constexpr uint32_t reliable_world_actions = 2048; // Fishing without underwater path/raycast.
+constexpr uint32_t neutral_npc_services = 4096; // Neutral services and type-based talk guards.
 enum Reason : uint32_t { idle, walking_now, no_session, no_focus, wrong_scene, menu,
     skill_lock, no_target, acting, unsupported, incomplete, transport_error, attack_unavailable };
 enum ActionResult : uint32_t { none, accepted, unavailable, changed_target, blocked };
