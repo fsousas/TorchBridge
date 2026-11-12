@@ -25,9 +25,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0 libwayland-dev libwayland-bin libxkbcommon-dev pkg-config gcc
+        timeout-minutes: 5
+        run: bash scripts/install_ci_linux_deps.sh
       - run: python -m pip install -e .
       - run: python -m pip wheel --no-deps . --wheel-dir dist
       - run: python scripts/run_tests.py
@@ -47,6 +46,18 @@ jobs:
           python-version: '3.13'
       - run: python scripts/build_fullscreen.py
       - run: ctest --test-dir build/fullscreen -C Release --output-on-failure
+      - name: Preserve shipped input module for its loader test
+        run: |
+          New-Item -ItemType Directory -Force build/input | Out-Null
+          Copy-Item assets/native/x86/winmm.dll build/input/bundled-winmm.dll
+      - run: python scripts/build_native_input.py
+      - run: ctest --test-dir build/input -C Release --output-on-failure
+      - run: build/input/Release/input_loader_test.exe build/input/bundled-winmm.dll
+      - uses: actions/upload-artifact@v6
+        with:
+          name: torchbridge-input-x86
+          path: assets/native/x86/winmm.dll
+          if-no-files-found: error
       - uses: actions/upload-artifact@v6
         with:
           name: torchbridge-fullscreen-x86

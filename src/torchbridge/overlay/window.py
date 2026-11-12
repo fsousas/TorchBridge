@@ -209,6 +209,7 @@ class GameOverlayBase(QWidget):
         self._radial_top_info_crossfade_seconds: float = 0.14
         # Cache dos pixmaps do HUD inferior dos controles (Xbox, PlayStation, Nintendo).
         self._bottom_hud_cache: dict[str, QPixmap] = {}
+        self._interaction_icon_cache: dict[str, QPixmap] = {}
         # Cache do pixmap de fundo do teclado virtual (assets/keyboard/background.png).
         self._keyboard_bg_pixmap: QPixmap | None = None
         # Cache de pixmaps das teclas do teclado virtual.
@@ -471,7 +472,9 @@ class GameOverlayBase(QWidget):
         self._draw_shortcut_instruction(painter, snapshot)
         self._draw_bottom_hud(painter, snapshot)
         self._draw_aim(painter, snapshot, scale)
+        self._draw_world_interaction(painter, snapshot, scale)
         self._draw_calibration(painter, snapshot, scale)
+        self._draw_world_calibration(painter, snapshot, scale)
         self._draw_virtual_keyboard(painter, snapshot, scale)
         self._draw_radial(painter, snapshot, scale)
         self._draw_mode_badge(painter, snapshot, scale)

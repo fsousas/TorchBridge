@@ -12,6 +12,15 @@
 8. `GameOverlay` desenha mira, modo, avisos e roda sem receber cliques ou foco.
 9. No Windows, em fullscreen exclusivo, os mesmos desenhos são rasterizados em BGRA e
    publicados num canal local por PID. A DLL D3D9 x86 os compõe antes de `Present`.
+10. `WorldMemoryReader` publica posições e entidades ativas do cenário em fotografias
+    imutáveis. O módulo x86 seleciona o alvo mais próximo, aplica o highlight e executa
+    movimento/interação na thread do jogo; o mesmo painter desenha o aviso nos três
+    backends de overlay. A caminhada não gera cliques.
+    Layout, limites e uso: [POSICIONAMENTO.md](POSICIONAMENTO.md).
+
+11. `NativeInputClient` descobre o endpoint do módulo na memória do processo
+    selecionado e envia intenções por loopback. Sequência, token e validade são
+    conferidos no receptor. Uso, catálogo e limites: [MOVIMENTO-SEGURO.md](MOVIMENTO-SEGURO.md).
 
 ## Princípios de segurança operacional
 
@@ -19,6 +28,9 @@
 - Todo clique ou modificador mantido é liberado na perda de foco, pausa ou saída.
 - O overlay usa `NOACTIVATE` e é transparente a cliques.
 - O leitor de memória acompanha o estado dos menus sem escrever no processo.
+- O módulo de movimento instala hooks apenas em builds reconhecidas, na memória
+  do próprio jogo. Destinos e parada usam as funções originais; a posição não é
+  escrita. O arquivo executável permanece intacto.
 - Fullscreen exclusivo usa uma DLL proxy opcional, carregada pelo Windows junto
   ao jogo. Não há patch no executável nem injeção remota. O instalador acrescenta
   `d3d9.dll` e um manifesto de remoção e recusa substituir DLLs existentes.
@@ -56,11 +68,12 @@ thread Qt rasteriza o mesmo `_paint_overlay` em ARGB e apresenta buffers shm em
 layer-shell. São usados até três buffers, reaproveitados apenas após `release` do
 compositor. Sem buffer livre, descarta-se o frame, sem escrever num buffer em uso.
 A camada não recebe foco de teclado e só intercepta mouse na região do teclado
-virtual. Não há regras locais de Hyprland, processo Quickshell ou DLL proxy Linux.
+virtual. Não há regras locais de Hyprland ou processo Quickshell. O overlay é nativo
+Wayland; a DLL de movimento roda dentro do processo PE32 sob Proton.
 
 `--launch` executa o comando Proton/Wine como descendente do aplicativo para
-atender Yama em 1. Não há escrita de memória, mudança de sysctl ou elevação de
-privilégios. O perfil permanece comum, e `resources.py` resolve assets em
+atender Yama em 1. O leitor continua somente leitura e não há mudança de sysctl ou elevação de
+privilégios. O launcher acrescenta o override WinMM para o módulo de movimento. O perfil permanece comum, e `resources.py` resolve assets em
 checkout, wheel e bundle sem depender do diretório de trabalho.
 
 Guia de uso, limites e matriz de paridade: [LINUX.md](LINUX.md).

@@ -40,5 +40,8 @@ setup(
                 if path.is_file() and path.suffix.lower() in {".png", ".cur", ".svg"}
                 and "native" not in path.parts]
     + ([("share/torchbridge/licenses", ["native/linux/THIRD_PARTY_NOTICES.txt"])]
-       if sys.platform.startswith("linux") else []),
+       if sys.platform.startswith("linux") else [])
+    + [("share/torchbridge/assets/native/x86", [str(path)])
+       for path in sorted(Path("assets/native/x86").glob("*.dll"))]
+    + [("share/torchbridge/licenses/minhook", ["native/input/vendor/minhook/LICENSE.txt"])],
 )

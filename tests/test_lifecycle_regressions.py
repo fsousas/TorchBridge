@@ -305,13 +305,13 @@ class EngineRegressionTests(unittest.TestCase):
         self.assertEqual(fresh.buttons, held.buttons)
         self.assertEqual(fresh.rt, 1.)
 
-    def test_rt_release_arms_walking_resume(self):
+    def test_rt_release_does_not_schedule_a_walking_click(self):
         self.engine._memory_state = GameMemoryState(is_connected=True, is_in_game=True, state_id=6)
         self.engine._previous = ControllerState(rt=1., lx=1.)
         self.engine._previous_rt_active = True
         with patch.object(self.engine, "_move_pointer", return_value=True):
             self.engine._process_active(self.hub, ControllerState(lx=1.), self.rect, self.config.get(), 5., .008)
-        self.assertEqual(self.engine._auto_move_resume_times, [5.15, 5.3])
+        self.assertNotIn("left", self.engine._held_mouse)
 
     def test_tab_action_cancels_before_click_after_focus_loss(self):
         engine = self.engine
@@ -481,9 +481,11 @@ class ProfileAndMemoryTests(unittest.TestCase):
 
     def test_invalid_snapshot_handle_is_not_enumerated_or_closed(self):
         reader = TorchlightMemoryReader()
+        reader._linux = None  # This regression specifically exercises Toolhelp.
         with patch.object(memory, "kernel32") as kernel:
             kernel.CreateToolhelp32Snapshot.return_value = ctypes.c_void_p(-1).value
             self.assertIsNone(reader._find_pid())
+            kernel.CreateToolhelp32Snapshot.assert_called_once()
             kernel.Process32First.assert_not_called()
             kernel.CloseHandle.assert_not_called()
 

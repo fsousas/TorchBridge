@@ -405,8 +405,8 @@ class HudMaskAssetTests(unittest.TestCase):
     def test_click_zone_hud_green_returns_hud(self):
         self._require_mask()
         rect = Rect(0, 0, 1920, 1080)
-        # Ponto verde conhecido: barra de vida no centro da base (960, 1070).
-        self.assertEqual(click_zone(rect, 960, 1070, self.mask), "hud")
+        # Ponto preenchido do disco central na máscara atual.
+        self.assertEqual(click_zone(rect, 900, 1000, self.mask), "hud")
 
     def test_click_zone_center_gap_stays_center(self):
         self._require_mask()
