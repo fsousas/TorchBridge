@@ -698,3 +698,61 @@ def settings_slider_bounds(rect: Rect, is_music: bool = True) -> tuple[tuple[int
     p2 = (int(clamp(round(x2), rect.left + 2, rect.right - 2)), int(clamp(round(y), rect.top + 2, rect.bottom - 2)))
     return (p1, p2)
 
+
+# Dimensões e posicionamento da Tela de Boas-Vindas (TB-17)
+WELCOME_DIALOG_BASE_WIDTH = 762.0
+WELCOME_DIALOG_BASE_HEIGHT = 657.0
+
+# Posições relativas na arte base de 762x657: (x, y, w, h)
+WELCOME_BTN_ANTERIOR_REL = (21.0, 598.0, 220.0, 40.0)
+WELCOME_BTN_PROXIMO_REL = (503.0, 598.0, 220.0, 40.0)
+WELCOME_BTN_FECHAR_REL = (503.0, 598.0, 220.0, 40.0)
+WELCOME_BTN_X_REL = (721.0, 92.0, 41.0, 76.0)
+
+
+def welcome_screen_target_rect(rect: Rect, scale_multiplier: float = 1.0) -> tuple[int, int, int, int]:
+    """Calcula (left, top, width, height) absolutos da tela de boas-vindas centralizada na área do jogo.
+
+    A proporção é ancorada estritamente na altura da janela (rect.height / 768.0), padrão do Torchlight.
+    """
+    if not rect.valid:
+        return (0, 0, 0, 0)
+    scale = (rect.height / 768.0) * max(0.1, scale_multiplier)
+    w = int(round(WELCOME_DIALOG_BASE_WIDTH * scale))
+    h = int(round(WELCOME_DIALOG_BASE_HEIGHT * scale))
+    left = int(round(rect.left + (rect.width - w) / 2.0))
+    top = int(round(rect.top + (rect.height - h) / 2.0))
+    return (left, top, w, h)
+
+
+def welcome_button_rect(rect: Rect, button_name: str, scale_multiplier: float = 1.0) -> tuple[int, int, int, int]:
+    """Retorna o retângulo absoluto (left, top, width, height) de um botão da tela de boas-vindas."""
+    dlg_left, dlg_top, dlg_w, dlg_h = welcome_screen_target_rect(rect, scale_multiplier)
+    if dlg_w <= 0 or dlg_h <= 0:
+        return (0, 0, 0, 0)
+    scale = dlg_w / WELCOME_DIALOG_BASE_WIDTH
+    if button_name == "prev":
+        rel = WELCOME_BTN_ANTERIOR_REL
+    elif button_name in ("next", "close"):
+        rel = WELCOME_BTN_PROXIMO_REL
+    elif button_name == "x":
+        rel = WELCOME_BTN_X_REL
+    else:
+        return (0, 0, 0, 0)
+
+    rx, ry, rw, rh = rel
+    bx = dlg_left + int(round(rx * scale))
+    by = dlg_top + int(round(ry * scale))
+    bw = int(round(rw * scale))
+    bh = int(round(rh * scale))
+    return (bx, by, bw, bh)
+
+
+def welcome_button_point(rect: Rect, button_name: str, scale_multiplier: float = 1.0) -> tuple[int, int]:
+    """Retorna a coordenada (x, y) absoluta do centro de um botão na tela de boas-vindas."""
+    bx, by, bw, bh = welcome_button_rect(rect, button_name, scale_multiplier)
+    if bw <= 0 or bh <= 0:
+        return (rect.left + rect.width // 2, rect.top + rect.height // 2)
+    return (bx + bw // 2, by + bh // 2)
+
+

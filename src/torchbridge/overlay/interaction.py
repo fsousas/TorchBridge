@@ -90,10 +90,7 @@ class WorldInteractionOverlayMixin:
                         if target.uses_face_button or snapshot.interaction_button == "dpad_up" else None)
                 button = (("×" if family == "playstation" else "A") if target.uses_face_button else
                           INTERACTION_LABELS.get(snapshot.interaction_button, "D-pad ↑"))
-                name = target.name or target.label
-                if target.npc_role or target.quest_status:
-                    name = f"{target.label}: {name}"
-                text = name
+                text = target.name or target.label
                 if icon is None:
                     text = f"[{button}] {text}"
                 painter.save()
@@ -103,10 +100,11 @@ class WorldInteractionOverlayMixin:
                 icon_width = icon_height * icon.width() / icon.height() if icon is not None else 0
                 leading = icon_width + gap
                 max_width = max(1, min(360 * scale, snapshot.game_rect.width - 16))
-                suffix = f" · {distance:.1f}"
+                show_distance = getattr(snapshot, "debug_npc_distance", False)
+                suffix = f" · {distance:.1f}" if show_distance else ""
+                advance_suffix = painter.fontMetrics().horizontalAdvance(suffix) if suffix else 0
                 text = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight,
-                    max(1, int(max_width - padding * 2 - leading
-                               - painter.fontMetrics().horizontalAdvance(suffix)))) + suffix
+                    max(1, int(max_width - padding * 2 - leading - advance_suffix))) + suffix
                 width = min(max_width, painter.fontMetrics().horizontalAdvance(text) + padding * 2 + leading)
                 height = 32 * scale
                 left = max(8, min(point[0] - width / 2, snapshot.game_rect.width - width - 8))
@@ -150,7 +148,12 @@ class WorldInteractionOverlayMixin:
     def _draw_world_calibration(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         config = self.config.get()
         rect = snapshot.game_rect
-        if (not config["overlay"]["show_calibration"] or not snapshot.enabled
+        calib_cfg = bool(config["overlay"].get("show_calibration", False))
+        draw_world_panel = calib_cfg or getattr(snapshot, "debug_world_panel", False)
+        draw_world_radius = calib_cfg or getattr(snapshot, "debug_world_radius", False) or getattr(snapshot, "debug_world_hitboxes", False)
+        draw_world_targets = calib_cfg or getattr(snapshot, "debug_world_targets", False) or getattr(snapshot, "debug_world_hitboxes", False)
+
+        if (not (draw_world_panel or draw_world_radius or draw_world_targets) or not snapshot.enabled
                 or not snapshot.game_found or not snapshot.game_active or not rect.valid
                 or not (snapshot.memory_is_in_game or snapshot.memory_is_loading)
                 or snapshot.memory_is_cutscene
@@ -179,31 +182,39 @@ class WorldInteractionOverlayMixin:
                 target = snapshot.interaction_target
                 visible = 0
                 if camera is not None:
-                    # Project the range on the same ground plane as the player.
-                    painter.setPen(QPen(QColor(95, 230, 140, 160), 1.5 * scale, Qt.PenStyle.DashLine))
-                    self._draw_world_radius(painter, camera, rect, player, cfg["radius"])
-                    painter.setPen(QPen(QColor(255, 170, 90, 160), 1.5 * scale, Qt.PenStyle.DashLine))
-                    self._draw_world_radius(painter, camera, rect, player, cfg["radius"] * 2)
-                    for entity in world.entities:
-                        if entity.kind == "fishing":
-                            painter.setPen(QPen(QColor(120, 215, 255, 160), 1.5 * scale, Qt.PenStyle.DashLine))
-                            self._draw_world_radius(painter, camera, rect, entity.position, entity.action_radius(0))
-                        point = camera.project(entity.position, rect.width, rect.height)
-                        if point is None:
-                            continue
-                        visible += 1
-                        selected = target is not None and entity.address == target.address
-                        color = QColor(255, 215, 105) if selected else (
-                            QColor(95, 230, 140) if entity.address in nearby else QColor(90, 195, 250))
-                        label = f"{entity.label}: {entity.name or entity.identifier or entity.label}"
-                        details = (f"X {entity.position.x:.2f}  Y {entity.position.y:.2f}  "
-                                   f"dist. {player.distance_to(entity.position):.2f}")
-                        self._draw_world_marker(painter, rect, point, label, details, color, scale)
-                    point = camera.project(player, rect.width, rect.height)
-                    if point is not None:
-                        self._draw_world_marker(painter, rect, point, "Jogador",
-                                                f"X {player.x:.2f}  Y {player.y:.2f}",
-                                                QColor(255, 135, 235), scale, below=True)
+                    if draw_world_radius:
+                        # Projeta o raio de ação no mesmo plano do chão do jogador.
+                        painter.setPen(QPen(QColor(95, 230, 140, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                        self._draw_world_radius(painter, camera, rect, player, cfg["radius"])
+                        painter.setPen(QPen(QColor(255, 170, 90, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                        self._draw_world_radius(painter, camera, rect, player, cfg["radius"] * 2)
+                        for entity in world.entities:
+                            if entity.kind == "fishing":
+                                painter.setPen(QPen(QColor(120, 215, 255, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                                self._draw_world_radius(painter, camera, rect, entity.position, entity.action_radius(0))
+
+                    if draw_world_targets:
+                        for entity in world.entities:
+                            point = camera.project(entity.position, rect.width, rect.height)
+                            if point is None:
+                                continue
+                            visible += 1
+                            selected = target is not None and entity.address == target.address
+                            color = QColor(255, 215, 105) if selected else (
+                                QColor(95, 230, 140) if entity.address in nearby else QColor(90, 195, 250))
+                            label = f"{entity.label}: {entity.name or entity.identifier or entity.label}"
+                            details = (f"X {entity.position.x:.2f}  Y {entity.position.y:.2f}  "
+                                       f"dist. {player.distance_to(entity.position):.2f}")
+                            self._draw_world_marker(painter, rect, point, label, details, color, scale)
+                        point = camera.project(player, rect.width, rect.height)
+                        if point is not None:
+                            self._draw_world_marker(painter, rect, point, "Jogador",
+                                                    f"X {player.x:.2f}  Y {player.y:.2f}",
+                                                    QColor(255, 135, 235), scale, below=True)
+                    else:
+                        for entity in world.entities:
+                            if camera.project(entity.position, rect.width, rect.height) is not None:
+                                visible += 1
                 lines.extend([
                     f"Jogador: X {player.x:.2f}  Y {player.y:.2f}  altura {player.height:.2f}",
                     f"{len(world.entities)} elementos · {len(nearby)} próximos · {visible} visíveis",
@@ -232,7 +243,8 @@ class WorldInteractionOverlayMixin:
                 lines.append("Carregando cenário..." if snapshot.memory_is_loading
                              else "Posições indisponíveis ou desatualizadas")
                 lines.append(world.status)
-            self._draw_world_calibration_panel(painter, rect, lines, scale)
+            if draw_world_panel:
+                self._draw_world_calibration_panel(painter, rect, lines, scale)
         finally:
             painter.restore()
 

@@ -78,7 +78,7 @@ class WorldOverlayTests(unittest.TestCase):
                     with patch.object(self.overlay, "_interaction_icon", wraps=self.overlay._interaction_icon) as icon:
                         pixels = self.render(snap)
                     icon.assert_called_once_with(family, face_button)
-                    self.assertEqual(self.drawn_text, ["Vasman · 0.5"])
+                    self.assertEqual(self.drawn_text, ["Vasman"])
                     self.assertEqual(len(self.drawn_images), 1)
                     self.assertFalse(self.drawn_images[0].isNull())
                     if kind in ("npc", "loot"):
@@ -111,8 +111,7 @@ class WorldOverlayTests(unittest.TestCase):
                     self.render(replace(self.snapshot, world=world, interaction_target=target,
                                         interaction_button="dpad_up", controller_type="xbox"))
                 icon.assert_called_once_with("xbox", False)
-                self.assertIn(label, self.drawn_text[0])
-                self.assertIn(name, self.drawn_text[0])
+                self.assertEqual(self.drawn_text, [name])
                 self.assertEqual(len(self.drawn_images), 1)
 
     def test_visible_native_prop_label_gets_only_an_icon_on_its_left(self):
@@ -138,7 +137,7 @@ class WorldOverlayTests(unittest.TestCase):
         self.render(replace(self.snapshot, interaction_target=target))
         self.assertEqual(self.drawn_text, [])
         self.render(replace(self.snapshot, interaction_target=replace(target, native_label_rect=None)))
-        self.assertEqual(self.drawn_text, ["Vasman · 0.5"])
+        self.assertEqual(self.drawn_text, ["Vasman"])
         self.assertEqual(len(self.drawn_images), 1)
 
     def test_native_label_does_not_replace_npc_pickup_or_destructible_prompts(self):
@@ -147,17 +146,17 @@ class WorldOverlayTests(unittest.TestCase):
                 target = replace(self.snapshot.interaction_target, kind=kind,
                                  native_label_rect=(.4, .3, .6, .35))
                 self.render(replace(self.snapshot, interaction_target=target))
-                self.assertEqual(self.drawn_text, ["Vasman · 0.5"])
+                self.assertEqual(self.drawn_text, ["Vasman"])
 
     def test_icon_replaces_only_the_button_and_preserves_npc_details(self):
         target = replace(self.snapshot.interaction_target, name="Miner", quest_status="unavailable")
         self.render(replace(self.snapshot, interaction_target=target))
-        self.assertEqual(self.drawn_text, ["NPC · Missão indisponível: Miner · 0.5"])
+        self.assertEqual(self.drawn_text, ["Miner"])
         self.assertEqual(len(self.drawn_images), 1)
 
     def test_long_names_keep_the_distance_visible(self):
         target = replace(self.snapshot.interaction_target, name="Nome muito longo " * 50)
-        self.render(replace(self.snapshot, interaction_target=target))
+        self.render(replace(self.snapshot, interaction_target=target, debug_npc_distance=True))
         self.assertIn("…", self.drawn_text[0])
         self.assertTrue(self.drawn_text[0].endswith(" · 0.5"))
 
@@ -169,7 +168,7 @@ class WorldOverlayTests(unittest.TestCase):
             for dpi in (96, 144, 192):
                 with self.subTest(scale=scale, dpi=dpi):
                     frame = self.render(snapshot, scale, dpi=dpi)
-                    self.assertEqual(self.drawn_text, ["NPC · Missão indisponível: Miner · 0.5"])
+                    self.assertEqual(self.drawn_text, ["Miner"])
                     self.assertEqual(frame, reference)
 
     def test_missing_image_falls_back_to_the_correct_button_label(self):
@@ -178,12 +177,12 @@ class WorldOverlayTests(unittest.TestCase):
             with patch.object(self.overlay, "_interaction_icon", return_value=None):
                 self.render(replace(self.snapshot, controller_type="playstation", interaction_target=target,
                                     interaction_button="a"))
-            self.assertEqual(self.drawn_text, ["[×] Vasman · 0.5"])
+            self.assertEqual(self.drawn_text, ["[×] Vasman"])
             self.assertEqual(self.drawn_images, [])
 
     def test_custom_world_button_does_not_show_an_incorrect_dpad_up_image(self):
         self.render(replace(self.snapshot, interaction_button="dpad_down"))
-        self.assertEqual(self.drawn_text, ["[D-pad ↓] Vasman · 0.5"])
+        self.assertEqual(self.drawn_text, ["[D-pad ↓] Vasman"])
         self.assertEqual(self.drawn_images, [])
 
     def test_prompt_renders_at_different_resolutions_and_scales(self):
@@ -314,3 +313,40 @@ class WorldOverlayTests(unittest.TestCase):
         self.assertIn("Movimento seguro: Caminhando",lines)
         self.assertTrue(any("12.00, 34.00" in line for line in lines))
         self.assertTrue(any("Highlight: ativo" in line and "3 usos / 2 transições" in line for line in lines))
+
+    def test_debug_npc_distance_shows_distance_only_when_enabled(self):
+        target = replace(self.snapshot.interaction_target, name="Triya")
+        snap_no_dist = replace(self.snapshot, interaction_target=target, debug_npc_distance=False)
+        self.render(snap_no_dist)
+        self.assertEqual(self.drawn_text, ["Triya"])
+
+        snap_with_dist = replace(self.snapshot, interaction_target=target, debug_npc_distance=True)
+        self.render(snap_with_dist)
+        self.assertEqual(self.drawn_text, ["Triya · 0.5"])
+
+    def test_debug_world_radius_and_targets_can_be_enabled_independently(self):
+        # 1. Apenas raio de ação (círculos)
+        snap_radius = replace(self.snapshot, debug_world_radius=True, debug_world_targets=False, debug_world_panel=False)
+        with patch.object(self.overlay, "_draw_world_radius", wraps=self.overlay._draw_world_radius) as draw_radius:
+            with patch.object(self.overlay, "_draw_world_marker", wraps=self.overlay._draw_world_marker) as draw_marker:
+                self.assertTrue(any(self.render(snap_radius, calibration=True)))
+        draw_radius.assert_called()
+        draw_marker.assert_not_called()
+
+        # 2. Apenas alvos e coordenadas X/Y
+        snap_targets = replace(self.snapshot, debug_world_radius=False, debug_world_targets=True, debug_world_panel=False)
+        with patch.object(self.overlay, "_draw_world_radius", wraps=self.overlay._draw_world_radius) as draw_radius:
+            with patch.object(self.overlay, "_draw_world_marker", wraps=self.overlay._draw_world_marker) as draw_marker:
+                self.assertTrue(any(self.render(snap_targets, calibration=True)))
+        draw_radius.assert_not_called()
+        draw_marker.assert_called()
+
+        # 3. Apenas painel de telemetria
+        snap_panel = replace(self.snapshot, debug_world_radius=False, debug_world_targets=False, debug_world_panel=True)
+        with patch.object(self.overlay, "_draw_world_radius", wraps=self.overlay._draw_world_radius) as draw_radius:
+            with patch.object(self.overlay, "_draw_world_marker", wraps=self.overlay._draw_world_marker) as draw_marker:
+                with patch.object(self.overlay, "_draw_world_calibration_panel", wraps=self.overlay._draw_world_calibration_panel) as draw_panel:
+                    self.assertTrue(any(self.render(snap_panel, calibration=True)))
+        draw_radius.assert_not_called()
+        draw_marker.assert_not_called()
+        draw_panel.assert_called()

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
@@ -560,6 +561,164 @@ class OverlayRadialExtraHudTests(unittest.TestCase):
             # Ambos devem ter sido consultados no cache
             self.assertIn("menu-radial-instructions-ps.png", overlay._radial_instruction_cache)
             self.assertIn("I", overlay._radial_info_cache)
+
+    def test_pet_submenu_icons_exist_and_render(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # Valida carregamento dos 4 ícones pet-1 a pet-4
+            for icon_name in overlay.PET_SUBMENU_ICONS:
+                pixmap = overlay._pet_icon(icon_name)
+                self.assertIsNotNone(pixmap, f"Ícone {icon_name} não deve ser None")
+                self.assertFalse(pixmap.isNull(), f"Ícone {icon_name} não deve ser nulo")
+
+            # Renderiza o submenu do pet e valida que desenha sem erros
+            pix = QPixmap(1920, 1080)
+            painter = QPainter(pix)
+            try:
+                overlay._pet_submenu_progress = 1.0
+                overlay._draw_pet_submenu(painter, QPointF(960, 540), 1.0, 1, 1.0)
+            finally:
+                painter.end()
+
+            # Valida transição de escala da opção marcada (1.0 -> 1.13)
+            snap_pet4 = OverlaySnapshot(
+                game_rect=rect,
+                radial_active=True,
+                radial_selection=6,
+                pet_submenu_open=True,
+                pet_submenu_selection=4,
+            )
+            # Simula tick de tempo
+            import time
+            overlay._pet_submenu_last_time = time.monotonic() - 0.20
+            overlay._tick_pet_submenu_anim(snap_pet4)
+            # Item 4 (índice 3) atinge escala 1.13, enquanto 0, 1 e 2 permanecem 1.0
+            self.assertAlmostEqual(overlay._pet_item_scales[3], 1.13, places=2)
+            self.assertAlmostEqual(overlay._pet_item_scales[0], 1.0, places=2)
+            self.assertAlmostEqual(overlay._pet_item_scales[1], 1.0, places=2)
+            self.assertAlmostEqual(overlay._pet_item_scales[2], 1.0, places=2)
+
+            # Muda seleção para item 2
+            snap_pet2 = OverlaySnapshot(
+                game_rect=rect,
+                radial_active=True,
+                radial_selection=6,
+                pet_submenu_open=True,
+                pet_submenu_selection=2,
+            )
+            overlay._pet_submenu_last_time = time.monotonic() - 0.20
+            overlay._tick_pet_submenu_anim(snap_pet2)
+            self.assertAlmostEqual(overlay._pet_item_scales[1], 1.13, places=2)
+            self.assertAlmostEqual(overlay._pet_item_scales[3], 1.0, places=2)
+
+    def test_draw_aim_renders_footstep(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # 1. Sem mira ativa: não desenha nada
+            snap_no_aim = OverlaySnapshot(game_rect=rect, aim_x=None, aim_y=None)
+            pix = QPixmap(1920, 1080)
+            painter = QPainter(pix)
+            try:
+                overlay._draw_aim(painter, snap_no_aim, 1.0)
+            finally:
+                painter.end()
+
+            # 2. Com mira ativa: desenha a pegada
+            snap_aim = OverlaySnapshot(game_rect=rect, aim_x=500, aim_y=500)
+            painter = QPainter(pix)
+            try:
+                overlay._draw_aim(painter, snap_aim, 1.0)
+            finally:
+                painter.end()
+
+            # Valida carregamento do pixmap de pegada
+            footstep = overlay._footstep_pixmap()
+            self.assertIsNotNone(footstep)
+            self.assertFalse(footstep.isNull())
+            self.assertGreater(footstep.width(), 0)
+            self.assertGreater(footstep.height(), 0)
+
+    def test_debug_menu_overlay_rendering(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay, shared = self._make_overlay(directory)
+            rect = Rect(0, 0, 1920, 1080)
+
+            # 1. Quando fechado, não desenha nada
+            snap_closed = OverlaySnapshot(game_rect=rect, debug_menu_open=False)
+            pix = QPixmap(1920, 1080)
+            painter = QPainter(pix)
+            try:
+                overlay._draw_debug_menu(painter, snap_closed, 1.0)
+            finally:
+                painter.end()
+            self.assertEqual(len(overlay._debug_menu_cache), 0)
+
+            # 2. Quando aberto (layout Xbox, foco no item 0, scroll 0)
+            snap_xbox = OverlaySnapshot(
+                game_rect=rect,
+                debug_menu_open=True,
+                debug_menu_focus=0,
+                debug_menu_scroll=0,
+                controller_type="xbox",
+                debug_bottom_hud=True,
+                debug_aim_marker=True,
+            )
+            painter = QPainter(pix)
+            try:
+                overlay._draw_debug_menu(painter, snap_xbox, 1.0)
+            finally:
+                painter.end()
+
+            # Valida que os assets principais foram carregados no cache
+            self.assertIn("quadro.png", overlay._debug_menu_cache)
+            self.assertIn("scroll-bar.png", overlay._debug_menu_cache)
+            self.assertIn("scroll-indicator.png", overlay._debug_menu_cache)
+            self.assertIn("hover.png", overlay._debug_menu_cache)
+            self.assertIn("check-on.png", overlay._debug_menu_cache)
+            self.assertIn("check-off.png", overlay._debug_menu_cache)
+            self.assertIn("btn-off.png", overlay._debug_menu_cache)
+            self.assertIn("dpad-up-xbox.png", overlay._debug_menu_cache)
+            self.assertIn("interact-xbox.png", overlay._debug_menu_cache)
+
+            # 3. Quando foco está no botão fechar (item 12) e scroll em 2 (layout PlayStation)
+            snap_ps = OverlaySnapshot(
+                game_rect=rect,
+                debug_menu_open=True,
+                debug_menu_focus=12,
+                debug_menu_scroll=2,
+                controller_type="playstation",
+            )
+            painter = QPainter(pix)
+            try:
+                overlay._draw_debug_menu(painter, snap_ps, 1.0)
+            finally:
+                painter.end()
+
+            self.assertIn("btn-on.png", overlay._debug_menu_cache)
+            self.assertIn("dpad-up-playstation.png", overlay._debug_menu_cache)
+            self.assertIn("interact-playstation.png", overlay._debug_menu_cache)
+
+            # 4. Layout Nintendo
+            snap_nin = OverlaySnapshot(
+                game_rect=rect,
+                debug_menu_open=True,
+                debug_menu_focus=5,
+                debug_menu_scroll=1,
+                controller_type="nintendo",
+            )
+            painter = QPainter(pix)
+            try:
+                overlay._draw_debug_menu(painter, snap_nin, 1.0)
+            finally:
+                painter.end()
+
+            self.assertIn("dpad-up-nintendo.png", overlay._debug_menu_cache)
+            self.assertIn("interact-nintendo.png", overlay._debug_menu_cache)
+
 
 
 if __name__ == "__main__":

@@ -210,6 +210,7 @@ class GameOverlayBase(QWidget):
         # Cache dos pixmaps do HUD inferior dos controles (Xbox, PlayStation, Nintendo).
         self._bottom_hud_cache: dict[str, QPixmap] = {}
         self._interaction_icon_cache: dict[str, QPixmap] = {}
+        self._footstep_cache: QPixmap | None = None
         # Cache do pixmap de fundo do teclado virtual (assets/keyboard/background.png).
         self._keyboard_bg_pixmap: QPixmap | None = None
         # Cache de pixmaps das teclas do teclado virtual.
@@ -221,6 +222,8 @@ class GameOverlayBase(QWidget):
         self._shortcut_instruction_cache: dict[str, QPixmap] = {}
         self._config_info_pixmap: QPixmap | None = None
         self._config_info_tooltip_cache: dict[str, QPixmap] = {}
+        # Cache de pixmaps do menu de debug interativo (assets/hud/debug menu/*.png)
+        self._debug_menu_cache: dict[str, QPixmap | None] = {}
         self._shortcut_tooltip_opacity = 0.0
         self._shortcut_anim_progress = 0.0
         self._shortcut_anim_last_time = time.monotonic()
@@ -242,6 +245,7 @@ class GameOverlayBase(QWidget):
         self._pet_submenu_progress = 0.0
         self._pet_submenu_last_time = time.monotonic()
         self._pet_submenu_anim_seconds = 0.3
+        self._pet_item_scales: list[float] = [1.0, 1.0, 1.0, 1.0]
         # Último nó P e marcador com a sublinha ABERTA — guardados para a animação de
         # SAÍDA: no tick em que a sublinha fecha, o snapshot já zera pet_submenu_open e
         # a seleção, então sem esses backups a saída não teria onde partir.
@@ -470,14 +474,35 @@ class GameOverlayBase(QWidget):
         self._draw_shortcut_spotlight(painter, snapshot)
         self._draw_shortcut_nodes(painter, snapshot)
         self._draw_shortcut_instruction(painter, snapshot)
-        self._draw_bottom_hud(painter, snapshot)
-        self._draw_aim(painter, snapshot, scale)
-        self._draw_world_interaction(painter, snapshot, scale)
+
+        # Itens do overlay com suporte ao menu de debug
+        draw_bottom_hud = getattr(snapshot, "debug_bottom_hud", True) if getattr(snapshot, "debug_menu_initialized", False) else self.config.get()["overlay"].get("show_bottom_hud", True)
+        if draw_bottom_hud:
+            self._draw_bottom_hud(painter, snapshot)
+
+        draw_aim = getattr(snapshot, "debug_aim_marker", True) if getattr(snapshot, "debug_menu_initialized", False) else self.config.get()["overlay"].get("show_aim_marker", True)
+        if draw_aim:
+            self._draw_aim(painter, snapshot, scale)
+
+        draw_interaction = getattr(snapshot, "debug_interaction_prompts", True) if getattr(snapshot, "debug_menu_initialized", False) else self.config.get()["interaction"].get("show_prompt", True)
+        if draw_interaction:
+            self._draw_world_interaction(painter, snapshot, scale)
+
         self._draw_calibration(painter, snapshot, scale)
         self._draw_world_calibration(painter, snapshot, scale)
         self._draw_virtual_keyboard(painter, snapshot, scale)
         self._draw_radial(painter, snapshot, scale)
-        self._draw_mode_badge(painter, snapshot, scale)
+
+        draw_mode_badge = getattr(snapshot, "debug_mode_badge", False) if getattr(snapshot, "debug_menu_initialized", False) else self.config.get()["overlay"].get("show_mode_badge", False)
+        if draw_mode_badge:
+            self._draw_mode_badge(painter, snapshot, scale)
+
         # Desenhado antes do toast para o aviso temporário cobrir o indicador quando sobreposto.
         self._draw_active_panels(painter, snapshot, scale)
+        # Tela de Boas-Vindas (TB-17) desenhada sobre os menus do jogo
+        if hasattr(self, "_draw_welcome_screen"):
+            self._draw_welcome_screen(painter, snapshot, scale)
+        # Painel de Debug (Konami Code) desenhado acima das camadas normais
+        if hasattr(self, "_draw_debug_menu"):
+            self._draw_debug_menu(painter, snapshot, scale)
         self._draw_toast(painter, snapshot, scale)

@@ -11,6 +11,7 @@ from ..models import (
 )
 from PySide6.QtCore import (
     QPointF,
+    QRect,
     QRectF,
     Qt,
 )
@@ -37,6 +38,12 @@ def _radial_extra_hud_dir() -> Path:
     return base / "assets" / "hud" / "menu radial"
 
 
+# Diretório dos assets da tela de boas-vindas (TB-17)
+def _welcome_hud_dir() -> Path:
+    base = resource_root()
+    return base / "assets" / "hud" / "boas-vindas"
+
+
 
 class RadialOverlayMixin:
     """Mixin com métodos de desenho e animação para radial."""
@@ -57,15 +64,22 @@ class RadialOverlayMixin:
             self._radial_progress = max(target, self._radial_progress - step)
 
     def _radial_icon(self, name: str, active: bool) -> QPixmap | None:
-        key = (name, "ativo" if active else "normal")
+        clean_name = name[:-4] if name.lower().endswith(".png") else name
+        key = (clean_name, "ativo" if active else "normal")
         cached = self._radial_cache.get(key)
         if cached is not None:
             return cached
-        filename = f"{name}-ativo.png" if active else f"{name}.png"
+        filename = f"{clean_name}-ativo.png" if active else f"{clean_name}.png"
         path = _radial_icons_dir() / filename
         if not path.is_file():
-            filename = f"{name.lower()}-ativo.png" if active else f"{name.lower()}.png"
+            filename = f"{clean_name.lower()}-ativo.png" if active else f"{clean_name.lower()}.png"
             path = _radial_icons_dir() / filename
+        if not path.is_file() and active:
+            filename = f"{clean_name}.png"
+            path = _radial_icons_dir() / filename
+            if not path.is_file():
+                filename = f"{clean_name.lower()}.png"
+                path = _radial_icons_dir() / filename
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             return None
@@ -179,6 +193,8 @@ class RadialOverlayMixin:
         # TB-16: Informações extras no menu radial (card superior e instruções inferiores)
         self._draw_radial_top_info(painter, center, scale)
         self._draw_radial_bottom_instructions(painter, center, scale, snapshot)
+        # TB-17: Banner superior de boas-vindas no menu radial (slide-in / slide-out)
+        self._draw_radial_welcome_top_banner(painter, snapshot, scale)
 
     def _get_radial_top_info_key(self, snapshot: OverlaySnapshot) -> str | None:
         if not snapshot.radial_active or snapshot.radial_selection is None:
@@ -390,3 +406,58 @@ class RadialOverlayMixin:
         painter.translate(-banner_center.x(), -banner_center.y())
         painter.drawPixmap(banner_rect.toRect(), pix)
         painter.restore()
+
+    def _draw_radial_welcome_top_banner(
+        self,
+        painter: QPainter,
+        snapshot: OverlaySnapshot,
+        scale: float,
+    ) -> None:
+        progress = self._radial_progress
+        if progress <= 0.0 or not snapshot.game_rect.valid:
+            return
+
+        cfg = self.config.get()
+        overlay_cfg = cfg.get("overlay", {})
+        layout_cfg = str(overlay_cfg.get("controller_layout", "auto")).lower()
+        if layout_cfg in ("xbox", "playstation", "nintendo"):
+            controller_type = layout_cfg
+        else:
+            controller_type = snapshot.controller_type or controller_type_from_name(snapshot.controller_name)
+        if controller_type not in ("playstation", "nintendo", "xbox"):
+            controller_type = "xbox"
+
+        filename = f"radial-info-{controller_type}.png"
+        pix = self._radial_welcome_pixmap(filename)
+        if not pix or pix.isNull():
+            return
+
+        scale_banner = snapshot.game_rect.height / 768.0
+        w = int(round(pix.width() * scale_banner))
+        h = int(round(pix.height() * scale_banner))
+        center_x = snapshot.game_rect.width / 2.0
+        x = int(round(center_x - w / 2.0))
+
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        # Sem offset: y atinge 0 (topo local do overlay) com eased == 1 (slide-in / slide-out)
+        y = int(round(-h * (1.0 - eased)))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setOpacity(eased)
+        painter.drawPixmap(QRect(x, y, w, h), pix)
+        painter.restore()
+
+    def _radial_welcome_pixmap(self, filename: str) -> QPixmap | None:
+        if not hasattr(self, "_radial_welcome_cache"):
+            self._radial_welcome_cache: dict[str, QPixmap] = {}
+        if filename in self._radial_welcome_cache:
+            return self._radial_welcome_cache[filename]
+        path = _welcome_hud_dir() / filename
+        if not path.is_file():
+            return None
+        pix = QPixmap(str(path))
+        if pix.isNull():
+            return None
+        self._radial_welcome_cache[filename] = pix
+        return pix
