@@ -2492,4 +2492,151 @@ class DiscreteBindingsR3Tests(unittest.TestCase):
             self.assertEqual(len(mouse_events), 0)
 
 
+class DebugSequenceTests(unittest.TestCase):
+    def _make_engine(self, directory: str) -> tuple[BridgeEngine, SharedOverlayState, FakeInjector]:
+        config = ConfigManager(Path(directory) / "perfil.json")
+        shared = SharedOverlayState()
+        engine = BridgeEngine(config, shared)
+        injector = FakeInjector()
+        engine.injector = injector  # type: ignore[assignment]
+        return engine, shared, injector
+
+    def _send_dpad_step(self, engine, hub, rect, cfg, button: str, now: float) -> None:
+        state_down = ControllerState(connected=True, buttons=frozenset({"lb", button}))
+        engine._process_active(hub, state_down, rect, cfg, now, 0.05)
+        engine._previous = state_down
+        state_up = ControllerState(connected=True, buttons=frozenset({"lb"}))
+        engine._process_active(hub, state_up, rect, cfg, now + 0.01, 0.05)
+        engine._previous = state_up
+
+    def test_debug_sequence_toggles_calibration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+
+            seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
+            t = 1.0
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            # Modo debug deve estar ativado
+            self.assertTrue(engine.config.get()["overlay"]["show_calibration"])
+            self.assertEqual(shared.get().toast_text, "Menu de debug ativado")
+            self.assertTrue(engine._radial_dismissed)
+
+            # Executa novamente para desativar
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+            self.assertEqual(shared.get().toast_text, "Menu de debug desativado")
+
+    def test_debug_sequence_resets_if_lb_released(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            t = 1.0
+            for btn in ("dpad_up", "dpad_up", "dpad_down"):
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            # Solta LB completamente
+            state_empty = ControllerState(connected=True, buttons=frozenset())
+            engine._process_active(hub, state_empty, rect, cfg, t, 0.05)
+            engine._previous = state_empty
+            t += 0.1
+
+            # Tenta continuar o restante da sequência
+            for btn in ("dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right"):
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+
+    def test_debug_sequence_resets_on_wrong_button(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            t = 1.0
+            self._send_dpad_step(engine, hub, rect, cfg, "dpad_up", t)
+            t += 0.1
+            self._send_dpad_step(engine, hub, rect, cfg, "dpad_up", t)
+            t += 0.1
+
+            # Pressiona A enquanto segura LB
+            state_a = ControllerState(connected=True, buttons=frozenset({"lb", "a"}))
+            engine._process_active(hub, state_a, rect, cfg, t, 0.05)
+            engine._previous = state_a
+            t += 0.1
+
+            for btn in ("dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right"):
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+
+    def test_debug_sequence_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            t = 1.0
+            self._send_dpad_step(engine, hub, rect, cfg, "dpad_up", t)
+            t += 0.1
+            self._send_dpad_step(engine, hub, rect, cfg, "dpad_up", t)
+
+            # Espera 3 segundos (> 2.5s timeout)
+            t += 3.0
+
+            for btn in ("dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right"):
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+
+    def test_debug_sequence_suppresses_dpad_in_title_menu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            from torchbridge.memory import GameMemoryState
+            engine._memory_state = GameMemoryState(
+                is_connected=True,
+                is_in_game=False,
+                state_id=0,
+            )
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            engine._title_focus = "continue"
+
+            # Sem LB: dpad_down move o foco do menu principal
+            state_down = ControllerState(connected=True, buttons=frozenset({"dpad_down"}))
+            engine._process_active(hub, state_down, rect, cfg, 1.0, 0.05)
+            engine._previous = state_down
+            self.assertNotEqual(engine._title_focus, "continue")
+
+            # Reset do foco
+            engine._title_focus = "continue"
+
+            # Com LB: dpad_down é consumido para a sequência e NÃO mexe no menu
+            state_lb_down = ControllerState(connected=True, buttons=frozenset({"lb", "dpad_down"}))
+            engine._process_active(hub, state_lb_down, rect, cfg, 1.1, 0.05)
+            engine._previous = state_lb_down
+            self.assertEqual(engine._title_focus, "continue")
+
+
 

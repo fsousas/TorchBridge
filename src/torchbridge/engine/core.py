@@ -127,6 +127,17 @@ class BridgeEngineCore(threading.Thread):
     _SKILL_REPEAT_INTERVAL = 0.12
     _MODIFIER_RELEASE_RETRY_INTERVAL = 0.005
     PET_PANEL_CLOSE_DELAY = 0.5
+    DEBUG_SEQUENCE: tuple[str, ...] = (
+        "dpad_up",
+        "dpad_up",
+        "dpad_down",
+        "dpad_down",
+        "dpad_left",
+        "dpad_right",
+        "dpad_left",
+        "dpad_right",
+    )
+    DEBUG_SEQUENCE_TIMEOUT: float = 2.5
 
     def __init__(self, config: ConfigManager, shared: SharedOverlayState) -> None:
         super().__init__(name="TorchBridgeInput", daemon=True)
@@ -365,6 +376,9 @@ class BridgeEngineCore(threading.Thread):
         self._last_quest_slot: int = 0
         self._quest_b_consumed: bool = False
         self._a_shift_held: bool = False
+        # Sequência no controle para alternar o Menu de Debug (L1 + D-Pad)
+        self._debug_sequence_history: list[str] = []
+        self._debug_sequence_last_time: float = 0.0
 
     def _reset_active_panels(self) -> None:
         self._active_panels = ["", ""]
@@ -513,6 +527,7 @@ class BridgeEngineCore(threading.Thread):
                 self._held_mouse.discard(button)
 
     def _release_all(self) -> None:
+        self._debug_sequence_history.clear()
         self._cancel_fishing_click()
         self._skill_repeat_at.clear()
         self._skill_repeat_sources.clear()
@@ -992,6 +1007,80 @@ class BridgeEngineCore(threading.Thread):
                            blocked_interactions=native.blocked_interactions,
                            blocked_warps=native.blocked_warps)
 
+    def _toggle_debug_mode(self, hub: ControllerHub) -> bool:
+        """Alterna a exibição do modo/menu de debug (calibração e diagnóstico de memória)."""
+        cfg = self.config.get()
+        current = bool(cfg.get("overlay", {}).get("show_calibration", False))
+        new_state = not current
+        self.config.set_show_calibration(new_state)
+        label = "ativado" if new_state else "desativado"
+        self.shared.toast(f"Menu de debug {label}", 3.0)
+        log.info("Menu de debug alternado: %s", label)
+        if hub and hasattr(hub, "rumble"):
+            hub.rumble(0.08, 0.20, 150)
+        return new_state
+
+    def _handle_debug_sequence(
+        self,
+        hub: ControllerHub,
+        state: ControllerState,
+        now: float,
+    ) -> bool:
+        """Detecta a sequência com L1 (LB) segurado para alternar o menu de debug.
+        
+        Sequência: D-Pad Cima, Cima, Baixo, Baixo, Esquerda, Direita, Esquerda, Direita.
+        """
+        if not state.pressed("lb"):
+            if self._debug_sequence_history:
+                self._debug_sequence_history.clear()
+            return False
+
+        # Qualquer outro botão de ação cancela a sequência em andamento
+        other_buttons = ("a", "b", "x", "y", "rb", "start", "back", "l3", "r3")
+        for btn in other_buttons:
+            if state.pressed(btn) and not self._previous.pressed(btn):
+                self._debug_sequence_history.clear()
+                return False
+
+        # Identifica borda de subida (rising edge) nos direcionais do D-Pad
+        dpad_pressed: str | None = None
+        for btn in ("dpad_up", "dpad_down", "dpad_left", "dpad_right"):
+            if state.pressed(btn) and not self._previous.pressed(btn):
+                dpad_pressed = btn
+                break
+
+        if dpad_pressed is None:
+            return False
+
+        # Timeout entre toques na sequência
+        if self._debug_sequence_history and (now - self._debug_sequence_last_time > self.DEBUG_SEQUENCE_TIMEOUT):
+            self._debug_sequence_history.clear()
+
+        self._debug_sequence_last_time = now
+        self._debug_sequence_history.append(dpad_pressed)
+
+        # Checa se completou a sequência completa
+        seq_len = len(self.DEBUG_SEQUENCE)
+        if tuple(self._debug_sequence_history[-seq_len:]) == self.DEBUG_SEQUENCE:
+            self._debug_sequence_history.clear()
+            self._toggle_debug_mode(hub)
+            self._radial_dismissed = True
+            self._radial_selection = None
+            self._pet_submenu = False
+            return True
+
+        # Reduz histórico para o maior sufixo que ainda coincida com o prefixo da sequência
+        for k in range(min(len(self._debug_sequence_history), seq_len - 1), 0, -1):
+            if tuple(self._debug_sequence_history[-k:]) == self.DEBUG_SEQUENCE[:k]:
+                self._debug_sequence_history = self._debug_sequence_history[-k:]
+                if hub and hasattr(hub, "rumble"):
+                    hub.rumble(0.02, 0.05, 20)
+                break
+        else:
+            self._debug_sequence_history.clear()
+
+        return False
+
     def _process_active_inputs(
         self,
         hub: ControllerHub,
@@ -1002,6 +1091,24 @@ class BridgeEngineCore(threading.Thread):
         dt: float,
     ) -> None:
         self._update_trigger_edges(state)
+
+        # Sequência para habilitar/desabilitar Menu de Debug (segurar L1 + D-Pad)
+        if not state.pressed("lb"):
+            self._debug_sequence_history.clear()
+        else:
+            in_radial_or_pet = bool(
+                getattr(self, "_radial_selection", None) is not None
+                or getattr(self, "_pet_submenu", False)
+            )
+            if not in_radial_or_pet:
+                debug_triggered = self._handle_debug_sequence(hub, state, now)
+                state = replace(
+                    state,
+                    buttons=frozenset(b for b in state.buttons if not b.startswith("dpad_")),
+                )
+                if debug_triggered:
+                    self._previous_panels = tuple(self._active_panels)
+                    return
         # Tela de Boas-Vindas (TB-17) - Bloqueio modal absoluto de comandos para as camadas inferiores
         if getattr(self, "_welcome_open", False) and not (
             hasattr(self, "_is_welcome_suppressed") and self._is_welcome_suppressed()
