@@ -93,7 +93,7 @@ def remove(exe: Path) -> None:
         raise FileNotFoundError("Nenhuma instalação gerenciada do overlay foi encontrada")
     if target.is_symlink() or manifest.is_symlink():
         raise ValueError("A instalação contém links; nenhum arquivo foi removido")
-    record = json.loads(manifest.read_text(encoding="utf-8"))
+    record = json.loads(manifest.read_text(encoding="utf-8-sig"))
     data = target.read_bytes()
     validate_x86(data, dll=True)
     if (not isinstance(record, dict) or record.get("owner") != "TorchBridge" or

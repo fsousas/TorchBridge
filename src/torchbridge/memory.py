@@ -14,6 +14,9 @@ import re
 import struct
 import time
 
+from .world import WorldSnapshot
+from .world_memory import WorldMemoryReader
+
 log = logging.getLogger(__name__)
 
 PROCESS_VM_READ = 0x0010
@@ -48,6 +51,7 @@ OFFSET_CHAR_NAME_LEN = 0x88
 OFFSET_UI_STATE      = 0x169C  # CGameUI -> Estado ativo do gameplay / transição de nível (6: em jogo, != 6: transição/carregando)
 OFFSET_HOVER_ENTITY  = 0x01BC  # CGameClient -> ponteiro para a entidade sob o cursor (0 = chão)
 OFFSET_HOVER_FLAG    = 0x01C0  # CGameClient -> tipo do hover (0 = chão, 1 = Baú/Item, 2 = NPC)
+OFFSET_HOVER_ITEM    = 0x01C4  # CGameClient -> hover de props/itens, inclusive portais e escadas
 
 MAIN_MENU_STATES: dict[int, str] = {
     0: "Tela Inicial",
@@ -220,6 +224,8 @@ class GameMemoryState:
     state_desc: str = "Aguardando jogo..."
     is_loading: bool = False
     is_in_game: bool = False
+    is_cutscene: bool = False
+    is_fishing: bool = False
     is_menu_open: bool = False
     open_menus: list[str] = field(default_factory=list)
     recommended_mode: str = "direct"  # "direct", "cursor", "blocked"
@@ -248,6 +254,8 @@ class GameMemoryState:
     # Hover / Interação no Overworld
     is_hover_interactive: bool = False
     hover_flag: int = 0
+    hover_entity: int = 0
+    world: WorldSnapshot = field(default_factory=WorldSnapshot)
 
 
 class TorchlightMemoryReader:
@@ -274,10 +282,12 @@ class TorchlightMemoryReader:
             "music_mute": False,
         }
         self._last_disk_check: float = 0.0
+        self._world_reader = WorldMemoryReader(self)
         self._cached_gui_3501_base_ptr: int | None = None
         self._cached_gui_3501_icons: dict[tuple[int, int], int] = {}
 
     def close(self) -> None:
+        self._world_reader.reset()
         if self._linux is not None:
             self._linux.close()
         if self._handle:
@@ -387,6 +397,7 @@ class TorchlightMemoryReader:
             connected = self._linux.attach(target_pid)
             new_session = (self._linux.pid, self._linux.start)
             if old_session != new_session or not connected:
+                self._world_reader.reset()
                 self._handle = None
                 self.pid = None
                 self._module_base = self._module_size = 0
@@ -467,6 +478,82 @@ class TorchlightMemoryReader:
                 return address
         # Still starting: do not publish an unverified version/address.
         self.game_version = ""
+        return None
+
+    def read_bytes(self, address: int, size: int) -> bytes:
+        """Exact, bounded PE32 read shared by world data on Windows and Proton."""
+        if (not self._handle or not isinstance(address, int) or not isinstance(size, int)
+                or not 0 < size <= 1024 * 1024 or not 0x10000 <= address < 0x100000000
+                or address + size > 0x100000000):
+            return b""
+        if self._linux is not None:
+            raw = self._linux.read(address, size)
+            return raw if len(raw) == size else b""
+        buf = ctypes.create_string_buffer(size)
+        count = ctypes.c_size_t()
+        if kernel32.ReadProcessMemory(self._handle, ctypes.c_void_p(address), buf, size, ctypes.byref(count)):
+            if count.value == size:
+                return buf.raw
+        return b""
+
+    def find_export(self, module_name: str, export_name: str) -> int | None:
+        """Read a PE32 export in the selected process, including Wine/ASLR.
+
+        The input endpoint is discovered in this process's memory, not in a
+        shared file or by guessing a Windows PID from the Linux PID.
+        """
+        if not self._handle or not self.pid:
+            return None
+        bases = []
+        if self._linux is not None:
+            from .linux_process import mapped_files
+            try:
+                maps = (self._linux.proc / str(self.pid) / "maps").read_text()
+            except OSError:
+                return None
+            bases = [start for start, _, offset, path in mapped_files(maps)
+                     if offset == 0 and Path(path).name.casefold() == module_name.casefold()]
+        else:
+            modules = (wintypes.HMODULE * 256)()
+            count = wintypes.DWORD()
+            if not psapi.EnumProcessModulesEx(self._handle, modules, ctypes.sizeof(modules),
+                                              ctypes.byref(count), LIST_MODULES_32BIT):
+                return None
+            for base in modules[:min(256, count.value // ctypes.sizeof(wintypes.HMODULE))]:
+                name = ctypes.create_unicode_buffer(32768)
+                if psapi.GetModuleFileNameExW(self._handle, base, name, len(name)):
+                    if Path(name.value).name.casefold() == module_name.casefold():
+                        bases.append(int(base))
+        for base in dict.fromkeys(bases):
+            header = self.read_bytes(base, 64)
+            if len(header) != 64 or header[:2] != b"MZ":
+                continue
+            pe = base + struct.unpack_from("<I", header, 60)[0]
+            optional = self.read_bytes(pe, 128)
+            if (len(optional) != 128 or optional[:4] != b"PE\0\0"
+                    or struct.unpack_from("<H", optional, 24)[0] != 0x10B):
+                continue
+            rva, size = struct.unpack_from("<II", optional, 120)
+            if not rva or size > 1024 * 1024:
+                continue
+            table = self.read_bytes(base + rva, 40)
+            if len(table) != 40:
+                continue
+            functions, names, function_rva, name_rva, ordinal_rva = struct.unpack_from("<5I", table, 20)
+            if not 0 < names <= 2048 or not 0 < functions <= 4096:
+                continue
+            for index in range(names):
+                string_rva = self.read_u32(base + name_rva + index * 4)
+                name = self.read_bytes(base + string_rva, 64) if string_rva else b""
+                if name.split(b"\0", 1)[0] != export_name.encode("ascii"):
+                    continue
+                raw = self.read_bytes(base + ordinal_rva + index * 2, 2)
+                if len(raw) != 2:
+                    continue
+                ordinal = struct.unpack("<H", raw)[0]
+                entry = self.read_u32(base + function_rva + ordinal * 4) if ordinal < functions else None
+                if entry and not rva <= entry < rva + size:
+                    return base + entry
         return None
 
     def read_u32(self, address: int) -> int | None:
@@ -768,6 +855,8 @@ class TorchlightMemoryReader:
 
         p_modal = self.read_u32(p_ui + 0x0304)
         is_modal_open = (self.read_u8(p_modal + 0x18) == 1) if p_modal else False
+        p_tip = self.read_u32(p_ui + 0x0308)
+        is_tip_open = (self.read_u8(p_tip + 0x18) == 1) if p_tip else False
 
         # Loading screen
         p_loading = self.read_u32(p_ui + 0x0298)
@@ -807,16 +896,16 @@ class TorchlightMemoryReader:
                 music_volume=music_vol,
             )
 
-        if is_modal_open:
+        if is_modal_open or is_tip_open:
             return GameMemoryState(
                 is_connected=True,
                 pid=self.pid,
                 game_version=self.game_version,
                 state_id=main_state_id,
-                state_desc="Confirmação / Sair",
+                state_desc="Confirmação / Sair" if is_modal_open else "Dica (Tutorial)",
                 is_in_game=(main_state_id == 6),
                 is_menu_open=True,
-                open_menus=["Confirmação Sair"],
+                open_menus=["Confirmação Sair" if is_modal_open else "Dica (Tutorial)"],
                 recommended_mode="cursor",
                 save_count=self._cached_save_count,
                 sound_volume=sound_vol,
@@ -899,12 +988,26 @@ class TorchlightMemoryReader:
         dialog_quest_title = ""
         dialog_has_item_reward = False
 
-        # 1. Tela de História / Cinemática (CCinematicMenu em +0x0300)
+        # 1. Tela de História / Cinemática / Cutscene (CCinematicMenu em +0x0300)
+        # O motor do Torchlight (CGameUI::IsCinematicActive) verifica:
+        # byte(+0x18) != 0 OU byte(+0x19) == 0.
+        # Quando ativo com botão Continue visível (+0x70), é uma Tela de História (vignette);
+        # caso contrário (ex: cenas automáticas com barras pretas letterbox no jogo), é uma Cutscene.
+        is_cutscene = False
         p_cine = self.read_u32(p_ui + 0x0300)
-        if p_cine and self.read_u8(p_cine + 0x18) == 1:
-            dialog_type = "historia"
-            dialog_buttons = ["continue"]
-            open_menus.append("Tela de História")
+        if p_cine:
+            cine_open = self.read_u8(p_cine + 0x18) or 0
+            cine_flag = self.read_u8(p_cine + 0x19)
+            if cine_open != 0 or (cine_flag is not None and cine_flag == 0):
+                is_cutscene = True
+                p_skip = self.read_u32(p_cine + 0x70)
+                skip_vis = (self.read_u8(p_skip + 0x1A0) == 1) if p_skip else False
+                if skip_vis:
+                    dialog_type = "historia"
+                    dialog_buttons = ["continue"]
+                    open_menus.append("Tela de História")
+                else:
+                    open_menus.append("Cutscene")
 
         # 2. Diálogos de Missões e NPCs (CQuestDialogMenu em +0x02FC ou CDialogMenu em +0x02F8)
         p_qdialog = self.read_u32(p_ui + 0x02FC)
@@ -1096,19 +1199,27 @@ class TorchlightMemoryReader:
         # hover_flag: 0 = chão, 1 = Baú/Item, 2 = NPC.
         hover_ptr = self.read_u32(p_client + OFFSET_HOVER_ENTITY) or 0
         hover_flag = self.read_u32(p_client + OFFSET_HOVER_FLAG) or 0
-        is_hover_interactive = bool(hover_ptr > 0x00400000 and hover_flag in (1, 2))
+        hover_item = self.read_u32(p_client + OFFSET_HOVER_ITEM) or 0
+        is_hover_interactive = bool((hover_ptr > 0x00400000 and hover_flag in (1, 2))
+                                   or hover_item > 0x00400000)
 
         is_menu_open = len(open_menus) > 0
+        if is_cutscene:
+            state_desc_game = "Cutscene" if "Cutscene" in open_menus else "Tela de História"
+        else:
+            state_desc_game = "Em Jogo"
+
         return GameMemoryState(
             is_connected=True,
             pid=self.pid,
             game_version=self.game_version,
             state_id=6,
-            state_desc="Em Jogo",
+            state_desc=state_desc_game,
             is_in_game=True,
+            is_cutscene=is_cutscene,
             is_menu_open=is_menu_open,
             open_menus=open_menus,
-            recommended_mode="cursor" if is_menu_open else "direct",
+            recommended_mode="blocked" if (is_cutscene and not dialog_buttons) else ("cursor" if is_menu_open else "direct"),
             save_count=self._cached_save_count,
             sound_volume=sound_vol,
             music_volume=music_vol,
@@ -1131,4 +1242,7 @@ class TorchlightMemoryReader:
             quest_has_item_reward=quest_has_item_reward,
             is_hover_interactive=is_hover_interactive,
             hover_flag=hover_flag,
+            hover_entity=hover_ptr or hover_item,
+            is_fishing=self.read_u32(p_player + 0x284) in (32, 33, 34),
+            world=self._world_reader.read(p_client, p_player, time.monotonic()),
         )

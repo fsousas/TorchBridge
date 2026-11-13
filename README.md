@@ -10,7 +10,8 @@ O motor, os menus, o teclado virtual, os perfis e os desenhos são compartilhado
 
 No Windows, usa `SendInput`, overlay Qt e um módulo Direct3D 9 opcional para
 fullscreen exclusivo. No Omarchy, usa entrada virtual e overlay Wayland acima do
-fullscreen, sem DLL no jogo. Instalação, Steam/Proton, permissões, matriz de
+fullscreen. O movimento seguro usa um módulo x86 no jogo nos dois sistemas.
+Instalação, Steam/Proton, permissões, matriz de
 funcionalidades e evidências: **[docs/LINUX.md](docs/LINUX.md)**.
 
 ### Começar no Omarchy
@@ -48,6 +49,9 @@ separadas na matriz de validação.
 - rastreador de painéis abertos pela roda (C/P à esquerda, I/S/Q/J à direita), com
   indicador discreto no topo central do overlay;
 - envio de comandos somente quando o jogo está em primeiro plano;
+- leitura das posições do jogador e dos elementos interativos do cenário;
+- aviso de proximidade com ícones por controle: **A/×** coleta itens no chão e ataca destrutíveis,
+  **D-pad para cima** interage com os demais elementos;
 - liberação automática de cliques e teclas ao trocar de janela;
 - calibração do ponto central do personagem dentro do jogo;
 - perfil JSON editável e recarregado automaticamente;
@@ -110,19 +114,25 @@ Detalhes, limites e roteiro: [docs/FULLSCREEN.md](docs/FULLSCREEN.md).
 
 | Controle | Ação no Torchlight |
 | --- | --- |
-| Analógico esquerdo | Movimento direto; mantém o clique na direção escolhida |
+| Analógico esquerdo | Movimento pela navegação nativa; cursor acompanha a mira |
 | Analógico direito | Mira e cursor |
 | A / Cruz (botão de baixo) | Clique esquerdo: atacar, mover, coletar e confirmar |
 | X / Quadrado (botão da esquerda) | Clique direito: habilidade secundária |
-| B / Círculo | Atalho 1 |
-| Y / Triângulo | Atalho 2 |
-| Direcional cima/direita/baixo/esquerda | Atalhos 5/6/7/8 |
+| B / Círculo | Atalho 2, repete enquanto segurado |
+| Y / Triângulo | Atalho 1, repete enquanto segurado |
+| Direcional cima | Interagir com o elemento próximo indicado no overlay |
+| Direcional direita | Tab, mapa/minimapa |
+| Direcional esquerda | Aciona o botão roxo da HUD e retorna o cursor |
 | Segurar LB / L1 + analógico direito | Roda de atalhos 1–6 |
-| RB / R1 | Segura Shift, para atacar sem avançar |
-| L3 | Segura Alt, para exibir itens |
-| R3 | Tab, mapa/minimapa |
+| RB / R1 | Atalho 3, repete enquanto segurado |
+| RT / R2 | Atalho 4, repete enquanto segurado |
+| LT / L2 + A, X, Y, B, RB, RT | Atalhos 5, 6, 7, 8, 9, 0; repetem enquanto segurados |
+| R3 | Clique esquerdo |
 | Back / Create / Select | Alterna entre movimento direto e modo cursor |
 | Start / Options | Esc, menus e retorno |
+
+As habilidades de 1 a 0 são acionadas novamente a cada 120 ms enquanto o botão
+estiver pressionado. O próprio jogo controla cooldown, mana e tempo de execução.
 
 Na roda, a posição superior é o atalho 1 e as demais seguem no sentido horário.
 O botão A confirma a seleção (com a roda aberta, A e X não geram clique de
@@ -138,20 +148,72 @@ e âncora à direita), mantendo o alvo na área visível.
 
 ## Modos de uso
 
+### Elementos próximos (TB-18)
+
+Em movimento direto, aproxime-se de um NPC, portal, escadas, fonte, porta,
+alavanca ou local de pesca. O overlay indica o alvo mais próximo; pressione
+**D-pad ↑** para interagir. O módulo valida a instância e o alcance no próprio jogo. Segurar não repete a ação.
+
+Se o NPC estiver dentro do raio, mas além do alcance da conversa, o personagem
+se aproxima pela navegação do jogo antes de conversar. Mover o analógico durante
+essa aproximação cancela a conversa pendente e retoma a caminhada imediatamente.
+
+Barris comuns, explosivos e demais destrutíveis recebem um ataque com **A (Xbox/Nintendo)**
+ou **× (PlayStation)**, com o ícone `interact-*.png`,
+mantendo o personagem parado. O ataque usa a habilidade configurada no clique
+esquerdo, com o alcance, mana e cooldown dela; quando esse slot usa ataque comum,
+vale o alcance da arma. O jogo verifica obstáculos e disponibilidade da ação.
+Fora de alcance, o personagem permanece parado, sem caminhar até o objeto.
+O raio de seleção dos destrutíveis é o dobro do raio comum: 9 unidades no padrão
+de 4,5. Fishing holes têm um círculo próprio de pelo menos 2,5 unidades;
+a interação fica disponível quando esse círculo toca o raio do personagem.
+Para pesca, a altura do píer em relação à água não bloqueia essa seleção.
+Na interface de pesca, somente os botões sul e leste funcionam: no Xbox e
+PlayStation, sul faz um clique esquerdo simples no anzol e leste clica 50 px
+acima para fechar. No Nintendo, essas duas ações são invertidas. Os cliques
+liberam os modificadores anteriores e não usam Shift ou Ctrl.
+
+Itens, equipamentos e ouro no chão usam **A (Xbox/Nintendo)** ou **× (PlayStation)**
+para coleta nativa. O aviso usa `interact-*.png` para coletas e destrutíveis e
+`dpad-up-*.png` para os demais elementos, seguindo a família do controle ou o
+layout escolhido na HUD. Só a indicação do botão é substituída por imagem;
+nome, informações e distância continuam visíveis. Quando Alt/D-pad ← mostra
+o nome nativo de um objeto usado pelo D-pad ↑, aparece somente o ícone à
+esquerda desse tooltip, usando o novo ícone com fundo claro em 48 px.
+NPCs mantêm suas informações completas.
+Segurar a coleta não vira
+ataque quando o item desaparece: é preciso soltar o botão antes de outra ação.
+Concluir uma coleta ou um ataque a destrutível libera a caminhada sem a espera
+extra de 1,5 s; a duração normal da ação do jogo continua sendo respeitada.
+
+Ao ativar **Modo de calibração** no ícone TB, o overlay também mostra as
+coordenadas, os marcadores dos elementos do cenário e o raio de interação.
+Mercadores e NPCs com missão recebem identificação própria, incluindo missão
+disponível, em andamento ou pronta para entregar, conforme o marcador do jogo.
+
+Coordenadas X/Y, raio configurável, lista completa em JSON, limites e validação
+Windows/Omarchy: [docs/POSICIONAMENTO.md](docs/POSICIONAMENTO.md).
+
 ### Movimento direto
 
-É o modo padrão para exploração e combate. Ao inclinar o analógico esquerdo, o
-TorchBridge coloca o cursor em um raio ao redor do herói e mantém o clique
-esquerdo. Isso aproveita o próprio sistema de `click-to-move` do Torchlight e dá
-sensação de controle direto sem alterar o jogo.
+O analógico esquerdo envia destinos à navegação do próprio jogo e pede parada
+quando volta ao centro. Durante a caminhada, o cursor acompanha a mira indicada
+pelo analógico, sem manter clique esquerdo. Ao soltar o analógico, o cursor fica
+na última posição. O alvo interativo mais próximo recebe o highlight nativo, sem precisar
+apontar o mouse, e **D-pad ↑** envia a interação explícita. Segurar não repete.
 
-O analógico direito assume o cursor quando é movimentado. Use o botão A
-(clique esquerdo) para atacar e o X (clique direito) para lançar uma
-habilidade na posição indicada.
+O TorchBridge prepara automaticamente a integração nas instalações Steam/GOG
+reconhecidas. Abra o aplicativo e o jogo normalmente; se o Torchlight já estava
+aberto durante uma atualização, reinicie o jogo uma vez. No Omarchy, a ativação
+fica associada ao Torchlight no Proton e o próprio módulo fornece acesso somente
+de leitura, sem exigir --launch. Na calibração aparecem estado, direção, destino, highlight
+e eventuais bloqueios. Instalação, tipos cobertos e detalhes:
+[Movimento seguro](docs/MOVIMENTO-SEGURO.md).
 
-Ao devolver o analógico esquerdo ao centro, o cursor volta automaticamente para
-a âncora do herói — o próximo `click-to-move` nasce no centro e não cai em cima
-de um NPC ou inimigo.
+O analógico direito continua movendo a mira. O ataque comum com A/Cruz usa Shift
+no overworld; coleta e ataque a destrutíveis selecionados usam os comandos nativos
+descritos acima.
+X/Quadrado usa a habilidade do clique direito. Menus suspendem a caminhada.
 
 ### Cursor / menus
 
@@ -217,8 +279,8 @@ Os campos mais úteis são:
 
 - `deadzone`: aumente se o personagem andar sozinho; reduza para maior resposta.
 - `response_curve`: maior deixa o começo do analógico mais preciso.
-- `movement_radius_percent`: raio circular do click-to-move, em fração da altura da janela (mesmo alcance nos eixos x e y). Aumente se o personagem andar pouco.
-- `click_center_fraction`: a que distância da âncora (em fração do raio) o cursor começa ao sair da deadzone. É onde o clique do click-to-move cai. Baixo = clique mais perto do herói (não acerta NPC/inimigo); o cursor depois cresce até o raio cheio conforme o stick é empurrado.
+- `movement_radius_percent`: raio da mira e do cursor durante a caminhada, em fração da altura da janela.
+- `click_center_fraction`: alcance inicial da mira e do cursor ao sair da deadzone; não gera cliques nem determina o destino nativo.
 - `speed_pixels_per_second`: velocidade do cursor analógico.
 - `bindings`: troca as teclas ligadas aos botões e à roda 1–6.
 - `overlay.enabled`: use `false` para desligar somente os elementos visuais.
@@ -263,6 +325,12 @@ Esse comando funciona no Windows e Linux, simulando as fronteiras de entrada nos
 testes do motor e forçando Qt offscreen. Ele não envia entrada ao desktop nem
 executa o jogo. O smoke test opt-in Linux e a validação de integração estão em
 [docs/LINUX.md](docs/LINUX.md).
+
+A suíte também verifica sinais Qt e o encerramento normal de um subprocesso:
+uma extensão pode abortar depois de todos os testes terem passado. No Python
+3.11, o projeto exclui PySide6 6.12.0 devido ao
+[erro de referências PYSIDE-3474](https://qt-project.atlassian.net/browse/PYSIDE-3474).
+Instale as dependências com `python -m pip install -e .` para aplicar essa restrição.
 
 ## Limite técnico honesto
 

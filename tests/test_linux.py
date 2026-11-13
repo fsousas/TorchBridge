@@ -140,7 +140,7 @@ class LinuxMemoryTests(unittest.TestCase):
                 patch.object(Path, "read_text", return_value="Torchlight.exe"), \
                 patch("torchbridge.linux_process.os.open", side_effect=PermissionError):
             self.assertFalse(process.attach(5))
-        self.assertIn("--launch", process.error)
+        self.assertIn("integração com Torchlight", process.error)
         self.assertIsNone(process.fd)
         self.assertFalse(process.attach(-1))
         self.assertEqual(process.error, "")

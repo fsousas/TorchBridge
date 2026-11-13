@@ -25,6 +25,13 @@
   "cursor": {
     "speed_pixels_per_second": 1450
   },
+  "interaction": {
+    "enabled": true,
+    "button": "dpad_up",
+    "radius": 4.5,
+    "show_prompt": true,
+    "show_positions": false
+  },
   "overlay": {
     "enabled": true,
     "scale": 1.0,

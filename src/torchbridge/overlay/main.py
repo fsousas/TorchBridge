@@ -9,12 +9,14 @@ from .keyboard import VirtualKeyboardOverlayMixin, KeyboardInputSurface
 from .shortcut_config import ShortcutConfigOverlayMixin
 from .calibration import CalibrationOverlayMixin
 from .welcome import WelcomeOverlayMixin
+from .interaction import WorldInteractionOverlayMixin
 
 log = logging.getLogger(__name__)
 
 
 class GameOverlay(
     WelcomeOverlayMixin,
+    WorldInteractionOverlayMixin,
     RadialOverlayMixin,
     BottomHudOverlayMixin,
     PetSubmenuOverlayMixin,

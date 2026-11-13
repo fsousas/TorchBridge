@@ -2,8 +2,13 @@
 
 Padrão do overworld: cada botão dispara uma entrada REAL (SendInput). A/X são
 os cliques de mouse (esquerdo/direito); o resto vira teclas (1..0) ou comandos
-contextuais. O d-pad fica **sem ação** no overworld — o rastreamento da tela
-inicial, que é quem vai usá-lo, ainda não existe.
+contextuais. No overworld, A (Xbox/Nintendo) ou Cruz (PlayStation) coleta o item
+no chão selecionado, antes de disparar ataque/habilidade, ou ataca o destrutível
+selecionado mantendo posição, conforme o alcance da arma. D-pad ↑ usa NPCs e
+outros objetos próximos (TB-18).
+D-pad → alterna o mapa e D-pad ← aciona o botão roxo da HUD. Durante a caminhada,
+o cursor acompanha a mira do analógico sem gerar clique. A interação
+é validada pelo módulo nativo no próprio jogo: [POSICIONAMENTO.md](POSICIONAMENTO.md).
 
 ---
 
@@ -41,7 +46,9 @@ L2+Triângulo  = 7
 L2+Círculo    = 8
 L2+R1         = 9
 L2+R2         = 0
-d-pad      = sem ação
+d-pad ↑    = interagir com o elemento próximo
+d-pad →    = TAB
+d-pad ←    = botão roxo da HUD
 ```
 
 ### Xbox/Genérico
@@ -58,7 +65,9 @@ LT+Y   = 7
 LT+B   = 8
 LT+RB  = 9
 LT+RT  = 0
-d-pad  = sem ação
+d-pad ↑ = interagir com o elemento próximo
+d-pad → = TAB
+d-pad ← = botão roxo da HUD
 ```
 
 ### Nintendo
@@ -75,18 +84,51 @@ ZL+Y   = 7
 ZL+B   = 8
 ZL+R   = 9
 ZL+ZR  = 0
-d-pad  = sem ação
+d-pad ↑ = interagir com o elemento próximo
+d-pad → = TAB
+d-pad ← = botão roxo da HUD
 ```
 
 **Notas técnicas (fechado)**
-- 1..4 (Triângulo/Y, Círculo/B, R1/RB, R2/RT) são **toques na borda de subida**
-  do botão/gatilho — segurar não repete.
+- Habilidades **1..0** disparam ao pressionar e repetem a cada 120 ms enquanto
+  o botão/gatilho continuar pressionado, respeitando o cooldown e os requisitos
+  do jogo. Soltar interrompe a repetição; pressionar novamente dispara de imediato.
+  Isso inclui os seis combos LT/L2/ZL. Trocar o modificador com o botão segurado
+  troca a habilidade repetida. ESC, cliques de inventário, coleta, destrutíveis
+  e D-pad de interação continuam exigindo um novo pressionamento para outra ação.
 - RB/R1/R e R2/ZR/RT **não seguram mais Shift/Alt**. Os holds antigos
   (`rb_hold`/`l3_hold`) foram removidos; se um dia voltarem, voltam como
   binding novo, não reusando as chaves velhas.
 - LT/L2/ZL é o **modificador** do combo 5..0: enquanto o gatilho está ativo
   (≥ 0.50), o botão face dispara o combo em vez do toque/clique comum.
-- O d-pad é **botão morto** no overworld.
+- D-pad ↑ usa a ação de proximidade; D-pad ↓ e L3 podem substituí-lo por
+  `interaction.button`. A ação só funciona em movimento direto, sem menus,
+  roda ou combo de combate. D-pad ← e → mantêm suas ações de HUD/mapa.
+- Coleta de `loot`/`gold` usa A físico (Xbox/Nintendo) ou Cruz (PlayStation),
+  consome o botão antes de ataque/habilidade e exige liberação antes de outro
+  uso. No Nintendo, A físico corresponde ao lógico `b` do SDL. D-pad ↑ não
+  coleta esses itens nem ataca destrutíveis. Barris e outros `breakable` usam
+  esse mesmo A/Cruz para ataque nativo, sem aproximação ou clique adicional.
+  O ataque usa a habilidade do slot esquerdo e seu alcance, ou o ataque básico
+  quando o slot está configurado para a arma.
+  O tooltip usa `interact-*.png` para coleta e destrutíveis e
+  `dpad-up-*.png` para os demais objetos. Para props com nome nativo visível
+  pelo Alt/D-pad ←, o overlay desenha apenas o ícone à esquerda desse nome.
+  Sem o nome nativo, mostra ícone, nome e distância; NPCs mantêm o aviso completo.
+
+## Interface de pesca
+
+O minigame recebe input antes dos handlers gerais de navegação e combate.
+No Xbox e PlayStation, somente sul (A/Cruz) e leste (B/Círculo) executam ações:
+sul clica no anzol e leste clica exatamente 50 pixels de tela acima para fechar.
+No Nintendo, leste (A) clica no anzol e sul (B) fecha. Cada pressão faz um
+clique esquerdo simples; segurar não repete. Os outros botões, gatilhos e
+analógicos são consumidos enquanto a interface está aberta. Entrar nela solta
+Shift/Ctrl, botões de mouse e sequências de cliques anteriores, impedindo que
+o clique do anzol herde o Shift do ataque do overworld. O clique aguarda 30 ms
+após mover o cursor e mantém o esquerdo por 60 ms para o jogo amostrá-lo entre
+frames. Perda de foco, pausa e fechamento cancelam a sequência e liberam o mouse.
+O bloqueio também cobre as animações de lançar/recolher com o menu oculto.
 
 ---
 

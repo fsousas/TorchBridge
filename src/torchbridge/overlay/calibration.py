@@ -36,6 +36,7 @@ from ..models import (
     dialog_button_point,
     difficulty_menu_button_point,
     fishing_hook_point,
+    fishing_close_point,
     hud_asset_path,
     hud_purple_button_point,
     hud_target_rect,
@@ -46,6 +47,7 @@ from ..models import (
     merchant_slot_point,
     merchant_tab_point,
     modal_ok_point,
+    modal_tips_checkbox_point,
     panel_regions,
     pause_menu_button_point,
     pet_actions_target_rect,
@@ -160,8 +162,20 @@ class CalibrationOverlayMixin:
                 for m in (snapshot.memory_open_menus or [])
             )
         )
+        is_cutscene = (
+            snapshot.memory_is_cutscene
+            or any(
+                "cutscene" in m.lower()
+                or "cinematica" in m.lower()
+                or "cinemática" in m.lower()
+                or "história" in m.lower()
+                or "historia" in m.lower()
+                for m in (snapshot.memory_open_menus or [])
+            )
+            or (bool(state_desc) and any(k in state_desc.lower() for k in ("cutscene", "cinematica", "cinemática", "história", "historia")))
+        )
 
-        is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading
+        is_in_game = (snapshot.memory_is_in_game or not state_desc) and not is_settings and not is_loading and not is_cutscene
 
         if is_in_game:
             regions = panel_regions(rect)
@@ -1138,24 +1152,47 @@ class CalibrationOverlayMixin:
                         painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawEllipse(QPointF(bx - rect.left, by - rect.top), box_size * 0.8, box_size * 0.8)
 
-        # 11. Modal de Confirmação (Resultado de Pesca / Popups com Ok)
+        # 11. Modal de Confirmação (Resultado de Pesca / Popups com Ok / Dica Tutorial)
         if snapshot.modal_confirm_focus:
+            is_tutorial = "Dica (Tutorial)" in (snapshot.memory_open_menus or [])
+            is_ok_focus = snapshot.modal_confirm_focus == "ok"
             btn_w = 125 * scale * (rect.height / 768.0)
             btn_h = 24 * scale * (rect.height / 768.0)
-            bx, by = modal_ok_point(rect)
+            bx, by = modal_ok_point(rect, tutorial=is_tutorial)
             lx = bx - rect.left - btn_w / 2.0
             ly = by - rect.top - btn_h / 2.0
-            painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-            painter.setBrush(QColor(255, 215, 0, 110))
+            if is_ok_focus:
+                painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                painter.setBrush(QColor(255, 215, 0, 110))
+            else:
+                painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                painter.setBrush(QColor(46, 204, 113, 90))
             painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
             painter.setFont(self._font(max(7, round(8 * scale)), True))
             painter.setPen(QColor(255, 255, 255, 240))
             painter.drawText(QRectF(lx, ly, btn_w, btn_h), Qt.AlignmentFlag.AlignCenter, "OK")
 
+            if is_tutorial:
+                is_tips_focus = snapshot.modal_confirm_focus == "show_tips"
+                cb_size = 28 * scale * (rect.height / 768.0)
+                cx, cy = modal_tips_checkbox_point(rect)
+                clx = cx - rect.left - cb_size / 2.0
+                cly = cy - rect.top - cb_size / 2.0
+                if is_tips_focus:
+                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                    painter.setBrush(QColor(255, 215, 0, 110))
+                else:
+                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                    painter.setBrush(QColor(46, 204, 113, 90))
+                painter.drawRoundedRect(QRectF(clx, cly, cb_size, cb_size), 3 * scale, 3 * scale)
+                painter.setFont(self._font(max(6, round(7 * scale)), True))
+                painter.setPen(QColor(255, 255, 255, 240))
+                painter.drawText(QRectF(clx, cly, cb_size, cb_size), Qt.AlignmentFlag.AlignCenter, "TIPS")
+
         # 12. Interface de Pesca (Anzol de Pescaria)
         if snapshot.fishing_focus:
             hook_size = 40.0 * scale * (rect.height / 768.0)
-            hx, hy = fishing_hook_point(rect)
+            hx, hy = fishing_close_point(rect) if snapshot.fishing_focus == "close" else fishing_hook_point(rect)
             lx = hx - rect.left - hook_size / 2.0
             ly = hy - rect.top - hook_size / 2.0
             painter.setPen(QPen(QColor(255, 30, 30, 240), 2.5 * scale))

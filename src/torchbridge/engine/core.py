@@ -21,6 +21,7 @@ from ..memory import (
     GameMemoryState,
     TorchlightMemoryReader,
 )
+from ..native_input import NativeInputClient, ACTIVE, DIRECT, WALKING, ALLOW_INTERACTION
 from ..models import (
     CHAR_ATTR_ORDER,
     CHAR_MENU_NODES_HAS_POINTS,
@@ -123,6 +124,7 @@ class BridgeEngineCore(threading.Thread):
     _MODIFIER_CLICK_HOLD = 0.12
     _MODIFIER_RELEASE_HOLD = 0.18
     _MODIFIER_RELEASE_TIMEOUT = 0.05
+    _SKILL_REPEAT_INTERVAL = 0.12
     _MODIFIER_RELEASE_RETRY_INTERVAL = 0.005
     PET_PANEL_CLOSE_DELAY = 0.5
 
@@ -132,8 +134,13 @@ class BridgeEngineCore(threading.Thread):
         self.shared = shared
         # Leitor de memória direto do processo do jogo
         self.memory = TorchlightMemoryReader()
+        self.native_input = NativeInputClient()
+        self._native_direction = (0., 0.)
+        self._native_heading = None
+        self._native_heading_scene = None
         self._memory_state = GameMemoryState()
         self._memory_last_read = 0.0
+        self._world_click = None
         initial = config.get()
         target = initial["target"]
         # Localizador da janela do Torchlight + injetor de entrada do Windows.
@@ -159,6 +166,8 @@ class BridgeEngineCore(threading.Thread):
         self._last_anchor: tuple[int, int] | None = None
         # Teclas e botões de mouse retidos agora (liberados todos na perda de foco/saída).
         self._held_keys: set[str] = set()
+        self._skill_repeat_at: dict[str, float] = {}
+        self._skill_repeat_sources: dict[str, str] = {}
         self._held_mouse: set[str] = set()
         # Nome do último controle visto — detecta troca/conexão/desconexão.
         # Última recarga do perfil (no mínimo 1 s entre tentativas).
@@ -303,7 +312,12 @@ class BridgeEngineCore(threading.Thread):
         self._settings_music_vol: float = 1.0
         # Navegação na Interface de Pesca e Modal de Confirmação (Peixe/Mensagens)
         self._fishing_initialized: bool = False
+        self._fishing_closing: bool = False
+        self._fishing_click_seq: tuple[int, int, float] | None = None
+        self._fishing_click_down = False
+        self._fishing_next_click: bool | None = None
         self._modal_confirm_initialized: bool = False
+        self._modal_confirm_focus: str = "ok"
         # Navegação no Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
         self._inventory_initialized: bool = False
         self._inventory_tab: str | None = None  # "tab-1", "tab-2", "tab-3"
@@ -351,8 +365,6 @@ class BridgeEngineCore(threading.Thread):
         self._last_quest_slot: int = 0
         self._quest_b_consumed: bool = False
         self._a_shift_held: bool = False
-        self._auto_move_resume_times: list[float] = []
-        self._auto_move_suppress_left_once: bool = False
 
     def _reset_active_panels(self) -> None:
         self._active_panels = ["", ""]
@@ -455,9 +467,8 @@ class BridgeEngineCore(threading.Thread):
         self._quest_b_consumed = False
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
+        self._modal_confirm_focus = "ok"
         self._a_shift_held = False
-        self._auto_move_resume_times = []
-        self._auto_move_suppress_left_once = False
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -502,7 +513,14 @@ class BridgeEngineCore(threading.Thread):
                 self._held_mouse.discard(button)
 
     def _release_all(self) -> None:
+        self._cancel_fishing_click()
+        self._skill_repeat_at.clear()
+        self._skill_repeat_sources.clear()
+        self.native_input.close()
+        self.shared.update(native_input_ready=False, native_highlight=False,
+                           movement_direction=(0., 0.), movement_status="Movimento suspenso")
         self._needs_rearm = True
+        self._cancel_world_interaction()
         self._reset_transient_navigation()
         if isinstance(self.injector, InputSession):
             self.injector.release_all()
@@ -510,9 +528,6 @@ class BridgeEngineCore(threading.Thread):
             self._set_key("SHIFT", False)
             self._ensure_modifier_released("SHIFT")
             self._a_shift_held = False
-        if getattr(self, "_auto_move_resume_times", None):
-            self._auto_move_resume_times.clear()
-        self._auto_move_suppress_left_once = False
         for key in tuple(self._held_keys):
             self._set_key(key, False)
         for button in tuple(self._held_mouse):
@@ -644,6 +659,7 @@ class BridgeEngineCore(threading.Thread):
         self._settings_dropdown = None
         self._fishing_initialized = False
         self._modal_confirm_initialized = False
+        self._modal_confirm_focus = "ok"
         self._previous_left_pressed = False
         self.shared.take_keyboard_events()
         self.shared.update(virtual_keyboard_open=False, virtual_keyboard_target="",
@@ -697,6 +713,23 @@ class BridgeEngineCore(threading.Thread):
             if remaining <= 0:
                 return
             self._stop_event.wait(min(remaining, 1 / 120))
+
+    def _tap_skill_binding(self, source: str, value: Any, now: float, edge: bool) -> None:
+        if not isinstance(value, str):
+            return
+        key = value.strip().upper()
+        if key not in "1234567890" or len(key) != 1:
+            self._skill_repeat_sources.pop(source, None)
+            if edge:
+                self._tap_binding(value)
+            return
+        if edge:
+            self._skill_repeat_sources[source] = key
+        if self._skill_repeat_sources.get(source) != key:
+            return  # A press consumed by a panel/item cannot become a held spell.
+        if edge or now >= self._skill_repeat_at.get(key, float("-inf")):
+            self._tap_binding(value)
+            self._skill_repeat_at[key] = now + self._SKILL_REPEAT_INTERVAL
 
     def _tap_binding(self, value: Any) -> None:
         if not isinstance(value, str) or not value.strip():
@@ -814,22 +847,22 @@ class BridgeEngineCore(threading.Thread):
         rx, ry, rmag = radial_deadzone(state.rx, state.ry, deadzone, curve)
         radial_active = state.pressed("lb") and self._is_radial_allowed()
         auto_move = False
-        cursor_active = False
         aim_local: tuple[int, int] | None = None
 
-        is_only_inventory = (self._memory_state.open_menus in (["Inventário"], ["Pet"]))
         # O modo efetivo respeita o estado do jogo na memória RAM:
         # Se qualquer menu estiver aberto (exceto quando apenas o inventário estiver aberto)
-        # ou estiver fora do jogo (telas iniciais), o modo vira automaticamente 'cursor'.
-        # Quando somente o inventário está aberto, o analógico esquerdo mantém o movimento
-        # direto do personagem.
+        # ou estiver fora do jogo, o modo vira cursor e a caminhada fica suspensa.
         effective_mode = (
-            "cursor"
-            if (
-                self._memory_state.is_connected
-                and ((self._memory_state.is_menu_open and not is_only_inventory) or not self._memory_state.is_in_game)
+            "blocked"
+            if (self._memory_state.is_loading or getattr(self._memory_state, "is_cutscene", False))
+            else (
+                "cursor"
+                if (
+                    self._memory_state.is_connected
+                    and (self._memory_state.is_menu_open or not self._memory_state.is_in_game)
+                )
+                else self._mode
             )
-            else self._mode
         )
 
         # Movimento direto: exige analógico esquerdo inclinado, direito parado, roda fechada
@@ -844,7 +877,10 @@ class BridgeEngineCore(threading.Thread):
             and not radial_active
             and self._pet_click_seq is None
             and self._hud_click_seq is None
-            and not both_panels_open(self._active_panels)
+            and not any(self._active_panels)
+            and self._memory_state.is_connected
+            and self._memory_state.is_in_game
+            and not self._memory_state.is_menu_open
         ):
             # Âncora do herói em pixels, a partir das frações do perfil.
             # Painel lateral aberto sozinho desloca a âncora para o lado oposto (área visível).
@@ -853,25 +889,27 @@ class BridgeEngineCore(threading.Thread):
                 float(movement["anchor_x"]) + anchor_shift, 0.05, 0.95
             )
             anchor_y = rect.top + rect.height * float(movement["anchor_y"])
-            # Memória da âncora atual: destino do retorno do cursor ao soltar o stick.
+            # Shared anchor for the aim marker and the system cursor.
             self._last_anchor = (round(anchor_x), round(anchor_y))
             # Raio circular: fração da ALTURA da janela nos dois eixos (área de movimento = círculo
             # ideal, sem ovalizar nas laterais como quando o eixo x usava a largura).
             radius = rect.height * float(movement["movement_radius_percent"])
-            # Distância do cursor em fração do raio: começa em click_center_fraction (perto da
-            # âncora — o clique do click-to-move cai longe de NPCs/inimigos) e cresce até o raio
-            # cheio conforme o stick é empurrado; o botão fica segurado e o herói segue o cursor.
+            # Keep the cursor on the same aim point as the direction marker.
+            # Movement itself remains a separate native navigation command.
             center_frac = float(movement["click_center_fraction"])
             reach = center_frac + (1.0 - center_frac) * lmag
             target_x = round(anchor_x + (lx / max(lmag, 1e-6)) * radius * reach)
             target_y = round(anchor_y + (ly / max(lmag, 1e-6)) * radius * reach)
-            # Move o cursor do sistema para o alvo do movimento direto (evento absoluto via SendInput).
-            # Mantém o cursor dentro da área jogável (borda de 2 px).
             target_x = int(clamp(target_x, rect.left + 2, rect.right - 2))
             target_y = int(clamp(target_y, rect.top + 2, rect.bottom - 2))
             self.injector.move(target_x, target_y)
             aim_local = (target_x - rect.left, target_y - rect.top)
-            auto_move = True
+            world = self._memory_state.world
+            if world.fresh(time.monotonic()) and world.camera is not None:
+                self._native_direction = world.camera.ground_direction(lx, ly)
+                if any(self._native_direction):
+                    self._native_heading = self._native_direction
+                    self._native_heading_scene = (world.player_address, world.level_address)
         else:
             # Modo cursor: analógico direito move o cursor; no modo 'cursor', o esquerdo também.
             cursor_x = cursor_y = cursor_mag = 0.0
@@ -886,7 +924,7 @@ class BridgeEngineCore(threading.Thread):
 
             # Há movimento de cursor: desloca da posição atual em vez de saltar para um ponto fixo.
             if cursor_mag > 0:
-                cursor_active = True
+                self._native_heading = None
                 current_x, current_y = self.injector.cursor_position()
                 speed = float(cfg["cursor"]["speed_pixels_per_second"])
                 # Delta em pixels; dt limitado a 50 ms para o cursor não 'saltar' após engasgos.
@@ -897,12 +935,8 @@ class BridgeEngineCore(threading.Thread):
                 self.injector.move(target_x, target_y)
                 aim_local = (target_x - rect.left, target_y - rect.top)
 
-        # Borda de descida do movimento direto: o stick voltou pra dentro da deadzone (ou o modo
-        # trocou) e NADA mais está movendo o cursor — devolve o cursor para a âncora do herói,
-        # para o próximo click-to-move nascer no centro e não cair em cima de um NPC/inimigo.
-        if not auto_move and not cursor_active and self._direct_move_active and self._last_anchor:
-            self.injector.move(*self._last_anchor)
-        self._direct_move_active = auto_move
+        # A neutral stick leaves the cursor at its last aim point.
+        self._direct_move_active = bool(any(self._native_direction) and self.native_input.ready)
 
         # Publica o marcador de mira no overlay (posição relativa à janela).
         if cfg["overlay"].get("show_aim_marker", True) and aim_local:
@@ -912,7 +946,53 @@ class BridgeEngineCore(threading.Thread):
             self.shared.update(aim_x=None, aim_y=None)
         return auto_move
 
-    def _process_active(
+    def _process_active(self, hub, state, rect, cfg, now, dt) -> None:
+        self._native_direction = (0., 0.)
+        self._native_interaction_allowed = False
+        for source in tuple(self._skill_repeat_sources):
+            pressed = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD if source == "rt" else state.pressed(source)
+            if not pressed:
+                del self._skill_repeat_sources[source]
+        self.native_input.connect(self.memory, now)
+        try:
+            self._process_active_inputs(hub, state, rect, cfg, now, dt)
+            self._publish_native_input(state, cfg, now)
+        except BaseException:
+            self._native_direction = (0., 0.)
+            self.native_input.close()
+            raise
+
+    def _publish_native_input(self, state, cfg, now) -> None:
+        memory = self._memory_state
+        world = memory.world
+        live = (state.connected and memory.is_connected and memory.is_in_game
+                and world.fresh(now) and not memory.is_loading and not getattr(memory, "is_cutscene", False))
+        direct = (live and self._mode == "direct" and not memory.is_menu_open and not memory.is_fishing
+                  and not memory.dialog_type and not any(self._active_panels)
+                  and not self._virtual_keyboard_open and not self._shortcut_config_active)
+        if isinstance(self.injector, InputSession):
+            self.injector.check()
+        flags = ACTIVE if state.connected else 0
+        if direct:
+            flags |= DIRECT
+            if any(self._native_direction):
+                flags |= WALKING
+            if self._native_interaction_allowed:
+                flags |= ALLOW_INTERACTION
+        self.native_input.send(flags=flags, player=world.player_address, level=world.level_address,
+                               dx=self._native_direction[0] if direct else 0.,
+                               dz=self._native_direction[1] if direct else 0.,
+                               radius=cfg["interaction"]["radius"], now=now)
+        native = self.native_input.status
+        self.shared.update(movement_status=self.native_input.message,
+                           native_input_ready=self.native_input.ready,
+                           movement_direction=self._native_direction,
+                           movement_destination=(native.destination_x, native.destination_z),
+                           native_highlight=bool(native.flags & 4),
+                           blocked_interactions=native.blocked_interactions,
+                           blocked_warps=native.blocked_warps)
+
+    def _process_active_inputs(
         self,
         hub: ControllerHub,
         state: ControllerState,
@@ -978,6 +1058,20 @@ class BridgeEngineCore(threading.Thread):
                         pass
             return
 
+        # Handle fishing before center buttons, discrete bindings and combat.
+        # Its only controller inputs are the physical confirm/cancel pair.
+        menus = self._memory_state.open_menus or []
+        modal = "Confirmação Sair" in menus or "confirma" in (self._memory_state.state_desc or "").lower()
+        if (self._memory_state.is_connected and not modal
+                and (self._memory_state.is_fishing or "Pesca" in menus)):
+            self._handle_fishing_navigation(state, rect, hub, now, visible="Pesca" in menus)
+            self._previous_panels = tuple(self._active_panels)
+            return
+        if self._fishing_initialized:
+            # Release before any modal, combat or world handler gets the input.
+            self._cancel_fishing_click()
+            self._fishing_initialized = False
+            self.shared.update(fishing_focus=None)
         if self._memory_state.is_connected and self._memory_state.state_id == 1:
             was_open = self._virtual_keyboard_open
             self._handle_char_create_navigation(state, rect, hub)
@@ -992,6 +1086,8 @@ class BridgeEngineCore(threading.Thread):
                 return
         bindings = cfg["bindings"]
         self._handle_center_buttons(state, rect, bindings, now)
+        if self._handle_world_interaction(state, rect, cfg, now):
+            return
         self._handle_discrete_bindings(state, bindings)
         # Navegação nos Menus via D-pad conforme o estado da memória
         if self._memory_state.is_connected:
@@ -1105,6 +1201,7 @@ class BridgeEngineCore(threading.Thread):
             # Modal de Confirmação (Resultado de Pesca, Avisos e Sair)
             is_modal = (
                 "Confirmação Sair" in (self._memory_state.open_menus or [])
+                or "Dica (Tutorial)" in (self._memory_state.open_menus or [])
                 or "confirma" in (self._memory_state.state_desc or "").lower()
             )
             if is_modal:
@@ -1114,16 +1211,6 @@ class BridgeEngineCore(threading.Thread):
             elif self._modal_confirm_initialized:
                 self._modal_confirm_initialized = False
                 self.shared.update(modal_confirm_focus=None)
-
-            # Interface de Pesca (minigame do anzol)
-            is_fishing = "Pesca" in (self._memory_state.open_menus or [])
-            if is_fishing:
-                self._handle_fishing_navigation(state, rect, hub)
-                self._previous_panels = (self._active_panels[0], self._active_panels[1])
-                return
-            elif self._fishing_initialized:
-                self._fishing_initialized = False
-                self.shared.update(fishing_focus=None)
 
             # Inventário do Jogador, Menu do Pet, Baú (Stash), Mercador (Loja) e Crafting (Transmutador, Sockets, Encantador)
             is_inventory = "Inventário" in (self._memory_state.open_menus or [])
@@ -1388,9 +1475,6 @@ class BridgeEngineCore(threading.Thread):
             if self._modal_confirm_initialized:
                 self._modal_confirm_initialized = False
                 self.shared.update(modal_confirm_focus=None)
-            if self._fishing_initialized:
-                self._fishing_initialized = False
-                self.shared.update(fishing_focus=None)
             if self._inventory_initialized:
                 self._inventory_initialized = False
                 self._inventory_tab = None
@@ -1757,7 +1841,7 @@ class BridgeEngineCore(threading.Thread):
         if self._modifier_seq is not None:
             self._previous_panels = (self._active_panels[0], self._active_panels[1])
             return
-        auto_move = self._move_pointer(state, rect, cfg, dt)
+        self._move_pointer(state, rect, cfg, dt)
         # Cliques de mouse vêm dos botões face: A = esquerdo, X = direito.
         # Cruz (PS) / A (Xbox) / A (Nintendo) chegam normalizados como "a" e
         # quadrado (PS) / X (Xbox) / X (Nintendo) como "x" (mapeamento do SDL —
@@ -1815,8 +1899,23 @@ class BridgeEngineCore(threading.Thread):
         want_shift = (
             a_pressed
             and is_overworld
-            and not getattr(self._memory_state, "is_hover_interactive", False)
         )
+
+        # Walking has already aligned the cursor with the visible aim marker.
+        # After stopping, an explicit attack may use the remembered heading.
+        # Right-stick aiming overrides it; a scene change invalidates it.
+        world = self._memory_state.world
+        if (want_shift and not any(self._native_direction)
+                and self._native_heading is not None and world.camera is not None
+                and world.fresh(time.monotonic())
+                and self._native_heading_scene == (world.player_address, world.level_address)):
+            hx, hz = self._native_heading
+            magnitude = max((hx * hx + hz * hz) ** .5, 1e-6)
+            point = world.camera.project(replace(world.player_position,
+                x=world.player_position.x + hx / magnitude * 2,
+                y=world.player_position.y + hz / magnitude * 2), rect.width, rect.height)
+            if point is not None:
+                self.injector.move(rect.left + point[0], rect.top + point[1])
 
         if want_shift:
             if not self._a_shift_held:
@@ -1828,54 +1927,9 @@ class BridgeEngineCore(threading.Thread):
                 self._ensure_modifier_released("SHIFT")
                 self._a_shift_held = False
 
-        # Detecção de liberação de botão de habilidade durante auto_move no overworld:
-        # Quando o jogador usa uma magia/ataque (Quadrado/X, Triângulo/Y, Círculo/B, R1/RB, R2/RT, LT combos)
-        # enquanto caminha com o analógico esquerdo, o motor do Torchlight cancela internamente a caminhada.
-        # Ao soltar a habilidade, se o analógico continuar inclinado, forçamos um pulso no clique esquerdo
-        # (1 frame solto e reapertado) para o herói retomar a corrida imediatamente na direção apontada.
-        skill_released = False
-        any_skill_held = False
-        if is_overworld:
-            rt_cur = state.rt >= self.TRIGGER_ACTIVE_THRESHOLD
-            rt_rel = self._rt_edge_down
-
-            for btn in ("x", "y", "b", "rb"):
-                if not state.pressed(btn) and self._previous.pressed(btn):
-                    skill_released = True
-                if state.pressed(btn):
-                    any_skill_held = True
-
-            if rt_rel:
-                skill_released = True
-            if rt_cur:
-                any_skill_held = True
-
-            # LT + A (combo da skill 5)
-            if lt_held and state.pressed("a"):
-                any_skill_held = True
-            if not state.pressed("a") and self._previous.pressed("a") and self._lt_was_active:
-                skill_released = True
-
-        if is_overworld and auto_move and not a_pressed:
-            if skill_released and not any_skill_held:
-                self._auto_move_suppress_left_once = True
-                self._auto_move_resume_times = [now + 0.150, now + 0.300]
-            elif self._auto_move_resume_times:
-                if any_skill_held:
-                    self._auto_move_resume_times.clear()
-                elif now >= self._auto_move_resume_times[0]:
-                    self._auto_move_resume_times.pop(0)
-                    self._auto_move_suppress_left_once = True
-        else:
-            if getattr(self, "_auto_move_resume_times", None):
-                self._auto_move_resume_times.clear()
-            self._auto_move_suppress_left_once = False
-
-        if self._auto_move_suppress_left_once:
-            left_pressed = False
-            self._auto_move_suppress_left_once = False
-        else:
-            left_pressed = auto_move or a_pressed
+        # Walking is an independent game-thread command. Skill release must
+        # never pulse a world click; only an explicit A press owns left mouse.
+        left_pressed = a_pressed
         right_pressed = (
             state.pressed("x") and not radial_held and not lt_held and not suppress_mouse
         )
@@ -2060,14 +2114,17 @@ class BridgeEngineCore(threading.Thread):
                     self._welcome_first_checked = True
 
                 is_only_inventory = (self._memory_state.open_menus in (["Inventário"], ["Pet"]))
+                # Memory sampling happens after the tick started. Use a current
+                # clock so a fresh world sample is never treated as future data.
+                now = time.monotonic()
                 effective_mode = (
                     "blocked"
-                    if self._memory_state.is_loading
+                    if (self._memory_state.is_loading or getattr(self._memory_state, "is_cutscene", False))
                     else (
                         "cursor"
                         if (
                             self._memory_state.is_connected
-                            and ((self._memory_state.is_menu_open and not is_only_inventory) or not self._memory_state.is_in_game)
+                            and (self._memory_state.is_menu_open or not self._memory_state.is_in_game)
                         )
                         else self._mode
                     )
@@ -2091,8 +2148,10 @@ class BridgeEngineCore(threading.Thread):
                     memory_state_desc=self._memory_state.state_desc,
                     memory_is_in_game=self._memory_state.is_in_game,
                     memory_is_loading=self._memory_state.is_loading,
+                    memory_is_cutscene=getattr(self._memory_state, "is_cutscene", False),
                     memory_is_menu_open=self._memory_state.is_menu_open,
                     memory_open_menus=list(self._memory_state.open_menus),
+                    world=self._memory_state.world,
                     char_name_len=self._memory_state.char_name_len,
                     title_menu_focus=self._title_focus if (self._memory_state.is_connected and self._memory_state.state_id == 0) else None,
                     dialog_focus=self._dialog_focus if (self._memory_state.is_connected and self._memory_state.dialog_type) else None,
@@ -2139,7 +2198,7 @@ class BridgeEngineCore(threading.Thread):
 
                 # PORTÃO DE SEGURANÇA: comandos só saem com jogo em foco, habilitado e controle conectado.
                 if enabled and not self.memory.last_error and game_active and state.connected:
-                    if self._memory_state.is_loading:
+                    if self._memory_state.is_loading or (getattr(self._memory_state, "is_cutscene", False) and not self._memory_state.dialog_buttons):
                         self._release_all()
                     else:
                         state = self._prepare_active_state(state)

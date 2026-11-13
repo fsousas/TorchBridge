@@ -2,7 +2,8 @@
 
 No ptrace attach, writes, signals, capabilities or global sysctl changes. Keeping
 an O_RDONLY /proc/PID/mem fd pins the address space; starttime rejects PID reuse.
-The launcher can make the game a descendant so Yama ptrace_scope=1 permits reads.
+The game module can hand over its own O_RDONLY fd without changing Yama. The
+launcher ancestry remains an alternative for older/nonstandard installations.
 """
 from __future__ import annotations
 
@@ -104,14 +105,20 @@ class LinuxProcess:
             self.close()
             if (self.proc / str(pid) / "comm").read_text(errors="replace").strip().casefold() != "torchlight.exe":
                 return False
-            self.fd = os.open(self.proc / str(pid) / "mem", os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                self.fd = os.open(self.proc / str(pid) / "mem", os.O_RDONLY | os.O_CLOEXEC)
+            except PermissionError:
+                from .memory_handoff import descriptor
+                self.fd = descriptor(pid, start)
+                if self.fd is None:
+                    raise
             self.pid, self.start = pid, start
             self.data_directory = game_data_directory(pid, self.proc)
             self.error = ""
             return True
         except PermissionError:
             self.close()
-            self.error = "Leitura de memória bloqueada; inicie pelo modo --launch (docs/LINUX.md)"
+            self.error = "Aguardando integração com Torchlight; reinicie o jogo se já estava aberto"
         except OSError:
             self.close()
             self.error = ""

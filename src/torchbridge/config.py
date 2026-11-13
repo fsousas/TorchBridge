@@ -11,6 +11,7 @@ from threading import RLock
 from typing import Any
 
 from .mathutils import clamp
+from .world import INTERACTION_BUTTONS
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -46,6 +47,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "cursor": {
         "speed_pixels_per_second": 1450,
     },
+    "interaction": {
+        "enabled": True,
+        "button": "dpad_up",
+        "radius": 4.5,
+        "show_prompt": True,
+        "show_positions": False,
+    },
     # Elementos visuais do Qt: liga/desliga, escala e marcadores individuais.
     "overlay": {
         "enabled": True,
@@ -65,15 +73,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # Botões → teclas do Torchlight; radial_slots são os atalhos da roda (1..N, N = tamanho da lista).
     # Mapa do overworld (spec docs/REMAP-BOTOES): A/X = cliques de mouse; Y/B/RB/RT tocam
-    # 1/2/3/4 na borda de subida; LT+botão toca 5..0. D-pad fica sem ação no overworld
-    # (a tela inicial usará, mas o rastreamento dela ainda não existe).
+    # 1/2/3/4 na borda de subida; LT+botão toca 5..0. As ações contextuais do
+    # D-pad (incluindo interaction.button) são tratadas pelos handlers, sem tecla.
     "bindings": {
         # A e X são os cliques de mouse (esquerdo/direito) — sem tecla associada.
         "a": "",
         "b": "2",
         "x": "",
         "y": "1",
-        # D-pad: sem binding no overworld (vazio = ignorado).
+        # D-pad: sem tecla associada; os handlers cuidam das ações contextuais.
         "dpad_up": "",
         "dpad_right": "",
         "dpad_down": "",
@@ -182,6 +190,7 @@ class ConfigManager:
             "input",
             "movement",
             "cursor",
+            "interaction",
             "overlay",
             "bindings",
             "raw_controller",
@@ -200,6 +209,7 @@ class ConfigManager:
             ("input", ("poll_hz", "deadzone", "response_curve")),
             ("movement", ("anchor_x", "anchor_y", "movement_radius_percent", "click_center_fraction")),
             ("cursor", ("speed_pixels_per_second",)),
+            ("interaction", ("radius",)),
             ("overlay", ("scale", "bottom_hud_offset_y_percent", "bottom_hud_scale")),
         ):
             for name in keys:
@@ -240,6 +250,13 @@ class ConfigManager:
         data["cursor"]["speed_pixels_per_second"] = int(
             clamp(float(data["cursor"]["speed_pixels_per_second"]), 150, 4000)
         )
+        interaction = data["interaction"]
+        interaction["radius"] = clamp(float(interaction["radius"]), 0.5, 8.0)
+        if interaction.get("button") not in INTERACTION_BUTTONS:
+            interaction["button"] = DEFAULT_CONFIG["interaction"]["button"]
+        for flag in ("enabled", "show_prompt", "show_positions"):
+            if not isinstance(interaction.get(flag), bool):
+                interaction[flag] = DEFAULT_CONFIG["interaction"][flag]
         # Escala do overlay entre 0.6× e 2.0×.
         data["overlay"]["scale"] = clamp(float(data["overlay"]["scale"]), 0.6, 2.0)
         # Marcadores visuais: tipos booleanos, senão volta ao padrão da seção.
@@ -343,7 +360,7 @@ class ConfigManager:
             if not force and mtime_ns == self._mtime_ns:
                 return False
             # Falha aqui (JSON inválido ou erro de I/O) cai no except e mantém o perfil atual em memória.
-            incoming = json.loads(self.path.read_text(encoding="utf-8"))
+            incoming = json.loads(self.path.read_text(encoding="utf-8-sig"))
             # Raiz precisa ser objeto JSON (dict).
             if not isinstance(incoming, dict):
                 raise ValueError("A raiz do perfil precisa ser um objeto JSON.")
