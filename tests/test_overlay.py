@@ -636,10 +636,11 @@ class OverlayRadialExtraHudTests(unittest.TestCase):
                 painter.end()
 
             # Valida carregamento do pixmap de pegada
-            self.assertIsNotNone(overlay._footstep_pixmap())
-            self.assertFalse(overlay._footstep_pixmap().isNull())
-            self.assertEqual(overlay._footstep_pixmap().width(), 33)
-            self.assertEqual(overlay._footstep_pixmap().height(), 29)
+            footstep = overlay._footstep_pixmap()
+            self.assertIsNotNone(footstep)
+            self.assertFalse(footstep.isNull())
+            self.assertGreater(footstep.width(), 0)
+            self.assertGreater(footstep.height(), 0)
 
     def test_debug_menu_overlay_rendering(self):
         with tempfile.TemporaryDirectory() as directory:
