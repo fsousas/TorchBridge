@@ -9,6 +9,7 @@ from ..models import (
     bottom_hud_target_rect,
     controller_type_from_name,
 )
+from ..resources import resource_root
 from PySide6.QtCore import (
     QPointF,
     QRectF,
@@ -142,6 +143,16 @@ class BottomHudOverlayMixin:
         )
         painter.restore()
 
+    def _footstep_pixmap(self) -> QPixmap | None:
+        if not hasattr(self, "_footstep_cache") or self._footstep_cache is None:
+            path = resource_root() / "assets" / "hud" / "general" / "footstep.png"
+            if path.is_file():
+                pix = QPixmap(str(path))
+                self._footstep_cache = pix if not pix.isNull() else None
+            else:
+                self._footstep_cache = None
+        return getattr(self, "_footstep_cache", None)
+
     def _draw_aim(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         # Sem alvo ou com a roda aberta: não desenha a mira.
         if (
@@ -151,6 +162,26 @@ class BottomHudOverlayMixin:
             or snapshot.memory_is_cutscene
         ):
             return
+
+        # Desenha o ícone de pegada se disponível
+        pixmap = self._footstep_pixmap()
+        if pixmap is not None and not pixmap.isNull():
+            w = pixmap.width() * scale
+            h = pixmap.height() * scale
+            target_rect = QRectF(
+                snapshot.aim_x - w / 2.0,
+                snapshot.aim_y - h / 2.0,
+                w,
+                h,
+            )
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.drawPixmap(target_rect, pixmap, QRectF(pixmap.rect()))
+            painter.restore()
+            return
+
+        # Fallback procedural caso o asset não seja encontrado
         center = QPointF(snapshot.aim_x, snapshot.aim_y)
         radius = 11 * scale
         painter.setPen(QPen(QColor(73, 224, 255, 205), max(1.5, 2.0 * scale)))

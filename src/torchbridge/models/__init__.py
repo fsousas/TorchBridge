@@ -9,6 +9,8 @@ from .base import (
     controller_type_from_name,
     OverlaySnapshot,
     SharedOverlayState,
+    DEBUG_MENU_ITEMS,
+    DEFAULT_DEBUG_OPTIONS,
     get_project_root,
     resource_root,
 )

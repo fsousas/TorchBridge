@@ -109,8 +109,13 @@ class CalibrationOverlayMixin:
 
     def _draw_calibration(self, painter: QPainter, snapshot: OverlaySnapshot, scale: float) -> None:
         cfg = self.config.get()
-        # Só visível com a flag ligada e o retângulo do jogo válido.
-        if not cfg["overlay"].get("show_calibration", False):
+        calib_cfg = bool(cfg["overlay"].get("show_calibration", False))
+        draw_mem = calib_cfg or getattr(snapshot, "debug_memory_badge", False)
+        draw_dpad = calib_cfg or getattr(snapshot, "debug_dpad_nodes", False)
+        draw_hud = calib_cfg or getattr(snapshot, "debug_hud_calibration", False)
+        draw_modal = calib_cfg or getattr(snapshot, "debug_modal_calibration", False)
+
+        if not (draw_mem or draw_dpad or draw_hud or draw_modal):
             return
         rect = snapshot.game_rect
         if not rect.valid:
@@ -184,7 +189,7 @@ class CalibrationOverlayMixin:
             both_open = left_open and right_open
 
             # 1. Painel Esquerdo e Aba de Fechar Esquerda (só visível com menu esquerdo aberto e fora de diálogos)
-            if not is_dialog and left_open:
+            if draw_hud and not is_dialog and left_open:
                 painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(local(regions["panel_left"]))
@@ -206,7 +211,7 @@ class CalibrationOverlayMixin:
                 painter.drawText(local(regions["panel_left"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
 
             # 2. Painel Direito e Aba de Fechar Direita (só visível com menu direito aberto e fora de diálogos)
-            if not is_dialog and right_open:
+            if draw_hud and not is_dialog and right_open:
                 painter.setPen(QPen(QColor(111, 210, 235, 170), 1.5 * scale))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(local(regions["panel_right"]))
@@ -223,7 +228,7 @@ class CalibrationOverlayMixin:
                 painter.drawText(local(regions["panel_right"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "PAINEL")
 
             # 3. Zona Central: tracejado (clique nela fecha ambos somente quando os dois estiverem abertos e fora de diálogos)
-            if not is_dialog and both_open:
+            if draw_hud and not is_dialog and both_open:
                 painter.setPen(
                     QPen(QColor(120, 220, 150, 170), 1.2 * scale, Qt.PenStyle.DashLine)
                 )
@@ -235,7 +240,7 @@ class CalibrationOverlayMixin:
                 painter.drawText(local(regions["center"]).adjusted(0, 6 * scale, 0, 24 * scale), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "CENTRO (ZERA TUDO)")
 
             # 4. HUD inferior (elemento fixo da interface in-game, oculto em diálogos/missões e tela de morte)
-            if not is_dialog and not is_death_screen and self._hud_pixmap is not None:
+            if draw_hud and not is_dialog and not is_death_screen and self._hud_pixmap is not None:
                 hl, ht, hw, hh = hud_target_rect(rect)
                 target = QRectF(hl - rect.left, ht - rect.top, hw, hh)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -275,7 +280,7 @@ class CalibrationOverlayMixin:
                 )
 
             # 4b. HUD inferior dos controles (calibração visual da área)
-            if not is_dialog and not is_death_screen:
+            if draw_hud and not is_dialog and not is_death_screen:
                 overlay_cfg = cfg.get("overlay", {})
                 offset_y = float(overlay_cfg.get("bottom_hud_offset_y_percent", BOTTOM_HUD_DEFAULT_OFFSET_Y_FRACTION))
                 scale_hud = float(overlay_cfg.get("bottom_hud_scale", 1.0))
@@ -294,7 +299,7 @@ class CalibrationOverlayMixin:
                 )
 
             # 5. Pet actions: visível somente quando o painel esquerdo NÃO estiver cobrindo a HUD do pet e fora de diálogos/missões
-            if not is_dialog and not left_open and self._pet_actions_pixmap is not None:
+            if draw_hud and not is_dialog and not left_open and self._pet_actions_pixmap is not None:
                 pl, pt, pw, ph = pet_actions_target_rect(rect)
                 pet_local = QRectF(pl - rect.left, pt - rect.top, pw, ph)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -336,7 +341,7 @@ class CalibrationOverlayMixin:
                 )
 
             # 6. Alvos de Diálogo (Missões, Diálogo Simples, História) em modo calibração
-            if snapshot.dialog_type and snapshot.dialog_buttons:
+            if draw_dpad and snapshot.dialog_type and snapshot.dialog_buttons:
                 btn_w = 124 * scale * (rect.height / 768.0)
                 btn_h = 24 * scale * (rect.height / 768.0)
                 for btn_name in snapshot.dialog_buttons:
@@ -382,7 +387,7 @@ class CalibrationOverlayMixin:
 
             # 7. Alvos de Crafting (Transmutador, Sockets, Encantador) com foco ativo
             crafting_menu = next((m for m in ("Transmutador", "Sockets", "Encantador") if m in (snapshot.memory_open_menus or [])), None)
-            if crafting_menu or snapshot.crafting_open:
+            if draw_dpad and (crafting_menu or snapshot.crafting_open):
                 active_menu = snapshot.crafting_menu or crafting_menu or "Transmutador"
                 # Desenha slots de itens
                 slots = CRAFTING_SLOTS.get(active_menu, [])
@@ -448,7 +453,7 @@ class CalibrationOverlayMixin:
                 "Pause" in (snapshot.memory_open_menus or [])
                 or any(m.lower() in ("pause", "paused") for m in (snapshot.memory_open_menus or []))
             )
-            if is_paused:
+            if draw_dpad and is_paused:
                 box_size = 17.0 * scale * (rect.height / 768.0)
                 for btn_name in PAUSE_BUTTONS:
                     bx, by = pause_menu_button_point(rect, btn_name)
@@ -470,7 +475,7 @@ class CalibrationOverlayMixin:
                 "Morte / Respawn" in (snapshot.memory_open_menus or [])
                 or any("morte" in m.lower() or "respawn" in m.lower() for m in (snapshot.memory_open_menus or []))
             )
-            if is_death_screen:
+            if draw_dpad and is_death_screen:
                 box_size = 20.0 * scale * (rect.height / 768.0)
                 for btn_name in DEATH_SCREEN_BUTTONS:
                     bx, by = death_screen_button_point(rect, btn_name)
@@ -487,7 +492,7 @@ class CalibrationOverlayMixin:
 
             # 9. Alvos do Inventário do Jogador (Abas + Grid 3x7 + Equipamentos superiores)
             is_inv_open = snapshot.inventory_open or ("Inventário" in (snapshot.memory_open_menus or []))
-            if is_inv_open:
+            if draw_dpad and is_inv_open:
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
@@ -552,7 +557,7 @@ class CalibrationOverlayMixin:
 
             # 10. Alvos do Menu do Pet (Abas + Grid 3x7 + Equipamentos/Spells superiores)
             is_pet_open = snapshot.pet_inventory_open or ("Pet" in (snapshot.memory_open_menus or []))
-            if is_pet_open:
+            if draw_dpad and is_pet_open:
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
@@ -615,7 +620,7 @@ class CalibrationOverlayMixin:
 
             # 11. Alvos do Menu do Baú (Stash 6x7 + Pet 3x7 + Abas)
             is_stash_open = snapshot.stash_open or ("Baú" in (snapshot.memory_open_menus or []))
-            if is_stash_open:
+            if draw_dpad and is_stash_open:
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
@@ -676,7 +681,7 @@ class CalibrationOverlayMixin:
 
             # 12. Alvos do Menu do Mercador (Loja 6x7 + Pet 3x7 + Abas Rosa + Abas Ciano)
             is_merchant_open = snapshot.merchant_open or ("Vendedor (Loja)" in (snapshot.memory_open_menus or []))
-            if is_merchant_open:
+            if draw_dpad and is_merchant_open:
                 c_rosa = QColor(0xFD, 0x62, 0xCE, 220)
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
@@ -759,7 +764,7 @@ class CalibrationOverlayMixin:
 
             # 13. Alvos do Menu de Personagem (C) - Atributos, Topo (XP/Fame/HP/MP) e Resistências
             is_char_open = snapshot.char_menu_open or ("Atributos" in (snapshot.memory_open_menus or []))
-            if is_char_open:
+            if draw_dpad and is_char_open:
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_laranja = QColor(0xFD, 0x61, 0x00, 220)
                 c_rosa = QColor(0xB2, 0x00, 0x7C, 220)
@@ -799,7 +804,7 @@ class CalibrationOverlayMixin:
 
             # 14. Alvos do Menu de Habilidades (S) - Abas e Grid Dinâmica da Skill Tree
             is_skills_open = snapshot.skill_menu_open or ("Habilidades" in (snapshot.memory_open_menus or []))
-            if is_skills_open:
+            if draw_dpad and is_skills_open:
                 c_ciano = QColor(0x0B, 0xE0, 0xEF, 220)
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_laranja = QColor(0xFD, 0x61, 0x00, 220)
@@ -898,7 +903,7 @@ class CalibrationOverlayMixin:
 
             # 15. Alvos do Menu de Missões / Quests (Q)
             is_quest_open = "Missões (Quests)" in (snapshot.memory_open_menus or [])
-            if is_quest_open:
+            if draw_dpad and is_quest_open:
                 c_verde = QColor(0x09, 0xB2, 0x00, 220)
                 c_amarelo = QColor(0xE6, 0xC1, 0x2A, 220)
                 c_laranja = QColor(0xFD, 0x61, 0x00, 220)
@@ -962,101 +967,105 @@ class CalibrationOverlayMixin:
 
         elif state_desc == "Tela Inicial":
             # Alvos da Tela Inicial (Title Screen) em modo calibração
-            btn_w = 43 * scale
-            btn_h = 36 * scale
-            for btn_name in TITLE_BUTTONS:
-                if btn_name == "continue" and snapshot.title_menu_focus != "continue":
-                    continue
-                bx, by = title_menu_button_point(rect, btn_name)
-                lx = bx - rect.left - btn_w / 2
-                ly = by - rect.top - btn_h / 2
-                is_focus = (snapshot.title_menu_focus == btn_name)
-                if is_focus:
-                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                    painter.setBrush(QColor(255, 215, 0, 110))
-                else:
-                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                    painter.setBrush(QColor(46, 204, 113, 75))
-                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+            if draw_dpad:
+                btn_w = 43 * scale
+                btn_h = 36 * scale
+                for btn_name in TITLE_BUTTONS:
+                    if btn_name == "continue" and snapshot.title_menu_focus != "continue":
+                        continue
+                    bx, by = title_menu_button_point(rect, btn_name)
+                    lx = bx - rect.left - btn_w / 2
+                    ly = by - rect.top - btn_h / 2
+                    is_focus = (snapshot.title_menu_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 110))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 75))
+                    painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
 
         elif state_desc == "Criar Personagem":
             # Alvos da Tela de Criação de Personagem (state_id == 1) em modo calibração
-            for btn_name in CREATE_CHAR_BUTTONS:
-                if btn_name in ("destroyer", "vanquisher", "alchemist"):
-                    btn_w, btn_h = 44 * scale, 38 * scale
-                elif btn_name in ("dog", "cat", "ferret", "pet_name"):
-                    btn_w, btn_h = 34 * scale, 18 * scale
-                else:  # back, character_name, ok
-                    btn_w, btn_h = 47 * scale, 37 * scale
+            if draw_dpad:
+                for btn_name in CREATE_CHAR_BUTTONS:
+                    if btn_name in ("destroyer", "vanquisher", "alchemist"):
+                        btn_w, btn_h = 44 * scale, 38 * scale
+                    elif btn_name in ("dog", "cat", "ferret", "pet_name"):
+                        btn_w, btn_h = 34 * scale, 18 * scale
+                    else:  # back, character_name, ok
+                        btn_w, btn_h = 47 * scale, 37 * scale
 
-                bx, by = char_create_button_point(rect, btn_name)
-                lx = bx - rect.left - btn_w / 2
-                ly = by - rect.top - btn_h / 2
-                is_focus = (snapshot.char_create_focus == btn_name)
-                if btn_name == "ok" and snapshot.char_name_len == 0:
-                    painter.setPen(QPen(QColor(231, 76, 60, 160), 1.5 * scale, Qt.PenStyle.DashLine))
-                    painter.setBrush(QColor(231, 76, 60, 40))
-                elif is_focus:
-                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                    painter.setBrush(QColor(255, 215, 0, 110))
-                else:
-                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                    painter.setBrush(QColor(46, 204, 113, 75))
-                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+                    bx, by = char_create_button_point(rect, btn_name)
+                    lx = bx - rect.left - btn_w / 2
+                    ly = by - rect.top - btn_h / 2
+                    is_focus = (snapshot.char_create_focus == btn_name)
+                    if btn_name == "ok" and snapshot.char_name_len == 0:
+                        painter.setPen(QPen(QColor(231, 76, 60, 160), 1.5 * scale, Qt.PenStyle.DashLine))
+                        painter.setBrush(QColor(231, 76, 60, 40))
+                    elif is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 110))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 75))
+                    painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
 
         elif state_desc == "Selecionar Dificuldade":
             # Alvos da Tela de Seleção de Dificuldade (state_id == 2) em modo calibração
-            btn_w = 24 * scale
-            btn_h = 23 * scale
-            for btn_name in DIFFICULTY_BUTTONS:
-                bx, by = difficulty_menu_button_point(rect, btn_name)
-                lx = bx - rect.left - btn_w / 2
-                ly = by - rect.top - btn_h / 2
-                is_focus = (snapshot.difficulty_focus == btn_name)
-                if is_focus:
-                    painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                    painter.setBrush(QColor(255, 215, 0, 110))
-                else:
-                    painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                    painter.setBrush(QColor(46, 204, 113, 75))
-                painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
+            if draw_dpad:
+                btn_w = 24 * scale
+                btn_h = 23 * scale
+                for btn_name in DIFFICULTY_BUTTONS:
+                    bx, by = difficulty_menu_button_point(rect, btn_name)
+                    lx = bx - rect.left - btn_w / 2
+                    ly = by - rect.top - btn_h / 2
+                    is_focus = (snapshot.difficulty_focus == btn_name)
+                    if is_focus:
+                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                        painter.setBrush(QColor(255, 215, 0, 110))
+                    else:
+                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                        painter.setBrush(QColor(46, 204, 113, 75))
+                    painter.drawRoundedRect(QRectF(lx, ly, btn_w, btn_h), 4 * scale, 4 * scale)
 
         elif state_desc == "Carregar Personagem":
             # Alvos da Tela de Carregar Personagem (state_id == 3) em modo calibração
-            box_w = 34 * scale * (rect.height / 768.0)
-            box_h = 18 * scale * (rect.height / 768.0)
+            if draw_dpad:
+                box_w = 34 * scale * (rect.height / 768.0)
+                box_h = 18 * scale * (rect.height / 768.0)
 
-            if snapshot.load_char_delete_open:
-                # Modal de Confirmação de Exclusão (Delete Character)
-                del_buttons = ("delete_confirm", "delete_cancel")
-                for btn_name in del_buttons:
-                    bx, by = load_char_button_point(rect, btn_name)
-                    lx = bx - rect.left - box_w / 2
-                    ly = by - rect.top - box_h / 2
-                    is_focus = (snapshot.load_char_focus == btn_name)
-                    if is_focus:
-                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                        painter.setBrush(QColor(255, 215, 0, 160))
-                    else:
-                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                        painter.setBrush(QColor(46, 204, 113, 90))
-                    painter.drawRoundedRect(QRectF(lx, ly, box_w, box_h), 3 * scale, 3 * scale)
-            else:
-                # Tela principal de carregamento de personagens
-                # Slots 1 a 5, setas de scroll e botões inferiores (Delete, Back, Play)
-                active_buttons = ["slot_1", "slot_2", "slot_3", "slot_4", "slot_5", "scroll_up", "scroll_down", "delete", "back", "play"]
-                for btn_name in active_buttons:
-                    bx, by = load_char_button_point(rect, btn_name)
-                    lx = bx - rect.left - box_w / 2
-                    ly = by - rect.top - box_h / 2
-                    is_focus = (snapshot.load_char_focus == btn_name)
-                    if is_focus:
-                        painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
-                        painter.setBrush(QColor(255, 215, 0, 160))
-                    else:
-                        painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
-                        painter.setBrush(QColor(46, 204, 113, 90))
-                    painter.drawRoundedRect(QRectF(lx, ly, box_w, box_h), 3 * scale, 3 * scale)
+                if snapshot.load_char_delete_open:
+                    # Modal de Confirmação de Exclusão (Delete Character)
+                    del_buttons = ("delete_confirm", "delete_cancel")
+                    for btn_name in del_buttons:
+                        bx, by = load_char_button_point(rect, btn_name)
+                        lx = bx - rect.left - box_w / 2
+                        ly = by - rect.top - box_h / 2
+                        is_focus = (snapshot.load_char_focus == btn_name)
+                        if is_focus:
+                            painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                            painter.setBrush(QColor(255, 215, 0, 160))
+                        else:
+                            painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                            painter.setBrush(QColor(46, 204, 113, 90))
+                        painter.drawRoundedRect(QRectF(lx, ly, box_w, box_h), 3 * scale, 3 * scale)
+                else:
+                    # Tela principal de carregamento de personagens
+                    # Slots 1 a 5, setas de scroll e botões inferiores (Delete, Back, Play)
+                    active_buttons = ["slot_1", "slot_2", "slot_3", "slot_4", "slot_5", "scroll_up", "scroll_down", "delete", "back", "play"]
+                    for btn_name in active_buttons:
+                        bx, by = load_char_button_point(rect, btn_name)
+                        lx = bx - rect.left - box_w / 2
+                        ly = by - rect.top - box_h / 2
+                        is_focus = (snapshot.load_char_focus == btn_name)
+                        if is_focus:
+                            painter.setPen(QPen(QColor(255, 215, 0, 240), 2.0 * scale))
+                            painter.setBrush(QColor(255, 215, 0, 160))
+                        else:
+                            painter.setPen(QPen(QColor(46, 204, 113, 230), 1.5 * scale))
+                            painter.setBrush(QColor(46, 204, 113, 90))
+                        painter.drawRoundedRect(QRectF(lx, ly, box_w, box_h), 3 * scale, 3 * scale)
 
         elif is_settings:
             # Calibração da Tela de Configurações (Settings)
@@ -1078,7 +1087,7 @@ class CalibrationOverlayMixin:
                 # Dropdown aberto: desenha apenas o opener rosa, a opção default amarela e opções verdes
                 drop_name = snapshot.settings_dropdown
                 drop_info = SETTINGS_DROPDOWNS.get(drop_name)
-                if drop_info:
+                if draw_dpad and drop_info:
                     # 1. Opener rosa
                     ox, oy = settings_button_point(rect, drop_name)
                     olx = ox - rect.left - box_size / 2.0
@@ -1106,54 +1115,56 @@ class CalibrationOverlayMixin:
             else:
                 # Tela principal de configurações
                 # 1. Linhas ciano dos sliders
-                (sx1, sy1), (sx2, sy2) = settings_slider_bounds(rect, is_music=False)
-                (mx1, my1), (mx2, my2) = settings_slider_bounds(rect, is_music=True)
-                pen_ciano = QPen(c_ciano, 3.0 * scale)
-                painter.setPen(pen_ciano)
-                painter.drawLine(QPointF(sx1 - rect.left, sy1 - rect.top), QPointF(sx2 - rect.left, sy2 - rect.top))
-                painter.drawLine(QPointF(mx1 - rect.left, my1 - rect.top), QPointF(mx2 - rect.left, my2 - rect.top))
+                if draw_hud:
+                    (sx1, sy1), (sx2, sy2) = settings_slider_bounds(rect, is_music=False)
+                    (mx1, my1), (mx2, my2) = settings_slider_bounds(rect, is_music=True)
+                    pen_ciano = QPen(c_ciano, 3.0 * scale)
+                    painter.setPen(pen_ciano)
+                    painter.drawLine(QPointF(sx1 - rect.left, sy1 - rect.top), QPointF(sx2 - rect.left, sy2 - rect.top))
+                    painter.drawLine(QPointF(mx1 - rect.left, my1 - rect.top), QPointF(mx2 - rect.left, my2 - rect.top))
 
                 # 2. Botões da tela principal
-                sound_vol = snapshot.settings_sound_vol
-                music_vol = snapshot.settings_music_vol
+                if draw_dpad:
+                    sound_vol = snapshot.settings_sound_vol
+                    music_vol = snapshot.settings_music_vol
 
-                for btn_name in SETTINGS_BUTTONS:
-                    if btn_name == "sound_slider":
-                        bx, by = settings_button_point(rect, btn_name, sound_vol)
-                        color = c_roxo
-                    elif btn_name == "music_slider":
-                        bx, by = settings_button_point(rect, btn_name, music_vol)
-                        color = c_roxo
-                    elif btn_name in ("resolution", "shadows", "particle_detail"):
-                        bx, by = settings_button_point(rect, btn_name)
-                        color = c_rosa
-                    elif btn_name == "row1_col1":
-                        bx, by = settings_button_point(rect, btn_name)
-                        color = c_amarelo
-                    else:
-                        bx, by = settings_button_point(rect, btn_name)
-                        color = c_verde
+                    for btn_name in SETTINGS_BUTTONS:
+                        if btn_name == "sound_slider":
+                            bx, by = settings_button_point(rect, btn_name, sound_vol)
+                            color = c_roxo
+                        elif btn_name == "music_slider":
+                            bx, by = settings_button_point(rect, btn_name, music_vol)
+                            color = c_roxo
+                        elif btn_name in ("resolution", "shadows", "particle_detail"):
+                            bx, by = settings_button_point(rect, btn_name)
+                            color = c_rosa
+                        elif btn_name == "row1_col1":
+                            bx, by = settings_button_point(rect, btn_name)
+                            color = c_amarelo
+                        else:
+                            bx, by = settings_button_point(rect, btn_name)
+                            color = c_verde
 
-                    lx = bx - rect.left - box_size / 2.0
-                    ly = by - rect.top - box_size / 2.0
-                    is_focus = (snapshot.settings_focus == btn_name)
+                        lx = bx - rect.left - box_size / 2.0
+                        ly = by - rect.top - box_size / 2.0
+                        is_focus = (snapshot.settings_focus == btn_name)
 
-                    if is_focus:
-                        painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
-                        painter.setBrush(color)
-                    else:
-                        painter.setPen(QPen(color, 1.5 * scale))
-                        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 120))
+                        if is_focus:
+                            painter.setPen(QPen(QColor(255, 255, 255, 255), 2.5 * scale))
+                            painter.setBrush(color)
+                        else:
+                            painter.setPen(QPen(color, 1.5 * scale))
+                            painter.setBrush(QColor(color.red(), color.green(), color.blue(), 120))
 
-                    painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3 * scale, 3 * scale)
+                        painter.drawRoundedRect(QRectF(lx, ly, box_size, box_size), 3 * scale, 3 * scale)
 
-                    if is_focus and snapshot.settings_slider_dragging and btn_name in ("sound_slider", "music_slider"):
-                        painter.setPen(QPen(QColor(255, 255, 0, 255), 1.5 * scale, Qt.PenStyle.DashLine))
-                        painter.setBrush(Qt.BrushStyle.NoBrush)
-                        painter.drawEllipse(QPointF(bx - rect.left, by - rect.top), box_size * 0.8, box_size * 0.8)
+                        if is_focus and snapshot.settings_slider_dragging and btn_name in ("sound_slider", "music_slider"):
+                            painter.setPen(QPen(QColor(255, 255, 0, 255), 1.5 * scale, Qt.PenStyle.DashLine))
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.drawEllipse(QPointF(bx - rect.left, by - rect.top), box_size * 0.8, box_size * 0.8)
 
         # 11. Modal de Confirmação (Resultado de Pesca / Popups com Ok / Dica Tutorial)
-        if snapshot.modal_confirm_focus:
+        if draw_modal and snapshot.modal_confirm_focus:
             is_tutorial = "Dica (Tutorial)" in (snapshot.memory_open_menus or [])
             is_ok_focus = snapshot.modal_confirm_focus == "ok"
             btn_w = 125 * scale * (rect.height / 768.0)
@@ -1190,7 +1201,7 @@ class CalibrationOverlayMixin:
                 painter.drawText(QRectF(clx, cly, cb_size, cb_size), Qt.AlignmentFlag.AlignCenter, "TIPS")
 
         # 12. Interface de Pesca (Anzol de Pescaria)
-        if snapshot.fishing_focus:
+        if draw_modal and snapshot.fishing_focus:
             hook_size = 40.0 * scale * (rect.height / 768.0)
             hx, hy = fishing_close_point(rect) if snapshot.fishing_focus == "close" else fishing_hook_point(rect)
             lx = hx - rect.left - hook_size / 2.0
@@ -1203,48 +1214,49 @@ class CalibrationOverlayMixin:
             painter.drawText(QRectF(lx, ly - 14 * scale, hook_size, 14 * scale), Qt.AlignmentFlag.AlignCenter, "PESCA")
 
         # Badge de diagnóstico da Memória Interna (visível em todas as telas no modo calibração)
-        mem_desc = snapshot.memory_state_desc or "Aguardando jogo..."
-        menus_str = ", ".join(snapshot.memory_open_menus) if snapshot.memory_open_menus else "Nenhum"
-        diag_lines = [
-            f"ESTADO: {mem_desc.upper()}",
-            f"MENUS : {menus_str}",
-            f"MODO  : {snapshot.mode.upper()}",
-        ]
+        if draw_mem:
+            mem_desc = snapshot.memory_state_desc or "Aguardando jogo..."
+            menus_str = ", ".join(snapshot.memory_open_menus) if snapshot.memory_open_menus else "Nenhum"
+            diag_lines = [
+                f"ESTADO: {mem_desc.upper()}",
+                f"MENUS : {menus_str}",
+                f"MODO  : {snapshot.mode.upper()}",
+            ]
 
-        painter.setFont(self._font(max(7, round(8.5 * scale)), True))
-        fm = painter.fontMetrics()
-        max_line_w = max(fm.horizontalAdvance(line) for line in diag_lines)
-        header_w = fm.horizontalAdvance("LEITURA DE MEMÓRIA (DEBUG)")
-        box_w = max(340 * scale, max(max_line_w, header_w) + 28 * scale)
-        box_h = (len(diag_lines) * 16 + 24) * scale
-        # Centralizado no topo: fica livre da caixa do Pet (esquerda) e dos menus/mapa (direita)
-        box_x = (rect.width - box_w) / 2
-        box_y = 12 * scale
+            painter.setFont(self._font(max(7, round(8.5 * scale)), True))
+            fm = painter.fontMetrics()
+            max_line_w = max(fm.horizontalAdvance(line) for line in diag_lines)
+            header_w = fm.horizontalAdvance("LEITURA DE MEMÓRIA (DEBUG)")
+            box_w = max(340 * scale, max(max_line_w, header_w) + 28 * scale)
+            box_h = (len(diag_lines) * 16 + 24) * scale
+            # Centralizado no topo: fica livre da caixa do Pet (esquerda) e dos menus/mapa (direita)
+            box_x = (rect.width - box_w) / 2
+            box_y = 12 * scale
 
-        # Fundo glassmorphism translúcido escuro com borda ciano
-        painter.setPen(QPen(QColor(75, 222, 247, 190), 1.2 * scale))
-        painter.setBrush(QColor(8, 20, 28, 225))
-        painter.drawRoundedRect(QRectF(box_x, box_y, box_w, box_h), 6 * scale, 6 * scale)
+            # Fundo glassmorphism translúcido escuro com borda ciano
+            painter.setPen(QPen(QColor(75, 222, 247, 190), 1.2 * scale))
+            painter.setBrush(QColor(8, 20, 28, 225))
+            painter.drawRoundedRect(QRectF(box_x, box_y, box_w, box_h), 6 * scale, 6 * scale)
 
-        # Cabeçalho do badge
-        painter.setPen(QColor(75, 222, 247, 240))
-        painter.drawText(
-            QRectF(box_x + 10 * scale, box_y + 4 * scale, box_w - 20 * scale, 16 * scale),
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-            "LEITURA DE MEMÓRIA (DEBUG)",
-        )
-
-        # Linhas de informação
-        for idx, line in enumerate(diag_lines):
-            line_y = box_y + (23 + idx * 15) * scale
-            color = (
-                QColor(255, 175, 75)
-                if ("ABERTO" in line or "LOADING" in line or "CARREGANDO" in line or (idx == 1 and menus_str != "Nenhum"))
-                else QColor(220, 240, 248)
-            )
-            painter.setPen(color)
+            # Cabeçalho do badge
+            painter.setPen(QColor(75, 222, 247, 240))
             painter.drawText(
-                QRectF(box_x + 12 * scale, line_y, box_w - 24 * scale, 15 * scale),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                line,
+                QRectF(box_x + 10 * scale, box_y + 4 * scale, box_w - 20 * scale, 16 * scale),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                "LEITURA DE MEMÓRIA (DEBUG)",
             )
+
+            # Linhas de informação
+            for idx, line in enumerate(diag_lines):
+                line_y = box_y + (23 + idx * 15) * scale
+                color = (
+                    QColor(255, 175, 75)
+                    if ("ABERTO" in line or "LOADING" in line or "CARREGANDO" in line or (idx == 1 and menus_str != "Nenhum"))
+                    else QColor(220, 240, 248)
+                )
+                painter.setPen(color)
+                painter.drawText(
+                    QRectF(box_x + 12 * scale, line_y, box_w - 24 * scale, 15 * scale),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    line,
+                )

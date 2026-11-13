@@ -64,15 +64,22 @@ class RadialOverlayMixin:
             self._radial_progress = max(target, self._radial_progress - step)
 
     def _radial_icon(self, name: str, active: bool) -> QPixmap | None:
-        key = (name, "ativo" if active else "normal")
+        clean_name = name[:-4] if name.lower().endswith(".png") else name
+        key = (clean_name, "ativo" if active else "normal")
         cached = self._radial_cache.get(key)
         if cached is not None:
             return cached
-        filename = f"{name}-ativo.png" if active else f"{name}.png"
+        filename = f"{clean_name}-ativo.png" if active else f"{clean_name}.png"
         path = _radial_icons_dir() / filename
         if not path.is_file():
-            filename = f"{name.lower()}-ativo.png" if active else f"{name.lower()}.png"
+            filename = f"{clean_name.lower()}-ativo.png" if active else f"{clean_name.lower()}.png"
             path = _radial_icons_dir() / filename
+        if not path.is_file() and active:
+            filename = f"{clean_name}.png"
+            path = _radial_icons_dir() / filename
+            if not path.is_file():
+                filename = f"{clean_name.lower()}.png"
+                path = _radial_icons_dir() / filename
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             return None

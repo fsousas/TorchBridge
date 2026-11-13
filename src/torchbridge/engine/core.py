@@ -29,6 +29,8 @@ from ..models import (
     CHAR_MENU_ROWS_HAS_POINTS,
     CHAR_MENU_ROWS_NO_POINTS,
     ControllerState,
+    DEBUG_MENU_ITEMS,
+    DEFAULT_DEBUG_OPTIONS,
     INVENTORY_UPPER_NAV_MAP,
     KEYBOARD_LAYOUT,
     MERCHANT_GRID_COLS,
@@ -379,6 +381,21 @@ class BridgeEngineCore(threading.Thread):
         # Sequência no controle para alternar o Menu de Debug (L1 + D-Pad)
         self._debug_sequence_history: list[str] = []
         self._debug_sequence_last_time: float = 0.0
+        # Painel / Menu de Debug Interativo (inicia fechado, com HUD de jogo ativa e calibrações desmarcadas)
+        self._debug_menu_open: bool = False
+        self._debug_menu_focus: int = 0
+        self._debug_menu_scroll: int = 0
+        self._debug_menu_close_latched: bool = False
+        self._debug_menu_close_until: float = 0.0
+        self._debug_menu_enter_prev: bool = False
+        self._debug_options: dict[str, bool] = dict(DEFAULT_DEBUG_OPTIONS)
+        self.shared.update(
+            debug_menu_open=False,
+            debug_menu_focus=0,
+            debug_menu_scroll=0,
+            debug_menu_initialized=True,
+            **self._debug_options,
+        )
 
     def _reset_active_panels(self) -> None:
         self._active_panels = ["", ""]
@@ -1008,17 +1025,150 @@ class BridgeEngineCore(threading.Thread):
                            blocked_warps=native.blocked_warps)
 
     def _toggle_debug_mode(self, hub: ControllerHub) -> bool:
-        """Alterna a exibição do modo/menu de debug (calibração e diagnóstico de memória)."""
-        cfg = self.config.get()
-        current = bool(cfg.get("overlay", {}).get("show_calibration", False))
-        new_state = not current
-        self.config.set_show_calibration(new_state)
-        label = "ativado" if new_state else "desativado"
-        self.shared.toast(f"Menu de debug {label}", 3.0)
+        """Alterna a exibição do menu de debug interativo."""
+        self._debug_menu_open = not self._debug_menu_open
+        if self._debug_menu_open:
+            self._debug_menu_focus = 0
+            self._debug_menu_scroll = 0
+            self._release_all()
+            self._radial_dismissed = True
+            self._radial_selection = None
+            self._pet_submenu = False
+            self._debug_menu_close_latched = False
+        else:
+            self._release_all()
+            self._debug_menu_close_latched = True
+            self._debug_menu_close_until = time.monotonic() + 0.20
+        self.shared.update(
+            debug_menu_open=self._debug_menu_open,
+            debug_menu_focus=self._debug_menu_focus,
+            debug_menu_scroll=self._debug_menu_scroll,
+            debug_menu_initialized=True,
+            **self._debug_options,
+        )
+        label = "aberto" if self._debug_menu_open else "fechado"
+        self.shared.toast(f"Menu de debug {label}", 2.0)
         log.info("Menu de debug alternado: %s", label)
         if hub and hasattr(hub, "rumble"):
             hub.rumble(0.08, 0.20, 150)
-        return new_state
+        return self._debug_menu_open
+
+    def _handle_debug_menu_navigation(
+        self,
+        hub: ControllerHub,
+        state: ControllerState,
+        cfg: dict[str, Any],
+        now: float,
+    ) -> bool:
+        """Processa a navegação no Painel de Debug (D-Pad e Confirmar).
+
+        Itens 0 a 11: Checkboxes granulares de calibração / overlay.
+        Item 12: Botão '[ Fechar Menu ]' selecionável.
+        O botão B / Cancelar é propositalmente ignorado para evitar fechamento acidental.
+        """
+        if not self._debug_menu_open:
+            return False
+
+        # Navegação vertical: D-Pad Cima / Baixo (borda de subida) ou analógico esquerdo com histerese
+        dpad_up = state.pressed("dpad_up") and not self._previous.pressed("dpad_up")
+        dpad_down = state.pressed("dpad_down") and not self._previous.pressed("dpad_down")
+        stick_up = state.ly > 0.6 and not (self._previous.ly > 0.6)
+        stick_down = state.ly < -0.6 and not (self._previous.ly < -0.6)
+        nav_up = dpad_up or stick_up
+        nav_down = dpad_down or stick_down
+
+        VISIBLE_ROWS = 10
+        total_checkboxes = len(DEBUG_MENU_ITEMS)
+        total_items = total_checkboxes + 1  # checkboxes + botão fechar
+        max_scroll = max(0, total_checkboxes - VISIBLE_ROWS)
+
+        if nav_up:
+            self._debug_menu_focus = (self._debug_menu_focus - 1) % total_items
+            if self._debug_menu_focus < total_checkboxes:
+                if self._debug_menu_focus < self._debug_menu_scroll:
+                    self._debug_menu_scroll = self._debug_menu_focus
+            else:
+                self._debug_menu_scroll = max_scroll
+
+            self.shared.update(
+                debug_menu_focus=self._debug_menu_focus,
+                debug_menu_scroll=self._debug_menu_scroll,
+            )
+            if hub and hasattr(hub, "rumble"):
+                hub.rumble(0.02, 0.05, 30)
+        elif nav_down:
+            self._debug_menu_focus = (self._debug_menu_focus + 1) % total_items
+            if self._debug_menu_focus < total_checkboxes:
+                if self._debug_menu_focus >= self._debug_menu_scroll + VISIBLE_ROWS:
+                    self._debug_menu_scroll = self._debug_menu_focus - VISIBLE_ROWS + 1
+            if self._debug_menu_focus == 0:
+                self._debug_menu_scroll = 0
+
+            self.shared.update(
+                debug_menu_focus=self._debug_menu_focus,
+                debug_menu_scroll=self._debug_menu_scroll,
+            )
+            if hub and hasattr(hub, "rumble"):
+                hub.rumble(0.02, 0.05, 30)
+
+        # Botão Confirmar (A no Xbox/PlayStation, B no Nintendo)
+        nintendo = any(name in state.controller_type.lower() for name in ("nintendo", "switch"))
+        confirm_btn = "b" if nintendo else "a"
+        confirm_pressed = (
+            (state.pressed(confirm_btn) and not self._previous.pressed(confirm_btn))
+            or (state.pressed("a") and not self._previous.pressed("a"))
+        )
+
+        # Suporte a Enter / Espaço no teclado
+        try:
+            if hasattr(self, "injector") and callable(getattr(self.injector, "key_pressed", None)):
+                res_enter = self.injector.key_pressed("RETURN")
+                res_space = self.injector.key_pressed("SPACE")
+                if isinstance(res_enter, bool) and isinstance(res_space, bool):
+                    enter_down = res_enter or res_space
+                    enter_prev = getattr(self, "_debug_menu_enter_prev", False)
+                    self._debug_menu_enter_prev = enter_down
+                    if enter_down and not enter_prev:
+                        confirm_pressed = True
+        except Exception:
+            pass
+
+        if confirm_pressed:
+            if self._debug_menu_focus < len(DEBUG_MENU_ITEMS):
+                # Alterna o checkbox em foco
+                attr_key, label_text = DEBUG_MENU_ITEMS[self._debug_menu_focus]
+                new_val = not self._debug_options.get(attr_key, False)
+                self._debug_options[attr_key] = new_val
+                self.shared.update(
+                    debug_menu_open=True,
+                    debug_menu_focus=self._debug_menu_focus,
+                    debug_menu_scroll=self._debug_menu_scroll,
+                    debug_menu_initialized=True,
+                    **self._debug_options,
+                )
+                if hub and hasattr(hub, "rumble"):
+                    hub.rumble(0.04, 0.10, 80)
+                log.info("Opção de debug '%s' alterada para %s", attr_key, new_val)
+            else:
+                # Foco no Botão "[ Fechar Menu ]"
+                self._debug_menu_open = False
+                self._debug_menu_close_latched = True
+                self._debug_menu_close_until = now + 0.20
+                self._release_all()
+                self.shared.update(
+                    debug_menu_open=False,
+                    debug_menu_focus=self._debug_menu_focus,
+                    debug_menu_scroll=self._debug_menu_scroll,
+                    debug_menu_initialized=True,
+                    **self._debug_options,
+                )
+                self.shared.toast("Menu de debug fechado", 2.0)
+                if hub and hasattr(hub, "rumble"):
+                    hub.rumble(0.06, 0.15, 120)
+                log.info("Menu de debug fechado via botão fechar")
+
+        # Botão Cancelar (B / Círculo) é ignorado de propósito (requisito 2 do usuário)
+        return True
 
     def _handle_debug_sequence(
         self,
@@ -1109,6 +1259,48 @@ class BridgeEngineCore(threading.Thread):
                 if debug_triggered:
                     self._previous_panels = tuple(self._active_panels)
                     return
+
+        # Menu de Debug (TB-17) - Bloqueio modal absoluto de comandos para as camadas inferiores
+        if getattr(self, "_debug_menu_open", False):
+            self._handle_debug_menu_navigation(hub, state, cfg, now)
+            self._previous_panels = tuple(self._active_panels)
+            return
+
+        # Trava anti-vazamento (Latch) ao fechar o Menu de Debug:
+        # Aguarda a liberação física dos botões de confirmação (A / Cross, B no Nintendo, Enter, Espaço)
+        # e botões de atalho (LB, D-Pad) e respeita um cooldown mínimo para não vazar ataques ou comandos para o jogo
+        if getattr(self, "_debug_menu_close_latched", False):
+            nintendo = any(n in state.controller_type.lower() for n in ("nintendo", "switch"))
+            confirm_btn = "b" if nintendo else "a"
+            controller_held = (
+                state.pressed(confirm_btn)
+                or state.pressed("a")
+                or state.pressed("lb")
+                or any(b.startswith("dpad_") for b in state.buttons)
+            )
+            keyboard_held = False
+            try:
+                if hasattr(self, "injector") and callable(getattr(self.injector, "key_pressed", None)):
+                    res_enter = self.injector.key_pressed("RETURN")
+                    res_space = self.injector.key_pressed("SPACE")
+                    if isinstance(res_enter, bool) and isinstance(res_space, bool):
+                        keyboard_held = res_enter or res_space
+            except Exception:
+                pass
+
+            still_held = controller_held or keyboard_held
+            timeout_passed = (now >= getattr(self, "_debug_menu_close_until", 0.0))
+
+            if still_held or not timeout_passed:
+                self._release_all()
+                self._previous_panels = tuple(self._active_panels)
+                return
+
+            self._debug_menu_close_latched = False
+            self._release_all()
+            self._previous_panels = tuple(self._active_panels)
+            return
+
         # Tela de Boas-Vindas (TB-17) - Bloqueio modal absoluto de comandos para as camadas inferiores
         if getattr(self, "_welcome_open", False) and not (
             hasattr(self, "_is_welcome_suppressed") and self._is_welcome_suppressed()
@@ -1990,6 +2182,8 @@ class BridgeEngineCore(threading.Thread):
             or self._modal_confirm_initialized
             or in_quest_side
             or self._virtual_keyboard_open
+            or getattr(self, "_debug_menu_open", False)
+            or getattr(self, "_debug_menu_close_latched", False)
         )
         a_pressed = (
             state.pressed("a") and not radial_held and not lt_held and not suppress_mouse
@@ -2002,6 +2196,8 @@ class BridgeEngineCore(threading.Thread):
             and not getattr(self._memory_state, "dialog_type", "")
             and not self._active_panels[0]
             and not self._active_panels[1]
+            and not getattr(self, "_debug_menu_open", False)
+            and not getattr(self, "_debug_menu_close_latched", False)
         )
         want_shift = (
             a_pressed

@@ -208,6 +208,57 @@ class OverlaySnapshot:
     welcome_screen_total_pages: int = 9
     welcome_screen_focus: str = "next"
     welcome_screen_can_close: bool = False
+    # Menu / Painel de Debug (Konami Code)
+    debug_menu_open: bool = False
+    debug_menu_focus: int = 0
+    debug_menu_scroll: int = 0
+    debug_menu_initialized: bool = False
+    # Camadas ativas no menu de debug (calibrações iniciam desmarcadas; elementos de HUD de jogo iniciam ativos)
+    debug_memory_badge: bool = False
+    debug_dpad_nodes: bool = False
+    debug_hud_calibration: bool = False
+    debug_modal_calibration: bool = False
+    debug_world_panel: bool = False
+    debug_world_hitboxes: bool = False
+    debug_world_radius: bool = False
+    debug_world_targets: bool = False
+    debug_npc_distance: bool = False
+    debug_bottom_hud: bool = True
+    debug_aim_marker: bool = True
+    debug_mode_badge: bool = False
+    debug_interaction_prompts: bool = True
+
+
+DEBUG_MENU_ITEMS: tuple[tuple[str, str], ...] = (
+    ("debug_memory_badge", "Leitura de Memória"),
+    ("debug_dpad_nodes", "Nós de Navegação D-Pad (Menus)"),
+    ("debug_hud_calibration", "Calibração da HUD e Globos"),
+    ("debug_modal_calibration", "Calibração de Modais e Pesca"),
+    ("debug_world_panel", "Painel de Telemetria do Mundo"),
+    ("debug_world_radius", "Calibração do Raio de Ação (Círculos)"),
+    ("debug_world_targets", "Coordenadas X/Y e Alvos do Mundo"),
+    ("debug_npc_distance", "Distância nas Dicas de Interação"),
+    ("debug_bottom_hud", "HUD Inferior (Controles)"),
+    ("debug_aim_marker", "Marcador de Mira"),
+    ("debug_mode_badge", "Badge de Modo"),
+    ("debug_interaction_prompts", "Dicas / Prompts de Interação"),
+)
+
+DEFAULT_DEBUG_OPTIONS: dict[str, bool] = {
+    "debug_memory_badge": False,
+    "debug_dpad_nodes": False,
+    "debug_hud_calibration": False,
+    "debug_modal_calibration": False,
+    "debug_world_panel": False,
+    "debug_world_hitboxes": False,
+    "debug_world_radius": False,
+    "debug_world_targets": False,
+    "debug_npc_distance": False,
+    "debug_bottom_hud": True,
+    "debug_aim_marker": True,
+    "debug_mode_badge": False,
+    "debug_interaction_prompts": True,
+}
 
 
 

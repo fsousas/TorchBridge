@@ -10,11 +10,13 @@ from .shortcut_config import ShortcutConfigOverlayMixin
 from .calibration import CalibrationOverlayMixin
 from .welcome import WelcomeOverlayMixin
 from .interaction import WorldInteractionOverlayMixin
+from .debug_menu import DebugMenuOverlayMixin
 
 log = logging.getLogger(__name__)
 
 
 class GameOverlay(
+    DebugMenuOverlayMixin,
     WelcomeOverlayMixin,
     WorldInteractionOverlayMixin,
     RadialOverlayMixin,

@@ -7,7 +7,14 @@ import unittest
 from torchbridge.config import ConfigManager
 from torchbridge.engine import BridgeEngine
 from torchbridge.mathutils import cursor_delta, radial_deadzone
-from torchbridge.models import ControllerState, Rect, SharedOverlayState, pet_click_point
+from torchbridge.models import (
+    ControllerState,
+    DEBUG_MENU_ITEMS,
+    DEFAULT_DEBUG_OPTIONS,
+    Rect,
+    SharedOverlayState,
+    pet_click_point,
+)
 
 
 class FakeInjector:
@@ -2516,7 +2523,8 @@ class DebugSequenceTests(unittest.TestCase):
             cfg = engine.config.get()
             hub = FakeHub()
 
-            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+            self.assertFalse(engine._debug_menu_open)
+            self.assertFalse(shared.get().debug_menu_open)
 
             seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
             t = 1.0
@@ -2524,18 +2532,20 @@ class DebugSequenceTests(unittest.TestCase):
                 self._send_dpad_step(engine, hub, rect, cfg, btn, t)
                 t += 0.1
 
-            # Modo debug deve estar ativado
-            self.assertTrue(engine.config.get()["overlay"]["show_calibration"])
-            self.assertEqual(shared.get().toast_text, "Menu de debug ativado")
+            # Menu de debug deve estar aberto
+            self.assertTrue(engine._debug_menu_open)
+            self.assertTrue(shared.get().debug_menu_open)
+            self.assertEqual(shared.get().toast_text, "Menu de debug aberto")
             self.assertTrue(engine._radial_dismissed)
 
-            # Executa novamente para desativar
+            # Executa novamente para fechar
             for btn in seq:
                 self._send_dpad_step(engine, hub, rect, cfg, btn, t)
                 t += 0.1
 
-            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
-            self.assertEqual(shared.get().toast_text, "Menu de debug desativado")
+            self.assertFalse(engine._debug_menu_open)
+            self.assertFalse(shared.get().debug_menu_open)
+            self.assertEqual(shared.get().toast_text, "Menu de debug fechado")
 
     def test_debug_sequence_resets_if_lb_released(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2560,7 +2570,7 @@ class DebugSequenceTests(unittest.TestCase):
                 self._send_dpad_step(engine, hub, rect, cfg, btn, t)
                 t += 0.1
 
-            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+            self.assertFalse(engine._debug_menu_open)
 
     def test_debug_sequence_resets_on_wrong_button(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2585,7 +2595,7 @@ class DebugSequenceTests(unittest.TestCase):
                 self._send_dpad_step(engine, hub, rect, cfg, btn, t)
                 t += 0.1
 
-            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+            self.assertFalse(engine._debug_menu_open)
 
     def test_debug_sequence_timeout(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2606,7 +2616,7 @@ class DebugSequenceTests(unittest.TestCase):
                 self._send_dpad_step(engine, hub, rect, cfg, btn, t)
                 t += 0.1
 
-            self.assertFalse(engine.config.get()["overlay"]["show_calibration"])
+            self.assertFalse(engine._debug_menu_open)
 
     def test_debug_sequence_suppresses_dpad_in_title_menu(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2637,6 +2647,266 @@ class DebugSequenceTests(unittest.TestCase):
             engine._process_active(hub, state_lb_down, rect, cfg, 1.1, 0.05)
             engine._previous = state_lb_down
             self.assertEqual(engine._title_focus, "continue")
+
+    def test_debug_menu_starts_unpersisted_and_unchecked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            snapshot = shared.get()
+            self.assertFalse(engine._debug_menu_open)
+            self.assertFalse(snapshot.debug_menu_open)
+            self.assertTrue(snapshot.debug_menu_initialized)
+            for key, _ in DEBUG_MENU_ITEMS:
+                expected = DEFAULT_DEBUG_OPTIONS[key]
+                self.assertEqual(engine._debug_options[key], expected)
+                self.assertEqual(getattr(snapshot, key), expected)
+
+    def test_debug_menu_dpad_navigation_and_wrapping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Abre o menu via Konami Code
+            seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
+            t = 1.0
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertTrue(engine._debug_menu_open)
+            self.assertEqual(engine._debug_menu_focus, 0)
+
+            # Navega para baixo com D-Pad Down: foco avança
+            state_down = ControllerState(connected=True, buttons=frozenset({"dpad_down"}))
+            engine._process_active(hub, state_down, rect, cfg, t, 0.05)
+            engine._previous = state_down
+            t += 0.1
+            self.assertEqual(engine._debug_menu_focus, 1)
+            self.assertEqual(shared.get().debug_menu_focus, 1)
+
+            # Solta dpad
+            state_none = ControllerState(connected=True, buttons=frozenset())
+            engine._process_active(hub, state_none, rect, cfg, t, 0.05)
+            engine._previous = state_none
+            t += 0.1
+
+            # Navega para cima com D-Pad Up: volta para 0
+            state_up = ControllerState(connected=True, buttons=frozenset({"dpad_up"}))
+            engine._process_active(hub, state_up, rect, cfg, t, 0.05)
+            engine._previous = state_up
+            t += 0.1
+            self.assertEqual(engine._debug_menu_focus, 0)
+
+            # Solta e navega para cima novamente: faz wrap para o botão Fechar Menu
+            engine._process_active(hub, state_none, rect, cfg, t, 0.05)
+            engine._previous = state_none
+            t += 0.1
+
+            engine._process_active(hub, state_up, rect, cfg, t, 0.05)
+            engine._previous = state_up
+            t += 0.1
+            self.assertEqual(engine._debug_menu_focus, len(DEBUG_MENU_ITEMS))
+            self.assertEqual(shared.get().debug_menu_focus, len(DEBUG_MENU_ITEMS))
+
+    def test_debug_menu_toggle_checkbox_with_confirm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Abre o menu
+            seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
+            t = 1.0
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertEqual(engine._debug_menu_focus, 0)
+            self.assertFalse(engine._debug_options["debug_memory_badge"])
+
+            # Pressiona A para marcar
+            state_a = ControllerState(connected=True, buttons=frozenset({"a"}))
+            engine._process_active(hub, state_a, rect, cfg, t, 0.05)
+            engine._previous = state_a
+            t += 0.1
+
+            self.assertTrue(engine._debug_options["debug_memory_badge"])
+            self.assertTrue(shared.get().debug_memory_badge)
+
+            # Solta e pressiona A novamente para desmarcar
+            state_none = ControllerState(connected=True, buttons=frozenset())
+            engine._process_active(hub, state_none, rect, cfg, t, 0.05)
+            engine._previous = state_none
+            t += 0.1
+
+            engine._process_active(hub, state_a, rect, cfg, t, 0.05)
+            engine._previous = state_a
+            t += 0.1
+
+            self.assertFalse(engine._debug_options["debug_memory_badge"])
+            self.assertFalse(shared.get().debug_memory_badge)
+
+    def test_debug_menu_close_button_closes_menu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Abre o menu
+            seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
+            t = 1.0
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            # Wrap direto para cima para focar no botão Fechar Menu
+            state_up = ControllerState(connected=True, buttons=frozenset({"dpad_up"}))
+            engine._process_active(hub, state_up, rect, cfg, t, 0.05)
+            engine._previous = state_up
+            t += 0.1
+            self.assertEqual(engine._debug_menu_focus, len(DEBUG_MENU_ITEMS))
+
+            # Solta dpad
+            state_none = ControllerState(connected=True, buttons=frozenset())
+            engine._process_active(hub, state_none, rect, cfg, t, 0.05)
+            engine._previous = state_none
+            t += 0.1
+
+            # Pressiona A sobre o botão Fechar Menu
+            state_a = ControllerState(connected=True, buttons=frozenset({"a"}))
+            engine._process_active(hub, state_a, rect, cfg, t, 0.05)
+            engine._previous = state_a
+            t += 0.1
+
+            # Menu deve ter fechado e travado vazamento
+            self.assertFalse(engine._debug_menu_open)
+            self.assertFalse(shared.get().debug_menu_open)
+            self.assertEqual(shared.get().toast_text, "Menu de debug fechado")
+            self.assertTrue(engine._debug_menu_close_latched)
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn("left", engine._held_mouse)
+
+            # Próximo tick com 'a' ainda segurado: latch impede ataque
+            engine._process_active(hub, state_a, rect, cfg, t, 0.05)
+            engine._previous = state_a
+            t += 0.1
+            self.assertTrue(engine._debug_menu_close_latched)
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn("left", engine._held_mouse)
+
+            # Solta 'a' e aguarda cooldown vencer: latch é liberado sem vazar ataque
+            t += 0.3
+            engine._process_active(hub, state_none, rect, cfg, t, 0.05)
+            engine._previous = state_none
+            self.assertFalse(engine._debug_menu_close_latched)
+            self.assertFalse(engine._a_shift_held)
+            self.assertNotIn("left", engine._held_mouse)
+
+    def test_debug_menu_ignores_cancel_button(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Abre o menu
+            seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
+            t = 1.0
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertTrue(engine._debug_menu_open)
+
+            # Pressiona B (Cancelar)
+            state_b = ControllerState(connected=True, buttons=frozenset({"b"}))
+            engine._process_active(hub, state_b, rect, cfg, t, 0.05)
+            engine._previous = state_b
+            t += 0.1
+
+            # O menu permanece aberto (B não fecha o menu)
+            self.assertTrue(engine._debug_menu_open)
+            self.assertTrue(shared.get().debug_menu_open)
+
+    def test_debug_menu_scrolling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, shared, _ = self._make_engine(directory)
+            rect = Rect(0, 0, 1024, 768)
+            cfg = engine.config.get()
+            hub = FakeHub()
+
+            # Abre o menu via Konami Code
+            seq = ("dpad_up", "dpad_up", "dpad_down", "dpad_down", "dpad_left", "dpad_right", "dpad_left", "dpad_right")
+            t = 1.0
+            for btn in seq:
+                self._send_dpad_step(engine, hub, rect, cfg, btn, t)
+                t += 0.1
+
+            self.assertTrue(engine._debug_menu_open)
+            self.assertEqual(engine._debug_menu_focus, 0)
+            self.assertEqual(engine._debug_menu_scroll, 0)
+
+            def nav_step(button: str):
+                nonlocal t
+                st = ControllerState(connected=True, buttons=frozenset({button}))
+                engine._process_active(hub, st, rect, cfg, t, 0.05)
+                engine._previous = st
+                t += 0.05
+                st_none = ControllerState(connected=True, buttons=frozenset())
+                engine._process_active(hub, st_none, rect, cfg, t, 0.05)
+                engine._previous = st_none
+                t += 0.05
+
+            # Navega 9 vezes para baixo (foco chega no item 9, os primeiros 10 itens estão visíveis, scroll continua 0)
+            for _ in range(9):
+                nav_step("dpad_down")
+            self.assertEqual(engine._debug_menu_focus, 9)
+            self.assertEqual(engine._debug_menu_scroll, 0)
+
+            # Mais um passo para baixo (foco vai para 10, além das 10 linhas visíveis -> scroll aumenta para 1)
+            nav_step("dpad_down")
+            self.assertEqual(engine._debug_menu_focus, 10)
+            self.assertEqual(engine._debug_menu_scroll, 1)
+
+            # Mais um passo para baixo (foco vai para 11 -> scroll aumenta para 2)
+            nav_step("dpad_down")
+            self.assertEqual(engine._debug_menu_focus, 11)
+            self.assertEqual(engine._debug_menu_scroll, 2)
+
+            # Mais um passo para baixo (foco no botão fechar, item 12 -> scroll mantém 2)
+            nav_step("dpad_down")
+            self.assertEqual(engine._debug_menu_focus, 12)
+            self.assertEqual(engine._debug_menu_scroll, 2)
+
+            # Mais um passo para baixo (wrap-around para o topo -> foco 0, scroll reseta para 0)
+            nav_step("dpad_down")
+            self.assertEqual(engine._debug_menu_focus, 0)
+            self.assertEqual(engine._debug_menu_scroll, 0)
+
+            # Passo para cima (wrap-around para trás -> foco 12 no botão fechar, scroll vai para max_scroll = 2)
+            nav_step("dpad_up")
+            self.assertEqual(engine._debug_menu_focus, 12)
+            self.assertEqual(engine._debug_menu_scroll, 2)
+
+            # Passo para cima: vai para item 11 (scroll continua 2, item 11 está na última linha visível)
+            nav_step("dpad_up")
+            self.assertEqual(engine._debug_menu_focus, 11)
+            self.assertEqual(engine._debug_menu_scroll, 2)
+
+            # Volta até item 1 (scroll vai para 1 quando passar para cima da janela)
+            for _ in range(10):
+                nav_step("dpad_up")
+            self.assertEqual(engine._debug_menu_focus, 1)
+            self.assertEqual(engine._debug_menu_scroll, 1)
+
+            # Volta para item 0 (scroll vai para 0)
+            nav_step("dpad_up")
+            self.assertEqual(engine._debug_menu_focus, 0)
+            self.assertEqual(engine._debug_menu_scroll, 0)
+
 
 
 
